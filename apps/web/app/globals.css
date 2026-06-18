@@ -1,0 +1,39 @@
+html,
+body {
+  margin: 0;
+  padding: 0;
+
+  background: #000;
+  color: white;
+
+  font-family: sans-serif;
+}
+
+.container {
+  height: 100vh;
+
+  display: flex;
+  flex-direction: column;
+
+  justify-content: center;
+  align-items: center;
+}
+
+.open,
+.closed {
+  font-size: 100px;
+}
+
+h1 {
+  font-size: 72px;
+  margin: 0;
+}
+
+.timer {
+  font-size: 140px;
+  font-weight: bold;
+}
+
+p {
+  opacity: 0.8;
+}
