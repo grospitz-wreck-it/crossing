@@ -1,0 +1,8 @@
+{
+  "name": "crossing",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
