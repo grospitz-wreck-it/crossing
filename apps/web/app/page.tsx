@@ -28,8 +28,36 @@ function formatDbTime(
     return "--:--";
   }
 
+  const yy = Number(
+    value.slice(0, 2)
+  );
+
+  const mm = Number(
+    value.slice(2, 4)
+  );
+
+  const dd = Number(
+    value.slice(4, 6)
+  );
+
+  const hh = Number(
+    value.slice(6, 8)
+  );
+
+  const mi = Number(
+    value.slice(8, 10)
+  );
+
   const date =
-    parseDbTime(value);
+    new Date(
+      Date.UTC(
+        2000 + yy,
+        mm - 1,
+        dd,
+        hh,
+        mi
+      )
+    );
 
   return date.toLocaleTimeString(
     "de-DE",
@@ -41,6 +69,7 @@ function formatDbTime(
     }
   );
 }
+
 function formatArrival(
   value?: string
 ) {
@@ -56,16 +85,17 @@ function formatIsoTime(
     return "--:--";
   }
 
-  const date =
-    new Date(value);
-
-  return `${date
-    .getHours()
-    .toString()
-    .padStart(2, "0")}:${date
-    .getMinutes()
-    .toString()
-    .padStart(2, "0")}`;
+  return new Date(
+    value
+  ).toLocaleTimeString(
+    "de-DE",
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone:
+        "Europe/Berlin",
+    }
+  );
 }
 
 function getOrigin(
