@@ -1,5 +1,7 @@
+import { parseTimetable } from "../../lib/parseTimetable";
+
 export async function GET() {
-  const eva = "8003295";
+  const eva = "8003288"; // später richtige EVA
 
   const now = new Date();
 
@@ -35,15 +37,14 @@ export async function GET() {
     cache: "no-store",
   });
 
-  const body = await res.text();
+  const xml =
+    await res.text();
+
+  const trains =
+    parseTimetable(xml);
 
   return Response.json({
-    eva,
-    date,
-    hour,
-    url,
-    status: res.status,
-    statusText: res.statusText,
-    body: body.slice(0, 1000),
+    count: trains.length,
+    trains,
   });
 }
