@@ -460,7 +460,7 @@ return (
 
       <div className="infoValue">
         {formatIsoTime(
-  data.phase.start
+  data.phase?.start
 )}
       </div>
     </div>
@@ -472,7 +472,7 @@ return (
 
       <div className="infoValue">
         {formatIsoTime(
-  data.phase.end
+  data.phase?.end
 )}
       </div>
     </div>
