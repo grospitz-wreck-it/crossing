@@ -28,28 +28,25 @@ function formatDbTime(
     return "--:--";
   }
 
-  const hh =
-    value.slice(6, 8);
+  const date =
+    parseDbTime(value);
 
-  const mm =
-    value.slice(8, 10);
-
-  return `${hh}:${mm}`;
+  return date.toLocaleTimeString(
+    "de-DE",
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone:
+        "Europe/Berlin",
+    }
+  );
 }
 function formatArrival(
   value?: string
 ) {
-  if (!value) {
-    return "--:--";
-  }
-
-  const hh =
-    value.slice(6, 8);
-
-  const mm =
-    value.slice(8, 10);
-
-  return `${hh}:${mm}`;
+  return formatDbTime(
+    value
+  );
 }
 
 function formatIsoTime(
@@ -59,15 +56,16 @@ function formatIsoTime(
     return "--:--";
   }
 
-  return new Date(
-    value
-  ).toLocaleTimeString(
-    "de-DE",
-    {
-      hour: "2-digit",
-      minute: "2-digit",
-    }
-  );
+  const date =
+    new Date(value);
+
+  return `${date
+    .getHours()
+    .toString()
+    .padStart(2, "0")}:${date
+    .getMinutes()
+    .toString()
+    .padStart(2, "0")}`;
 }
 
 function getOrigin(
