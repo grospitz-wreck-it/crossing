@@ -65,7 +65,27 @@ export async function GET() {
 
   const trains =
     parseTimetable(xml);
-
+console.log(
+  "PARSED TRAINS",
+  trains.slice(0, 10).map(
+    (t) => ({
+      line: t.line,
+      arrival: t.arrival,
+      parsedArrival:
+        t.arrival
+          ? parseDbTime(
+              t.arrival
+            ).toString()
+          : null,
+      parsedIso:
+        t.arrival
+          ? parseDbTime(
+              t.arrival
+            ).toISOString()
+          : null,
+    })
+  )
+);
   const nowMs =
     Date.now();
 
@@ -86,7 +106,15 @@ export async function GET() {
         );
       }
     );
-
+console.log(
+  "UPCOMING",
+  upcomingTrains.map(
+    (t) => ({
+      line: t.line,
+      arrival: t.arrival,
+    })
+  )
+);
   const windows =
     predictCrossingWindows(
       upcomingTrains
