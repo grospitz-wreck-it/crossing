@@ -3,37 +3,385 @@ body {
   margin: 0;
   padding: 0;
 
-  background: #000;
-  color: white;
+  min-height: 100vh;
 
-  font-family: sans-serif;
+  font-family:
+    Inter,
+    system-ui,
+    sans-serif;
+
+  background:
+    linear-gradient(
+      180deg,
+      #eef5fb 0%,
+      #f8fbff 100%
+    );
+
+  color: #18324a;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 .container {
-  height: 100vh;
+  min-height: 100vh;
 
   display: flex;
   flex-direction: column;
 
-  justify-content: center;
   align-items: center;
+
+  padding:
+    48px 24px 64px;
 }
 
-.open,
-.closed {
-  font-size: 100px;
+.logo {
+  margin-bottom: 40px;
+
+  color: #2b66b0;
+
+  font-size: 0.95rem;
+
+  font-weight: 700;
+
+  letter-spacing: 0.18em;
+
+  text-transform: uppercase;
+}
+
+.statusDot {
+  width: 140px;
+  height: 140px;
+
+  border-radius: 999px;
+
+  margin-bottom: 32px;
+}
+
+.statusDot.open {
+  background:
+    radial-gradient(
+      circle at top,
+      #58ef71,
+      #20b33f
+    );
+
+  box-shadow:
+    0 24px 60px
+      rgba(
+        32,
+        179,
+        63,
+        0.25
+      );
+}
+
+.statusDot.closed {
+  background:
+    radial-gradient(
+      circle at top,
+      #ff8a8a,
+      #df2d2d
+    );
+
+  box-shadow:
+    0 24px 60px
+      rgba(
+        223,
+        45,
+        45,
+        0.25
+      );
 }
 
 h1 {
-  font-size: 72px;
   margin: 0;
+
+  font-size: 5rem;
+
+  font-weight: 800;
+
+  letter-spacing: -0.04em;
 }
 
 .timer {
-  font-size: 140px;
-  font-weight: bold;
+  font-size: clamp(
+    6rem,
+    18vw,
+    10rem
+  );
+
+  font-weight: 900;
+
+  line-height: 0.9;
+
+  color: #12345a;
+
+  font-variant-numeric:
+    tabular-nums;
+
+  font-feature-settings:
+    "tnum";
+
+  letter-spacing: -0.06em;
 }
 
-p {
-  opacity: 0.8;
+.subtitle {
+  margin-top: 16px;
+
+  font-size: 1.3rem;
+
+  color: #6b7c93;
+}
+
+.trainCard {
+  width: 100%;
+  max-width: 520px;
+
+  margin-top: 40px;
+
+  background: white;
+
+  border-radius: 28px;
+
+  padding: 24px;
+
+  box-shadow:
+    0 20px 60px
+      rgba(
+        0,
+        0,
+        0,
+        0.08
+      );
+}
+
+.trainLabel {
+  color: #7a8ca5;
+
+  font-size: 0.9rem;
+
+  text-transform: uppercase;
+
+  letter-spacing: 0.08em;
+}
+
+.trainLine {
+  margin-top: 10px;
+
+  font-size: 2rem;
+
+  font-weight: 800;
+}
+
+.trainDirection {
+  margin-top: 8px;
+
+  font-size: 1.1rem;
+
+  color: #4f637b;
+}
+
+.trainArrival {
+  margin-top: 14px;
+
+  font-size: 1rem;
+
+  color: #71849d;
+}
+
+.measurementButtons {
+  width: 100%;
+  max-width: 520px;
+
+  display: flex;
+  flex-direction: column;
+
+  gap: 16px;
+
+  margin-top: 28px;
+}
+
+.cta {
+  border: none;
+
+  border-radius: 24px;
+
+  padding: 26px;
+
+  font-size: 1.35rem;
+
+  font-weight: 800;
+
+  cursor: pointer;
+
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.cta:hover {
+  transform:
+    translateY(-2px);
+}
+
+.cta:active {
+  transform:
+    translateY(0);
+}
+
+.ctaClose {
+  background: #d92d20;
+
+  color: white;
+
+  box-shadow:
+    0 18px 40px
+      rgba(
+        217,
+        45,
+        32,
+        0.22
+      );
+}
+
+.ctaOpen {
+  background: #1f9d4f;
+
+  color: white;
+
+  box-shadow:
+    0 18px 40px
+      rgba(
+        31,
+        157,
+        79,
+        0.22
+      );
+}
+.infoGrid {
+  display: grid;
+
+  grid-template-columns:
+    1fr 1fr;
+
+  gap: 16px;
+
+  margin-top: 24px;
+}
+
+.infoItem {
+  background: #f5f9fd;
+
+  border-radius: 16px;
+
+  padding: 14px;
+}
+
+.infoTitle {
+  font-size: 0.8rem;
+
+  color: #6f8095;
+
+  text-transform: uppercase;
+
+  letter-spacing: 0.08em;
+
+  margin-bottom: 6px;
+}
+
+.infoValue {
+  font-size: 1rem;
+
+  font-weight: 700;
+
+  color: #18324a;
+}
+h1 {
+  margin: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  align-items: center;
+}
+
+.headlineTop {
+  font-size: 1.4rem;
+
+  letter-spacing: 0.12em;
+
+  color: #6f8095;
+
+  font-weight: 700;
+}
+
+.headlineBottom {
+  font-size: 4.8rem;
+
+  font-weight: 800;
+
+  line-height: 1;
+}
+.disabledMeasurement {
+  opacity: 0.35;
+}
+
+.measurementMessage {
+  margin-top: 20px;
+
+  font-weight: 700;
+
+  color: #1f9d4f;
+}
+
+.measurementInfo {
+  margin-top: 8px;
+
+  color: #55708e;
+
+  font-size: 0.95rem;
+}
+.measurementMessage {
+  margin-top: 20px;
+
+  padding: 12px 18px;
+
+  background: #eaf7ee;
+
+  color: #1f9d4f;
+
+  border-radius: 14px;
+
+  font-weight: 700;
+}
+
+.measurementInfo {
+  margin-top: 10px;
+
+  color: #55708e;
+
+  font-size: 0.95rem;
+}
+
+.disabledMeasurement {
+  opacity: 0.35;
+
+  pointer-events: none;
+}
+.extraTrain {
+  padding: 14px 0;
+
+  border-top: 1px solid
+    rgba(
+      24,
+      50,
+      74,
+      0.08
+    );
+}
+
+.extraTrain:first-child {
+  border-top: none;
 }
