@@ -3,115 +3,61 @@ import { db } from "@/app/lib/db";
 export async function GET() {
   const result =
     await db.execute(`
-      SELECT
-        prediction_id,
-
-        MIN(
-          CASE
-            WHEN event_type = 'close'
-            THEN actual_at
-          END
-        ) AS close_at,
-
-        MIN(
-          CASE
-            WHEN event_type = 'open'
-            THEN actual_at
-          END
-        ) AS open_at,
-
-        MIN(
-          phase_json
-        ) AS phase_json
-
+      SELECT *
       FROM measurements
-
-      GROUP BY prediction_id
-
-      ORDER BY prediction_id DESC
+      ORDER BY id DESC
     `);
 
-  const rows =
-    result.rows.map(
-      (row: any) => {
-        const phase =
-          JSON.parse(
-            row.phase_json
-          );
+  return Response.json(
+    result.rows
+  );
+}
 
-        const closeAt =
-          row.close_at
-            ? new Date(
-                row.close_at
-              )
-            : null;
+export async function POST(
+  request: Request
+) {
+  try {
+    const body =
+      await request.json();
 
-        const openAt =
-          row.open_at
-            ? new Date(
-                row.open_at
-              )
-            : null;
+    await db.execute({
+      sql: `
+        INSERT INTO measurements (
+          prediction_id,
+          event_type,
+          actual_at,
+          phase_json
+        )
+        VALUES (?, ?, ?, ?)
+      `,
+      args: [
+        body.predictionId,
+        body.event,
+        body.actualAt,
+        JSON.stringify(
+          body.phase
+        ),
+      ],
+    });
 
-        const predictedClose =
-          new Date(
-            phase.start
-          );
-
-        const predictedOpen =
-          new Date(
-            phase.end
-          );
-
-        return {
-          predictionId:
-            row.prediction_id,
-
-          predictedClose,
-
-          predictedOpen,
-
-          actualClose:
-            closeAt,
-
-          actualOpen:
-            openAt,
-
-          closeDeltaSeconds:
-            closeAt
-              ? Math.round(
-                  (closeAt.getTime() -
-                    predictedClose.getTime()) /
-                    1000
-                )
-              : null,
-
-          openDeltaSeconds:
-            openAt
-              ? Math.round(
-                  (openAt.getTime() -
-                    predictedOpen.getTime()) /
-                    1000
-                )
-              : null,
-
-          measuredDurationSeconds:
-            closeAt &&
-            openAt
-              ? Math.round(
-                  (openAt.getTime() -
-                    closeAt.getTime()) /
-                    1000
-                )
-              : null,
-
-          trains:
-            phase.trains,
-        };
-      }
+    return Response.json({
+      success: true,
+    });
+  } catch (error) {
+    console.error(
+      "Measurement insert failed",
+      error
     );
 
-  return Response.json(
-    rows
-  );
+    return Response.json(
+      {
+        success: false,
+        error:
+          "Insert failed",
+      },
+      {
+        status: 500,
+      }
+    );
+  }
 }
