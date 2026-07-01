@@ -173,7 +173,6 @@ export default function Home() {
         await res.json();
 
       setData(json);
-
       setCountdown(
         json.state === "OPEN"
           ? json.nextCloseIn
@@ -394,23 +393,31 @@ useEffect(() => {
 }, [firstClickAt]);
 
 useEffect(() => {
-  const timer =
-    setInterval(() => {
-      setCountdown(
-        (
-          prev: number
-        ) =>
+  const timer = setInterval(() => {
+    setCountdown(
+      (prev: number) => {
+        const next =
           Math.max(
             0,
             prev - 1
-          )
-      );
-    }, 1000);
+          );
+
+        return next;
+      }
+    );
+  }, 1000);
 
   return () =>
     clearInterval(timer);
 }, []);
-
+useEffect(() => {
+  if (
+    countdown === 0 &&
+    data
+  ) {
+    load();
+  }
+}, [countdown]);
 if (!data) {
   return (
     <main className="container">
