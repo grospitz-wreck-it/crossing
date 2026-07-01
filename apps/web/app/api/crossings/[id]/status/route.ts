@@ -67,30 +67,85 @@ export async function GET(
   const date =
     `${year}${month}${day}`;
 
-  const url =
-    `https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/plan/${crossing.eva}/${date}/${hour}`;
+  const nextHourDate =
+  new Date(
+    now.getTime() +
+      60 * 60 * 1000
+  );
 
-  const res =
-    await fetch(url, {
-      headers: {
-        "DB-Client-Id":
-          process.env
-            .DB_CLIENT_ID!,
+const nextYear =
+  String(
+    nextHourDate.getUTCFullYear()
+  ).slice(-2);
 
-        "DB-Api-Key":
-          process.env
-            .DB_API_KEY!,
-      },
+const nextMonth =
+  String(
+    nextHourDate.getUTCMonth() +
+      1
+  ).padStart(2, "0");
 
-      cache:
-        "no-store",
-    });
+const nextDay =
+  String(
+    nextHourDate.getUTCDate()
+  ).padStart(2, "0");
 
-  const xml =
-    await res.text();
+const nextHour =
+  String(
+    nextHourDate.getUTCHours()
+  ).padStart(2, "0");
 
-  const trains =
-    parseTimetable(xml);
+const nextDate =
+  `${nextYear}${nextMonth}${nextDay}`;
+
+const urlCurrent =
+  `https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/plan/${crossing.eva}/${date}/${hour}`;
+
+const urlNext =
+  `https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/plan/${crossing.eva}/${nextDate}/${nextHour}`;
+
+const headers = {
+  "DB-Client-Id":
+    process.env
+      .DB_CLIENT_ID!,
+
+  "DB-Api-Key":
+    process.env
+      .DB_API_KEY!,
+};
+
+const [
+  resCurrent,
+  resNext,
+] = await Promise.all([
+  fetch(urlCurrent, {
+    headers,
+    cache:
+      "no-store",
+  }),
+
+  fetch(urlNext, {
+    headers,
+    cache:
+      "no-store",
+  }),
+]);
+
+const [
+  xmlCurrent,
+  xmlNext,
+] = await Promise.all([
+  resCurrent.text(),
+  resNext.text(),
+]);
+
+const trains = [
+  ...parseTimetable(
+    xmlCurrent
+  ),
+  ...parseTimetable(
+    xmlNext
+  ),
+];
 console.log(
   "PARSED TRAINS",
   trains.slice(0, 10).map(
@@ -157,33 +212,39 @@ console.log(
     );
 
   return Response.json({
-    crossing:
-      crossing.name,
+  crossing:
+    crossing.name,
 
-    debugNow:
-      new Date().toString(),
+  debugNow:
+    new Date().toString(),
 
-    debugUtcNow:
-      new Date().toISOString(),
+  debugUtcNow:
+    new Date().toISOString(),
 
-    debugHour:
-      hour,
+  debugHour:
+    hour,
 
-    debugDate:
-      date,
+  debugDate:
+    date,
 
-    debugUrl:
-      url,
+  debugUrlCurrent:
+    urlCurrent,
 
-    trainsFound:
-      upcomingTrains.length,
+  debugUrlNext:
+    urlNext,
 
-    windowsFound:
-      windows.length,
+  totalTrainsLoaded:
+    trains.length,
 
-    mergedFound:
-      merged.length,
+  trainsFound:
+    upcomingTrains.length,
 
-    ...phase,
-  });
+  windowsFound:
+    windows.length,
+
+  mergedFound:
+    merged.length,
+
+  ...phase,
+});
 }
