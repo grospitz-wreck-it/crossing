@@ -9,7 +9,20 @@ export async function GET() {
       ORDER BY id DESC
     `
     );
+const flagsResult =
+  await db.execute(`
+    SELECT prediction_id
+    FROM measurement_flags
+  `);
 
+const flagged =
+  new Set(
+    (flagsResult.rows as any[])
+      .map(
+        (row) =>
+          row.prediction_id
+      )
+  );
   const grouped =
     new Map<
       string,
@@ -88,118 +101,125 @@ export async function GET() {
   }
 
   const rows =
-    Array.from(
-      grouped.values()
+  Array.from(
+    grouped.values()
+  )
+    .map(
+      (
+        row: any
+      ) => {
+        const predictedClose =
+          row.phase?.start
+            ? new Date(
+                row.phase.start
+              )
+            : null;
+
+        const predictedOpen =
+          row.phase?.end
+            ? new Date(
+                row.phase.end
+              )
+            : null;
+
+        const actualClose =
+          row.closeAt
+            ? new Date(
+                row.closeAt
+              )
+            : null;
+
+        const actualOpen =
+          row.openAt
+            ? new Date(
+                row.openAt
+              )
+            : null;
+
+        return {
+          predictionId:
+            row.predictionId,
+
+          predictedClose,
+
+          predictedOpen,
+
+          actualClose,
+
+          actualOpen,
+
+          closeDeltaSeconds:
+            predictedClose &&
+            actualClose
+              ? Math.round(
+                  (
+                    actualClose.getTime() -
+                    predictedClose.getTime()
+                  ) / 1000
+                )
+              : null,
+
+          openDeltaSeconds:
+            predictedOpen &&
+            actualOpen
+              ? Math.round(
+                  (
+                    actualOpen.getTime() -
+                    predictedOpen.getTime()
+                  ) / 1000
+                )
+              : null,
+
+          measuredDurationSeconds:
+            actualClose &&
+            actualOpen
+              ? Math.round(
+                  (
+                    actualOpen.getTime() -
+                    actualClose.getTime()
+                  ) / 1000
+                )
+              : null,
+
+          trains:
+            row.phase
+              ?.trains ?? [],
+
+          trainCount:
+            row.phase
+              ?.trains
+              ?.length ?? 0,
+
+          flagged:
+            flagged.has(
+              row.predictionId
+            ),
+        };
+      }
     )
-      .map(
-        (
-          row: any
-        ) => {
-          const predictedClose =
-            row.phase?.start
-              ? new Date(
-                  row.phase.start
-                )
-              : null;
+    .sort(
+      (a, b) => {
+        const aTime =
+          a.actualClose
+            ? new Date(
+                a.actualClose
+              ).getTime()
+            : 0;
 
-          const predictedOpen =
-            row.phase?.end
-              ? new Date(
-                  row.phase.end
-                )
-              : null;
+        const bTime =
+          b.actualClose
+            ? new Date(
+                b.actualClose
+              ).getTime()
+            : 0;
 
-          const actualClose =
-            row.closeAt
-              ? new Date(
-                  row.closeAt
-                )
-              : null;
+        return (
+          bTime - aTime
+        );
+      }
+    );
 
-          const actualOpen =
-            row.openAt
-              ? new Date(
-                  row.openAt
-                )
-              : null;
-
-          return {
-            predictionId:
-              row.predictionId,
-
-            predictedClose,
-
-            predictedOpen,
-
-            actualClose,
-
-            actualOpen,
-
-            closeDeltaSeconds:
-              predictedClose &&
-              actualClose
-                ? Math.round(
-                    (actualClose.getTime() -
-                      predictedClose.getTime()) /
-                      1000
-                  )
-                : null,
-
-            openDeltaSeconds:
-              predictedOpen &&
-              actualOpen
-                ? Math.round(
-                    (actualOpen.getTime() -
-                      predictedOpen.getTime()) /
-                      1000
-                  )
-                : null,
-
-            measuredDurationSeconds:
-              actualClose &&
-              actualOpen
-                ? Math.round(
-                    (actualOpen.getTime() -
-                      actualClose.getTime()) /
-                      1000
-                  )
-                : null,
-
-            trains:
-              row.phase
-                ?.trains ??
-              [],
-
-            trainCount:
-              row.phase
-                ?.trains
-                ?.length ?? 0,
-          };
-        }
-      )
-      .sort(
-        (a, b) => {
-          const aTime =
-            a.actualClose
-              ? new Date(
-                  a.actualClose
-                ).getTime()
-              : 0;
-
-          const bTime =
-            b.actualClose
-              ? new Date(
-                  b.actualClose
-                ).getTime()
-              : 0;
-
-          return (
-            bTime - aTime
-          );
-        }
-      );
-
-  return Response.json(
-    rows
-  );
+return Response.json(
+  rows
+);
 }
