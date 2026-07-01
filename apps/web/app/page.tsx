@@ -660,13 +660,14 @@ return (
 >
   SCHRANKE HOCH
 </button>
-    </div>
-  <button
+ <button
   className="flagButton"
   onClick={saveUnexpectedTrain}
 >
   ⚠ GÜTERZUG / SONDERFALL
 </button>
+    </div>
+ 
   </main>
 );
 }
