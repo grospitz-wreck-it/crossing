@@ -2,6 +2,7 @@
 
 import {
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
@@ -18,8 +19,23 @@ function formatTime(
     "de-DE",
     {
       dateStyle: "short",
-      timeStyle: "medium",
+      timeStyle: "short",
     }
+  );
+}
+
+function avg(
+  values: number[]
+) {
+  if (!values.length) {
+    return null;
+  }
+
+  return Math.round(
+    values.reduce(
+      (a, b) => a + b,
+      0
+    ) / values.length
   );
 }
 
@@ -37,29 +53,155 @@ export default function Admin() {
       .then((res) =>
         res.json()
       )
-      .then((data) => {
-        setRows(data);
-      })
-      .finally(() => {
-        setLoading(false);
-      });
+      .then(setRows)
+      .finally(() =>
+        setLoading(false)
+      );
   }, []);
+
+  const stats =
+    useMemo(() => {
+      const closeValues =
+        rows
+          .map(
+            (r) =>
+              r.closeDeltaSeconds
+          )
+          .filter(
+            (
+              v
+            ): v is number =>
+              v !== null
+          );
+
+      const openValues =
+        rows
+          .map(
+            (r) =>
+              r.openDeltaSeconds
+          )
+          .filter(
+            (
+              v
+            ): v is number =>
+              v !== null
+          );
+
+      const durations =
+        rows
+          .map(
+            (r) =>
+              r.measuredDurationSeconds
+          )
+          .filter(
+            (
+              v
+            ): v is number =>
+              v !== null
+          );
+
+      const trainStats =
+        new Map();
+
+      rows.forEach(
+        (row) => {
+          row.trains?.forEach(
+            (
+              train: any
+            ) => {
+              const key =
+                train.line ??
+                "Unknown";
+
+              if (
+                !trainStats.has(
+                  key
+                )
+              ) {
+                trainStats.set(
+                  key,
+                  []
+                );
+              }
+
+              if (
+                row.closeDeltaSeconds !==
+                null
+              ) {
+                trainStats
+                  .get(
+                    key
+                  )
+                  .push(
+                    row.closeDeltaSeconds
+                  );
+              }
+            }
+          );
+        }
+      );
+
+      return {
+        avgClose:
+          avg(
+            closeValues
+          ),
+
+        avgOpen:
+          avg(
+            openValues
+          ),
+
+        avgDuration:
+          avg(
+            durations
+          ),
+
+        trainStats:
+          Array.from(
+            trainStats.entries()
+          )
+            .map(
+              (
+                [
+                  line,
+                  values,
+                ]
+              ) => ({
+                line,
+
+                count:
+                  values.length,
+
+                avgError:
+                  avg(
+                    values
+                  ),
+              })
+            )
+            .sort(
+              (
+                a,
+                b
+              ) =>
+                b.count -
+                a.count
+            ),
+      };
+    }, [rows]);
 
   return (
     <main
       style={{
-        maxWidth: 1400,
+        maxWidth: 1600,
         margin:
           "0 auto",
         padding: 40,
       }}
     >
-      <h1
-        style={{
-          marginBottom: 24,
-        }}
-      >
-        Messungen
+      <h1>
+        Kirchlengern
+        Analytics
       </h1>
 
       {loading && (
@@ -69,147 +211,251 @@ export default function Admin() {
       )}
 
       {!loading && (
-        <div
-          style={{
-            overflowX:
-              "auto",
-          }}
-        >
+        <>
+          <div
+            style={{
+              display:
+                "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit,minmax(220px,1fr))",
+              gap: 16,
+              marginTop: 24,
+              marginBottom:
+                32,
+            }}
+          >
+            <Card
+              title="Messungen"
+              value={
+                rows.length
+              }
+            />
+
+            <Card
+              title="Ø Close Fehler"
+              value={`${stats.avgClose ?? "-"} s`}
+            />
+
+            <Card
+              title="Ø Open Fehler"
+              value={`${stats.avgOpen ?? "-"} s`}
+            />
+
+            <Card
+              title="Ø Dauer"
+              value={`${stats.avgDuration ?? "-"} s`}
+            />
+          </div>
+
+          <h2>
+            Linienanalyse
+          </h2>
+
           <table
             style={{
               width: "100%",
-              borderCollapse:
-                "collapse",
+              marginBottom:
+                40,
             }}
           >
             <thead>
               <tr>
                 <th>
-                  Prediction
+                  Linie
                 </th>
-
                 <th>
-                  Prognose
-                  Schließen
+                  Messungen
                 </th>
-
                 <th>
-                  Ist
-                  Schließen
-                </th>
-
-                <th>
-                  Prognose
-                  Öffnen
-                </th>
-
-                <th>
-                  Ist
-                  Öffnen
-                </th>
-
-                <th>
-                  Close Δ
-                </th>
-
-                <th>
-                  Open Δ
-                </th>
-
-                <th>
-                  Dauer
-                </th>
-
-                <th>
-                  Züge
+                  Ø Fehler
                 </th>
               </tr>
             </thead>
 
             <tbody>
-              {rows.map(
+              {stats.trainStats.map(
                 (
-                  row: any
+                  row
                 ) => (
                   <tr
                     key={
-                      row.predictionId
+                      row.line
                     }
                   >
                     <td>
-                      {row.predictionId.slice(
-                        0,
-                        10
-                      )}
+                      {
+                        row.line
+                      }
                     </td>
 
                     <td>
-                      {formatTime(
-                        row.predictedClose
-                      )}
+                      {
+                        row.count
+                      }
                     </td>
 
                     <td>
-                      {formatTime(
-                        row.actualClose
-                      )}
-                    </td>
-
-                    <td>
-                      {formatTime(
-                        row.predictedOpen
-                      )}
-                    </td>
-
-                    <td>
-                      {formatTime(
-                        row.actualOpen
-                      )}
-                    </td>
-
-                    <td>
-                      {row.closeDeltaSeconds ??
-                        "-"}
-                      {row.closeDeltaSeconds !==
-                        null &&
-                        " s"}
-                    </td>
-
-                    <td>
-                      {row.openDeltaSeconds ??
-                        "-"}
-                      {row.openDeltaSeconds !==
-                        null &&
-                        " s"}
-                    </td>
-
-                    <td>
-                      {row.measuredDurationSeconds ??
-                        "-"}
-                      {row.measuredDurationSeconds !==
-                        null &&
-                        " s"}
-                    </td>
-
-                    <td>
-                      {row.trains
-                        ?.map(
-                          (
-                            t: any
-                          ) =>
-                            `${t.line} ${t.trainNumber}`
-                        )
-                        .join(
-                          ", "
-                        )}
+                      {
+                        row.avgError
+                      }
+                      s
                     </td>
                   </tr>
                 )
               )}
             </tbody>
           </table>
-        </div>
+
+          <h2>
+            Einzelmessungen
+          </h2>
+
+          <div
+            style={{
+              overflowX:
+                "auto",
+            }}
+          >
+            <table
+              style={{
+                width:
+                  "100%",
+              }}
+            >
+              <thead>
+                <tr>
+                  <th>
+                    Prognose
+                  </th>
+
+                  <th>
+                    Ist
+                  </th>
+
+                  <th>
+                    Δ Close
+                  </th>
+
+                  <th>
+                    Δ Open
+                  </th>
+
+                  <th>
+                    Dauer
+                  </th>
+
+                  <th>
+                    Züge
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {rows.map(
+                  (
+                    row
+                  ) => (
+                    <tr
+                      key={
+                        row.predictionId
+                      }
+                    >
+                      <td>
+                        {formatTime(
+                          row.predictedClose
+                        )}
+                      </td>
+
+                      <td>
+                        {formatTime(
+                          row.actualClose
+                        )}
+                      </td>
+
+                      <td>
+                        {row.closeDeltaSeconds}
+                        s
+                      </td>
+
+                      <td>
+                        {row.openDeltaSeconds ??
+                          "-"}
+                        {row.openDeltaSeconds !==
+                          null &&
+                          " s"}
+                      </td>
+
+                      <td>
+                        {row.measuredDurationSeconds ??
+                          "-"}
+                        {row.measuredDurationSeconds !==
+                          null &&
+                          " s"}
+                      </td>
+
+                      <td>
+                        {row.trains
+                          ?.map(
+                            (
+                              t: any
+                            ) =>
+                              `${t.line ?? ""} ${t.trainNumber}`
+                          )
+                          .join(
+                            ", "
+                          )}
+                      </td>
+                    </tr>
+                  )
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </main>
+  );
+}
+
+function Card({
+  title,
+  value,
+}: {
+  title: string;
+  value:
+    | string
+    | number
+    | null;
+}) {
+  return (
+    <div
+      style={{
+        padding: 24,
+        borderRadius: 20,
+        background:
+          "#f6f7f9",
+      }}
+    >
+      <div
+        style={{
+          fontSize:
+            14,
+          opacity: 0.6,
+        }}
+      >
+        {title}
+      </div>
+
+      <div
+        style={{
+          fontSize:
+            32,
+          fontWeight: 700,
+          marginTop: 8,
+        }}
+      >
+        {value}
+      </div>
+    </div>
   );
 }

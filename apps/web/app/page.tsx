@@ -183,7 +183,39 @@ export default function Home() {
       console.error(err);
     }
   }
+async function saveUnexpectedTrain() {
+  if (!data?.predictionId) {
+    return;
+  }
 
+  await fetch(
+    "/api/measurements/flag",
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json",
+      },
+
+      body: JSON.stringify({
+        predictionId:
+          data.predictionId,
+
+        flag:
+          "unexpected_train",
+      }),
+    }
+  );
+
+  setMessage(
+    "⚠ Sonderfall markiert"
+  );
+
+  setTimeout(() => {
+    setMessage("");
+  }, 3000);
+}
   async function saveMeasurement(
   event:
     | "close"
@@ -629,6 +661,12 @@ return (
   SCHRANKE HOCH
 </button>
     </div>
+  <button
+  className="flagButton"
+  onClick={saveUnexpectedTrain}
+>
+  ⚠ GÜTERZUG / SONDERFALL
+</button>
   </main>
 );
 }

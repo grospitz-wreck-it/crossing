@@ -385,3 +385,28 @@ h1 {
 .extraTrain:first-child {
   border-top: none;
 }
+.flagButton {
+  width: 100%;
+
+  margin-top: 16px;
+
+  height: 64px;
+
+  border: none;
+
+  border-radius: 18px;
+
+  font-size: 1rem;
+
+  font-weight: 700;
+
+  color: #fff;
+
+  background: linear-gradient(
+    180deg,
+    #ffb300,
+    #ff8f00
+  );
+
+  cursor: pointer;
+}
