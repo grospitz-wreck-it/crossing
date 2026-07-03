@@ -97,39 +97,38 @@ function formatIsoTime(
     }
   );
 }
-
-function getOrigin(
-  train: any
+function getClosureDuration(
+  start?: string,
+  end?: string
 ) {
-  const stations =
-    train?.arrivalStations;
-
-  if (
-    !stations ||
-    stations.length === 0
-  ) {
+  if (!start || !end) {
     return null;
   }
 
-  return stations[
-    stations.length - 1
-  ];
+  return Math.round(
+    (
+      new Date(end).getTime() -
+      new Date(start).getTime()
+    ) /
+      60000
+  );
+}
+function getOrigin(
+  train: any
+) {
+  return (
+    train?.origin ??
+    "--"
+  );
 }
 
 function getDestination(
   train: any
 ) {
-  const stations =
-    train?.departureStations;
-
-  if (
-    !stations ||
-    stations.length === 0
-  ) {
-    return null;
-  }
-
-  return stations[0];
+  return (
+    train?.destination ??
+    "--"
+  );
 }
 
 const MAX_PHASE_MS =
@@ -425,138 +424,281 @@ if (!data) {
     </main>
   );
 }
+const closeTime =
+  formatIsoTime(
+    data.phase?.start
+  );
+
+const openTime =
+  formatIsoTime(
+    data.phase?.end
+  );
+
+const closureDuration =
+  getClosureDuration(
+    data.phase?.start,
+    data.phase?.end
+  );
+
+const train =
+  data.phase?.trains?.[0];
+
+const heroImage =
+  data.state === "OPEN"
+    ? "/images/barrier-open.webp"
+    : "/images/barrier-closed.webp";
 
 return (
   <main className="container">
-    <div className="logo">
-      GEMEINDE
-      KIRCHLENGERN
-    </div>
 
-    <div
-      className={`statusDot ${
-        data.state === "OPEN"
-          ? "open"
-          : "closed"
-      }`}
-    />
+  <div className="logo">
+    GEMEINDE KIRCHLENGERN
+  </div>
 
-   <h1>
-  <span className="headlineTop">
-    BAHNÜBERGANG
-  </span>
+  <div
+  className={`heroCard ${
+    data.state === "OPEN"
+      ? "heroCardOpen"
+      : "heroCardClosed"
+  }`}
+>
 
-  <span className="headlineBottom">
+  <div className="heroVisual">
+
+  <img
+    src={heroImage}
+    alt={
+      data.state === "OPEN"
+        ? "Bahnübergang offen"
+        : "Bahnübergang geschlossen"
+    }
+    className="heroImage"
+  />
+
+</div>
+
+<div className="heroContent">
+
+  <div
+    className={`statusBadge ${
+      data.state === "OPEN"
+        ? "badgeOpen"
+        : "badgeClosed"
+    }`}
+  >
+    ●{" "}
     {data.state === "OPEN"
       ? "OFFEN"
       : "GESCHLOSSEN"}
-  </span>
-</h1>
-
-    <div className="timer">
-      {formatSeconds(
-        countdown
-      )}
-    </div>
-
-    <div className="subtitle">
-      {data.state === "OPEN"
-        ? "bis Schranke schließt"
-        : "bis Schranke öffnet"}
-    </div>
-
-    <div className="trainCard">
-  <div className="trainLabel">
-    Nächster Zug
   </div>
 
-  <div className="trainLine">
-    {data.phase?.trains?.[0]?.line}
-    {" · "}
-    {
-      data.phase?.trains?.[0]
-        ?.trainNumber
-    }
+  <div className="heroTimer">
+    {formatSeconds(
+      countdown
+    )}
   </div>
 
-  <div className="infoGrid">
-    <div className="infoItem">
-      <div className="infoTitle">
-        Kommt aus
-      </div>
+  <div className="heroSubtitle">
+    {data.state === "OPEN"
+      ? "bis Schranke schließt"
+      : "bis Schranke öffnet"}
+  </div>
 
-      <div className="infoValue">
-        {getOrigin(
-          data.phase?.trains?.[0]
-        )}
-      </div>
+  <div className="heroSummary">
+
+  <div className="heroSummaryGrid">
+
+    <div className="heroSummaryItem">
+      <strong>
+        {formatIsoTime(data.phase?.start)}
+      </strong>
+
+      <span>Schließt</span>
     </div>
 
-    <div className="infoItem">
-      <div className="infoTitle">
-        Fährt nach
-      </div>
+    <div className="heroSummaryItem">
+      <strong>
+        {formatIsoTime(data.phase?.end)}
+      </strong>
 
-      <div className="infoValue">
-        {getDestination(
-          data.phase?.trains?.[0]
-        )}
-      </div>
+      <span>Frei</span>
     </div>
 
-    <div className="infoItem">
-      <div className="infoTitle">
-        Ankunft
-      </div>
+  </div>
 
-      <div className="infoValue">
-        {formatDbTime(
-          data.phase
-            ?.trains?.[0]
-            ?.arrival
-        )}
-      </div>
+  <div className="heroDuration">
+
+    <strong>
+      {closureDuration}
+      {" "}
+      Min.
+    </strong>
+
+    <span>
+      Sperrdauer
+    </span>
+
+  </div>
+
+</div>
+
+</div>
+
+</div>
+
+  <div className="trainCard">
+
+    <div className="trainLabel">
+      Nächster Zug
     </div>
 
-    <div className="infoItem">
-      <div className="infoTitle">
-        Schranke zu
-      </div>
-
-      <div className="infoValue">
-        {formatIsoTime(
-  data.phase?.start
-)}
-      </div>
-    </div>
-
-    <div className="infoItem">
-      <div className="infoTitle">
-        Schranke auf
-      </div>
-
-      <div className="infoValue">
-        {formatIsoTime(
-  data.phase?.end
-)}
-      </div>
-    </div>
-
-    <div className="infoItem">
-      <div className="infoTitle">
-        Gleis
-      </div>
-
-      <div className="infoValue">
+    <div
+      style={{
+        display: "flex",
+        alignItems:
+          "center",
+        gap: 12,
+        marginTop: 10,
+      }}
+    >
+      <div className="trainLine">
         {
           data.phase
             ?.trains?.[0]
-            ?.platform
+            ?.line
+        }
+        {" · "}
+        {
+          data.phase
+            ?.trains?.[0]
+            ?.trainNumber
         }
       </div>
+
+      {data.phase?.trains?.[0]
+        ?.delayMinutes >
+        0 && (
+        <div
+          className="delayBadge"
+        >
+          +
+          {
+            data.phase
+              ?.trains?.[0]
+              ?.delayMinutes
+          }
+        </div>
+      )}
     </div>
+
+    <div
+      style={{
+        marginTop: 10,
+        fontSize:
+          "1.15rem",
+        color:
+          "#4f637b",
+      }}
+    >
+      {getOrigin(
+        data.phase?.trains?.[0]
+      )}
+      {" → "}
+      {getDestination(
+        data.phase?.trains?.[0]
+      )}
+    </div>
+
+    {data.phase?.trains?.[0]
+      ?.delayMinutes >
+      0 && (
+      <div
+        style={{
+          marginTop: 8,
+          color:
+            "#d92d20",
+          fontWeight: 600,
+        }}
+      >
+        Verspätung ca.{" "}
+        {
+          data.phase
+            ?.trains?.[0]
+            ?.delayMinutes
+        }{" "}
+        Minuten
+      </div>
+    )}
+
+    <div className="timeline">
+
+  <div className="timelineItem">
+
+    <div className="timelineDot red" />
+
+    <div className="timelineTime">
+      {formatIsoTime(
+        data.phase?.start
+      )}
+    </div>
+
+    <div className="timelineLabel timelineRed">
+      Schranke zu
+    </div>
+
   </div>
+
+  <div className="timelineItem">
+
+    <div className="timelineDot blue" />
+
+    <div className="timelineTime">
+      {formatIsoTime(
+        data.phase
+          ?.trains?.[0]
+          ?.arrival
+      )}
+    </div>
+
+    <div className="timelineLabel">
+      Zug passiert
+    </div>
+
+  </div>
+
+  <div className="timelineItem">
+
+    <div className="timelineDot green" />
+
+    <div className="timelineTime">
+      {formatIsoTime(
+        data.phase?.end
+      )}
+    </div>
+
+    <div className="timelineLabel timelineGreen">
+      Schranke auf
+    </div>
+
+  </div>
+
 </div>
+
+{data.phase?.trains?.[0]
+  ?.platform && (
+  <div className="trainMeta">
+    Gleis{" "}
+    <strong>
+      {
+        data.phase
+          ?.trains?.[0]
+          ?.platform
+      }
+    </strong>
+  </div>
+)}
+
+  </div>
 
 {data.phase?.trains?.length >
   1 && (
