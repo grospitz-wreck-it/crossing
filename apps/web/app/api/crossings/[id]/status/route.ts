@@ -1,14 +1,14 @@
-import { crossings } from "../../../../lib/crossings";
+import { getDepartures } from "../../../../../../../packages/db-api-client/src/irisDepartures";
 
-import { parseTimetable } from "../../../../lib/parseTimetable";
+import { parseIrisDepartures } from "../../../../../../../packages/db-api-client/src/parseIrisDepartures";
 
-import { predictCrossingWindows } from "../../../../lib/predictCrossingWindows";
+import { findJourney } from "../../../../../../../packages/db-api-client/src/journeyFind";
 
-import { mergeCrossingWindows } from "../../../../lib/mergeCrossingWindows";
+import { getTrainContext } from "../../../../../../../packages/db-api-client/src/journey";
 
-import { getCurrentPhase } from "../../../../lib/getCurrentPhase";
+import { crossings } from "../../../../../../../packages/crossing-model/src/crossings";
 
-import { parseDbTime } from "../../../../lib/getNextTrain";
+import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 
 export async function GET(
   request: Request,
@@ -24,9 +24,10 @@ export async function GET(
     await params;
 
   const crossing =
-    crossings[
-      id as keyof typeof crossings
-    ];
+    crossings.find(
+      (c) =>
+        c.id === id
+    );
 
   if (!crossing) {
     return Response.json(
@@ -40,211 +41,252 @@ export async function GET(
     );
   }
 
+  const departures =
+    parseIrisDepartures(
+      await getDepartures(
+        crossing.eva
+      )
+    );
+
+  const trains = [];
+
+  for (const train of departures) {
+    try {
+      const journey =
+        await findJourney(
+          train.category,
+          train.journeyNumber,
+          crossing.eva
+        );
+
+      const parsedJourney =
+        JSON.parse(
+          journey?.[0]
+            ?.result?.data
+        );
+
+      const journeyRef =
+        parsedJourney?.[1]
+          ?.journeyId;
+
+      const journeyId =
+        parsedJourney?.[
+          journeyRef
+        ];
+
+      if (!journeyId) {
+        continue;
+      }
+
+      const context =
+        await getTrainContext(
+          journeyId
+        );
+
+      const crossingStop =
+        context.stopDetails?.find(
+          (stop) =>
+            stop.name ===
+            crossing.name
+        );
+
+      if (
+        !crossingStop?.realtimeTime
+      ) {
+        continue;
+      }
+
+      const crossingTime =
+        new Date(
+          crossingStop.realtimeTime
+        );
+
+      const etaSeconds =
+        Math.floor(
+          (
+            crossingTime.getTime() -
+            Date.now()
+          ) / 1000
+        );
+
+      trains.push({
+  journeyId,
+
+  line:
+    train.line,
+
+  category:
+    train.category,
+
+  journeyNumber:
+    train.journeyNumber,
+
+  origin:
+    context.stopDetails?.[0]
+      ?.name,
+
+  destination:
+    context.stopDetails?.[
+      context.stopDetails.length - 1
+    ]?.name,
+
+  platform:
+    train.platform,
+
+  direction:
+    getCrossingDirection(
+      train.route
+    ),
+
+  delayMinutes:
+    train.delay,
+
+  currentStop:
+    context.currentStop,
+
+  nextStop:
+    context.nextStop,
+
+  crossingTime:
+    crossingTime.toISOString(),
+
+  arrival:
+    crossingTime.toISOString(),
+
+  etaSeconds,
+
+  stopDetails:
+    context.stopDetails,
+});
+    } catch (error) {
+      console.error(
+        train.category,
+        train.journeyNumber,
+        error
+      );
+    }
+  }
+  const upcoming =
+    trains
+      .filter(
+        (t) =>
+          t.etaSeconds > 0
+      )
+      .sort(
+        (a, b) =>
+          a.etaSeconds -
+          b.etaSeconds
+      );
+
+  const nextTrain =
+  upcoming[0];
+
+let state = "OPEN";
+
+let nextCloseIn = 0;
+let nextOpenIn = 0;
+
+let phaseStart:
+  string | null = null;
+
+let phaseEnd:
+  string | null = null;
+
+if (nextTrain) {
+  const crossingTime =
+    new Date(
+      nextTrain.crossingTime
+    );
+
+  const closeAt =
+    new Date(
+      crossingTime.getTime() -
+      crossing.closeOffsetSeconds *
+        1000
+    );
+
+  const openAt =
+    new Date(
+      crossingTime.getTime() +
+      crossing.openOffsetSeconds *
+        1000
+    );
+
+  phaseStart =
+    closeAt.toISOString();
+
+  phaseEnd =
+    openAt.toISOString();
+
   const now =
-    new Date();
-
-  const year =
-    String(
-      now.getUTCFullYear()
-    ).slice(-2);
-
-  const month =
-    String(
-      now.getUTCMonth() +
-        1
-    ).padStart(2, "0");
-
-  const day =
-    String(
-      now.getUTCDate()
-    ).padStart(2, "0");
-
-  const hour =
-    String(
-      now.getUTCHours()
-    ).padStart(2, "0");
-
-  const date =
-    `${year}${month}${day}`;
-
-  const nextHourDate =
-  new Date(
-    now.getTime() +
-      60 * 60 * 1000
-  );
-
-const nextYear =
-  String(
-    nextHourDate.getUTCFullYear()
-  ).slice(-2);
-
-const nextMonth =
-  String(
-    nextHourDate.getUTCMonth() +
-      1
-  ).padStart(2, "0");
-
-const nextDay =
-  String(
-    nextHourDate.getUTCDate()
-  ).padStart(2, "0");
-
-const nextHour =
-  String(
-    nextHourDate.getUTCHours()
-  ).padStart(2, "0");
-
-const nextDate =
-  `${nextYear}${nextMonth}${nextDay}`;
-
-const urlCurrent =
-  `https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/plan/${crossing.eva}/${date}/${hour}`;
-
-const urlNext =
-  `https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1/plan/${crossing.eva}/${nextDate}/${nextHour}`;
-
-const headers = {
-  "DB-Client-Id":
-    process.env
-      .DB_CLIENT_ID!,
-
-  "DB-Api-Key":
-    process.env
-      .DB_API_KEY!,
-};
-
-const [
-  resCurrent,
-  resNext,
-] = await Promise.all([
-  fetch(urlCurrent, {
-    headers,
-    cache:
-      "no-store",
-  }),
-
-  fetch(urlNext, {
-    headers,
-    cache:
-      "no-store",
-  }),
-]);
-
-const [
-  xmlCurrent,
-  xmlNext,
-] = await Promise.all([
-  resCurrent.text(),
-  resNext.text(),
-]);
-
-const trains = [
-  ...parseTimetable(
-    xmlCurrent
-  ),
-  ...parseTimetable(
-    xmlNext
-  ),
-];
-console.log(
-  "PARSED TRAINS",
-  trains.slice(0, 10).map(
-    (t) => ({
-      line: t.line,
-      arrival: t.arrival,
-      parsedArrival:
-        t.arrival
-          ? parseDbTime(
-              t.arrival
-            ).toString()
-          : null,
-      parsedIso:
-        t.arrival
-          ? parseDbTime(
-              t.arrival
-            ).toISOString()
-          : null,
-    })
-  )
-);
-  const nowMs =
     Date.now();
 
-  const upcomingTrains =
-    trains.filter(
-      (train) => {
-        if (
-          !train.arrival
-        ) {
-          return false;
-        }
+  if (
+    now <
+    closeAt.getTime()
+  ) {
+    state = "OPEN";
 
-        return (
-          parseDbTime(
-            train.arrival
-          ).getTime() >
-          nowMs
-        );
-      }
-    );
-console.log(
-  "UPCOMING",
-  upcomingTrains.map(
-    (t) => ({
-      line: t.line,
-      arrival: t.arrival,
-    })
-  )
-);
-  const windows =
-    predictCrossingWindows(
-      upcomingTrains
-    );
+    nextCloseIn =
+      Math.floor(
+        (
+          closeAt.getTime() -
+          now
+        ) / 1000
+      );
+  } else if (
+    now <
+    openAt.getTime()
+  ) {
+    state = "CLOSED";
 
-  const merged =
-    mergeCrossingWindows(
-      windows
-    );
-
-  const phase =
-    getCurrentPhase(
-      merged
-    );
+    nextOpenIn =
+      Math.floor(
+        (
+          openAt.getTime() -
+          now
+        ) / 1000
+      );
+  }
+}
 
   return Response.json({
-  crossing:
-    crossing.name,
+    crossing: {
+      id:
+        crossing.id,
 
-  debugNow:
-    new Date().toString(),
+      name:
+        crossing.name,
 
-  debugUtcNow:
-    new Date().toISOString(),
+      lat:
+        crossing.lat,
 
-  debugHour:
-    hour,
+      lon:
+        crossing.lon,
+    },
 
-  debugDate:
-    date,
+    state,
 
-  debugUrlCurrent:
-    urlCurrent,
+    nextCloseIn,
 
-  debugUrlNext:
-    urlNext,
+    nextOpenIn,
 
-  totalTrainsLoaded:
-    trains.length,
+    phase: {
+  start:
+    phaseStart,
 
-  trainsFound:
-    upcomingTrains.length,
+  end:
+    phaseEnd,
 
-  windowsFound:
-    windows.length,
+  trains:
+    nextTrain
+      ? [nextTrain]
+      : [],
+},
 
-  mergedFound:
-    merged.length,
+    trainCount:
+      trains.length,
 
-  ...phase,
-});
+    trains,
+  });
 }
