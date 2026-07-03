@@ -139,7 +139,23 @@ export async function GET(
     ),
 
   delayMinutes:
-    train.delay,
+  crossingStop.scheduledTime &&
+  crossingStop.realtimeTime
+    ? Math.max(
+        0,
+        Math.round(
+          (
+            new Date(
+              crossingStop.realtimeTime
+            ).getTime()
+            -
+            new Date(
+              crossingStop.scheduledTime
+            ).getTime()
+          ) / 60000
+        )
+      )
+    : 0,
 
   currentStop:
     context.currentStop,

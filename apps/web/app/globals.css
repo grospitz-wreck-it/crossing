@@ -135,25 +135,26 @@ body {
 }
 
 .heroTimer {
-  margin-top: 18px;
+  margin-top: 12px;
 
   font-size:
     clamp(
-      4.8rem,
+      4.4rem,
       16vw,
-      7rem
+      6.5rem
     );
 
   line-height: .9;
 
   font-weight: 900;
 
-  letter-spacing: -.08em;
+  letter-spacing: 0;
 
   color: #12345a;
 
   font-variant-numeric:
-    tabular-nums;
+    tabular-nums
+    lining-nums;
 }
 
 .heroSubtitle {
@@ -168,93 +169,73 @@ body {
 /* HERO SUMMARY       */
 /* ------------------ */
 
-.heroSummary {
-  width: 320px;
+.heroStats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 18px;
+}
 
-  padding: 24px;
+.heroStatCard {
+  background: rgba(255,255,255,.42);
 
-  border-radius: 28px;
+  backdrop-filter: blur(18px);
 
-  background:
-    rgba(255,255,255,.82);
+  border: 1px solid rgba(255,255,255,.35);
 
-  backdrop-filter:
-    blur(14px);
+  border-radius: 16px;
+
+  padding: 6px 8px;
+
+  text-align: center;
 
   box-shadow:
-    0 12px 32px
-    rgba(0,0,0,.05);
+    0 4px 12px rgba(0,0,0,.03);
 }
 
-.heroSummaryGrid {
+.heroStatIcon {
+  font-size: .8rem;
+
+  opacity: .65;
+
+  line-height: 1;
+}
+
+.heroStatValue {
+  margin-top: 2px;
+
+  font-size: .82rem;
+
+  font-weight: 700;
+
+  line-height: 1.1;
+
+  color: #12345a;
+}
+
+.heroStatLabel {
+  margin-top: 2px;
+
+  font-size: .55rem;
+
+  letter-spacing: .08em;
+
+  text-transform: uppercase;
+
+  color: #6f8095;
+
+  opacity: .75;
+
+  line-height: 1;
+}
+.heroStats {
   display: grid;
 
-  grid-template-columns:
-    1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
 
-  gap: 24px;
+  gap: 6px;
 
-  margin-bottom: 20px;
-}
-
-.heroSummaryItem strong {
-  display: block;
-
-  font-size: 3rem;
-
-  line-height: 1;
-
-  font-weight: 900;
-
-  color: #12345a;
-}
-
-.heroSummaryItem span {
-  display: block;
-
-  margin-top: 6px;
-
-  font-size: .8rem;
-
-  text-transform: uppercase;
-
-  letter-spacing: .08em;
-
-  color: #6f8095;
-}
-
-.heroDuration {
-  padding-top: 18px;
-
-  border-top:
-    1px solid
-    rgba(24,50,74,.08);
-}
-
-.heroDuration strong {
-  display: block;
-
-  font-size: 2.8rem;
-
-  font-weight: 900;
-
-  line-height: 1;
-
-  color: #12345a;
-}
-
-.heroDuration span {
-  display: block;
-
-  margin-top: 4px;
-
-  font-size: .8rem;
-
-  text-transform: uppercase;
-
-  letter-spacing: .08em;
-
-  color: #6f8095;
+  margin-top: 12px;
 }
 /* ------------------ */
 /* HERO IMAGE         */
@@ -330,7 +311,7 @@ body {
   }
 
   .heroContent {
-    max-width: 100%;
+    max-width: 72%;
   }
 
   .heroSummary {
@@ -338,7 +319,7 @@ body {
   }
 
   .heroVisual {
-    right: -170px;
+    right: -80px;
 
     bottom: -10px;
   }
@@ -646,7 +627,7 @@ body {
   .heroCard {
     padding: 24px;
 
-    min-height: 460px;
+    min-height: 320px;
   }
 
   .heroTimer {
@@ -685,4 +666,44 @@ body {
   .timelineLabel {
     font-size: 0.75rem;
   }
+}
+
+.adCard {
+  margin-top: 14px;
+
+  background: white;
+
+  border-radius: 28px;
+
+  padding: 20px;
+
+  box-shadow:
+    0 24px 60px
+    rgba(0,0,0,.08);
+}
+
+.adLabel {
+  font-size: .7rem;
+
+  text-transform: uppercase;
+
+  letter-spacing: .08em;
+
+  color: #7a8ca5;
+}
+
+.adHeadline {
+  margin-top: 8px;
+
+  font-size: 1.1rem;
+
+  font-weight: 800;
+
+  color: #18324a;
+}
+
+.adText {
+  margin-top: 6px;
+
+  color: #55708e;
 }
