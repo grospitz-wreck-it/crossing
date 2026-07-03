@@ -9,7 +9,11 @@ import { getTrainContext } from "../../../../../../../packages/db-api-client/src
 import { crossings } from "../../../../../../../packages/crossing-model/src/crossings";
 
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
+let cachedResponse: any = null;
 
+let cacheTimestamp = 0;
+
+const CACHE_TTL = 30_000;
 export async function GET(
   request: Request,
   {
@@ -22,7 +26,21 @@ export async function GET(
 ) {
   const { id } =
     await params;
+const now = Date.now();
 
+if (
+  cachedResponse &&
+  now - cacheTimestamp <
+    CACHE_TTL
+) {
+  console.log("CACHE HIT");
+
+  return Response.json(
+    cachedResponse
+  );
+}
+
+console.log("CACHE MISS");
   const crossing =
     crossings.find(
       (c) =>
@@ -266,43 +284,41 @@ if (nextTrain) {
   }
 }
 
-  return Response.json({
-    crossing: {
-      id:
-        crossing.id,
+  const response = {
+  crossing: {
+    id: crossing.id,
+    name: crossing.name,
+    lat: crossing.lat,
+    lon: crossing.lon,
+  },
 
-      name:
-        crossing.name,
+  state,
 
-      lat:
-        crossing.lat,
+  nextCloseIn,
 
-      lon:
-        crossing.lon,
-    },
+  nextOpenIn,
 
-    state,
-
-    nextCloseIn,
-
-    nextOpenIn,
-
-    phase: {
-  start:
-    phaseStart,
-
-  end:
-    phaseEnd,
-
-  trains:
-    nextTrain
+  phase: {
+    start: phaseStart,
+    end: phaseEnd,
+    trains: nextTrain
       ? [nextTrain]
       : [],
-},
+  },
 
-    trainCount:
-      trains.length,
+  trainCount:
+    trains.length,
 
-    trains,
-  });
+  trains,
+};
+
+cachedResponse =
+  response;
+
+cacheTimestamp =
+  Date.now();
+
+return Response.json(
+  response
+);
 }
