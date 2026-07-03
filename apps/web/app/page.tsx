@@ -448,6 +448,13 @@ const heroImage =
     ? "/images/barrier-open.webp"
     : "/images/barrier-closed.webp";
 
+
+console.log({
+  line: data.phase?.trains?.[0]?.line,
+  delayMinutes:
+    data.phase?.trains?.[0]?.delayMinutes,
+});
+
 return (
   <main className="container">
 
@@ -504,48 +511,71 @@ return (
       : "bis Schranke öffnet"}
   </div>
 
-  <div className="heroSummary">
+  <div className="heroStats">
 
-  <div className="heroSummaryGrid">
-
-    <div className="heroSummaryItem">
-      <strong>
-        {formatIsoTime(data.phase?.start)}
-      </strong>
-
-      <span>Schließt</span>
+  <div className="heroStatCard">
+    <div className="heroStatIcon">
+      🕒
     </div>
 
-    <div className="heroSummaryItem">
-      <strong>
-        {formatIsoTime(data.phase?.end)}
-      </strong>
-
-      <span>Frei</span>
+    <div className="heroStatValue">
+      {formatIsoTime(data.phase?.start)}
     </div>
 
+    <div className="heroStatLabel">
+      Schließt
+    </div>
   </div>
 
-  <div className="heroDuration">
+  <div className="heroStatCard">
+    <div className="heroStatIcon">
+      🔓
+    </div>
 
-    <strong>
-      {closureDuration}
-      {" "}
-      Min.
-    </strong>
+    <div className="heroStatValue">
+      {formatIsoTime(data.phase?.end)}
+    </div>
 
-    <span>
-      Sperrdauer
-    </span>
+    <div className="heroStatLabel">
+      Frei
+    </div>
+  </div>
 
+  <div className="heroStatCard">
+    <div className="heroStatIcon">
+      ⏳
+    </div>
+
+    <div className="heroStatValue">
+      {closureDuration}m
+    </div>
+
+    <div className="heroStatLabel">
+      Dauer
+    </div>
   </div>
 
 </div>
 
 </div>
 
-</div>
 
+
+</div>
+{data.state === "CLOSED" && (
+  <div className="adCard">
+    <div className="adLabel">Anzeige</div>
+
+    <div className="adHeadline">
+      Hier könnte Werbung stehen
+    </div>
+
+    <div className="adText">
+      Nur sichtbar, solange die Schranke
+      geschlossen ist.
+    </div>
+  </div>
+)}
   <div className="trainCard">
 
     <div className="trainLabel">
