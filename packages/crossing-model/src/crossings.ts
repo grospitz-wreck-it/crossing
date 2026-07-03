@@ -1,12 +1,15 @@
-import { Crossing } from "@crossing/shared-types";
+import { Crossing } from "./types";
 
 export const crossings: Crossing[] = [
   {
-    id: "kirchlengern-elsestrasse",
-    name: "Elsestraße",
+    id: "kirchlengern",
 
-    lat: 52.2000,
-    lon: 8.6500,
+    name: "Kirchlengern",
+
+    eva: "8003288",
+
+    lat: 52.196944,
+    lon: 8.642139,
 
     closeOffsetSeconds: 80,
     openOffsetSeconds: 20,

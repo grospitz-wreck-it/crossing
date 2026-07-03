@@ -1,3 +1,5 @@
+export * from "./bahnExpert";
+export * from "./journey";
 export async function getNextTrainEta() {
   const now = new Date();
 
