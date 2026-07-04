@@ -162,6 +162,9 @@ export default function Home() {
     setMessage,
   ] = useState("");
 
+const [ad, setAd] =
+  useState<any>(null);
+
   async function load() {
     try {
       const res = await fetch(
@@ -417,6 +420,48 @@ useEffect(() => {
     load();
   }
 }, [countdown]);
+
+useEffect(() => {
+  fetch(
+    "/api/ads/serve?crossingId=kirchlengern"
+  )
+    .then((r) => r.json())
+    .then((ad) => {
+      setAd(ad);
+
+      if (!ad) {
+        return;
+      }
+
+      fetch(
+        "/api/ads/impression",
+        {
+          method: "POST",
+
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+
+          body: JSON.stringify({
+            campaignId:
+              ad.campaign_id,
+
+            creativeId:
+              ad.id,
+
+            crossingId:
+              "kirchlengern",
+
+            sessionId:
+              crypto.randomUUID(),
+          }),
+        }
+      );
+    })
+    .catch(console.error);
+}, []);
+
 if (!data) {
   return (
     <main className="container">
@@ -562,171 +607,183 @@ return (
 
 
 </div>
-{data.state === "CLOSED" && (
-  <div className="adCard">
-    <div className="adLabel">Anzeige</div>
-
-    <div className="adHeadline">
-      Hier könnte Werbung stehen
-    </div>
-
-    <div className="adText">
-      Nur sichtbar, solange die Schranke
-      geschlossen ist.
-    </div>
-  </div>
+{data.state === "CLOSED" &&
+  ad && (
+    <a
+      href={ad.target_url}
+      target="_blank"
+      rel="noreferrer"
+      className="adCard"
+    >
+      <img
+        src={ad.image_url}
+        alt=""
+        className="adImage"
+      />
+    </a>
 )}
   <div className="trainCard">
 
-    <div className="trainLabel">
-      Nächster Zug
-    </div>
+  <div className="trainLabel">
+    Nächster Zug
+  </div>
 
-    <div
-      style={{
-        display: "flex",
-        alignItems:
-          "center",
-        gap: 12,
-        marginTop: 10,
-      }}
-    >
-      <div className="trainLine">
-        {
-          data.phase
-            ?.trains?.[0]
-            ?.line
-        }
-        {" · "}
-        {
-          data.phase
-            ?.trains?.[0]
-            ?.trainNumber
-        }
-      </div>
+  <div className="trainHeader">
 
-      {data.phase?.trains?.[0]
-        ?.delayMinutes >
-        0 && (
-        <div
-          className="delayBadge"
-        >
-          +
-          {
-            data.phase
-              ?.trains?.[0]
-              ?.delayMinutes
-          }
-        </div>
-      )}
-    </div>
+    <div className="trainMain">
 
-    <div
-      style={{
-        marginTop: 10,
-        fontSize:
-          "1.15rem",
-        color:
-          "#4f637b",
-      }}
-    >
-      {getOrigin(
-        data.phase?.trains?.[0]
-      )}
-      {" → "}
-      {getDestination(
-        data.phase?.trains?.[0]
-      )}
-    </div>
+      <div className="trainLineRow">
 
-    {data.phase?.trains?.[0]
-      ?.delayMinutes >
-      0 && (
-      <div
-        style={{
-          marginTop: 8,
-          color:
-            "#d92d20",
-          fontWeight: 600,
-        }}
-      >
-        Verspätung ca.{" "}
-        {
-          data.phase
-            ?.trains?.[0]
-            ?.delayMinutes
-        }{" "}
-        Minuten
-      </div>
-    )}
+  <div className="trainLine">
 
-    <div className="timeline">
+    {
+      data.phase
+        ?.trains?.[0]
+        ?.line
+    }
 
-  <div className="timelineItem">
+    <span className="trainNumberInline">
 
-    <div className="timelineDot red" />
+  {
+    data.phase
+      ?.trains?.[0]
+      ?.trainNumber
+  }
 
-    <div className="timelineTime">
-      {formatIsoTime(
-        data.phase?.start
-      )}
-    </div>
-
-    <div className="timelineLabel timelineRed">
-      Schranke zu
-    </div>
+</span>
 
   </div>
 
-  <div className="timelineItem">
-
-    <div className="timelineDot blue" />
-
-    <div className="timelineTime">
-      {formatIsoTime(
-        data.phase
-          ?.trains?.[0]
-          ?.arrival
-      )}
-    </div>
-
-    <div className="timelineLabel">
-      Zug passiert
-    </div>
-
-  </div>
-
-  <div className="timelineItem">
-
-    <div className="timelineDot green" />
-
-    <div className="timelineTime">
-      {formatIsoTime(
-        data.phase?.end
-      )}
-    </div>
-
-    <div className="timelineLabel timelineGreen">
-      Schranke auf
-    </div>
-
-  </div>
-
-</div>
-
-{data.phase?.trains?.[0]
-  ?.platform && (
-  <div className="trainMeta">
-    Gleis{" "}
-    <strong>
+  {data.phase?.trains?.[0]
+    ?.delayMinutes > 0 && (
+    <span className="delayChipInline">
+      +
       {
         data.phase
           ?.trains?.[0]
-          ?.platform
+          ?.delayMinutes
       }
-    </strong>
+    </span>
+  )}
+
+</div>
+
+      <div className="trainRoute">
+
+        {getOrigin(
+          data.phase?.trains?.[0]
+        )}
+
+        {" → "}
+
+        {getDestination(
+          data.phase?.trains?.[0]
+        )}
+
+        {data.phase?.trains?.[0]
+          ?.platform && (
+          <span className="platformInline">
+            · Gleis{" "}
+            {
+              data.phase
+                ?.trains?.[0]
+                ?.platform
+            }
+          </span>
+        )}
+
+      </div>
+
+    </div>
+
+    <div className="etaCard">
+
+      <div className="etaLabel">
+        passiert in
+      </div>
+
+      <div className="etaValue">
+        {Math.max(
+          1,
+          Math.round(
+            (
+              data.phase
+                ?.trains?.[0]
+                ?.etaSeconds || 0
+            ) / 60
+          )
+        )}
+        <span className="etaUnit">
+          Min
+        </span>
+      </div>
+
+    </div>
+
   </div>
-)}
+
+<div className="upcomingList">
+
+  <div className="upcomingLabel">
+    Danach
+  </div>
+
+    {data.trains
+      ?.filter(
+  (t: any) =>
+    t.etaSeconds > 0 &&
+    t.etaSeconds <= 1800
+)
+.slice(1, 10)
+      .map((train: any) => (
+
+        <div
+  key={train.journeyId}
+  className="upcomingTrain"
+>
+
+  <div className="upcomingMain">
+
+    <div className="upcomingLine">
+
+      <strong>
+        {train.line}
+      </strong>
+
+      {train.delayMinutes >
+        0 && (
+        <span className="miniDelay">
+          +{train.delayMinutes}
+        </span>
+      )}
+
+    </div>
+
+    <div className="upcomingRoute">
+  → {train.destination}
+</div>
+
+  </div>
+
+  <div className="upcomingTime">
+
+  {formatIsoTime(
+    train.arrival
+  )}
+
+  {train.delayMinutes >
+    0 && (
+    <span className="upcomingDelay">
+      +{train.delayMinutes}
+    </span>
+  )}
+
+</div>
+
+</div>
+      ))}
+
+  </div>
 
   </div>
 

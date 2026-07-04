@@ -669,41 +669,222 @@ body {
 }
 
 .adCard {
-  margin-top: 14px;
+  display: block;
 
-  background: white;
+  margin-top: 16px;
+
+  overflow: hidden;
 
   border-radius: 28px;
 
-  padding: 20px;
+  background: white;
 
   box-shadow:
     0 24px 60px
     rgba(0,0,0,.08);
 }
 
-.adLabel {
-  font-size: .7rem;
+.adImage {
+  display: block;
+
+  width: 100%;
+
+  height: auto;
+}
+
+.nextTrainRow {
+  margin-top: 18px;
+
+  display: flex;
+
+  justify-content: space-between;
+
+  align-items: center;
+
+  padding: 14px 16px;
+
+  border-radius: 20px;
+
+  background:
+    rgba(
+      245,
+      248,
+      252,
+      .85
+    );
+}
+
+.etaLabel {
+  font-size: .75rem;
+
+  text-transform: uppercase;
+
+  letter-spacing: .06em;
+
+  color: #6f8095;
+}
+
+.etaValue {
+  margin-top: 4px;
+
+  font-size: 1.8rem;
+
+  font-weight: 900;
+
+  color: #12345a;
+}
+
+.chevron {
+  font-size: 1.4rem;
+
+  color: #6f8095;
+}
+
+.upcomingList {
+  margin-top: 14px;
+
+  padding-top: 14px;
+
+  border-top:
+    1px solid
+    rgba(0,0,0,.06);
+}
+
+.upcomingLabel {
+  margin-bottom: 10px;
+
+  font-size: .75rem;
+
+  font-weight: 700;
 
   text-transform: uppercase;
 
   letter-spacing: .08em;
 
-  color: #7a8ca5;
+  color: #6f8095;
 }
 
-.adHeadline {
+.upcomingTrain {
+  display: flex;
+
+  justify-content:
+    space-between;
+
+  align-items: center;
+
+  padding: 8px 0;
+
+  font-size: .95rem;
+}
+.upcomingTime {
+  display: flex;
+
+  align-items: center;
+
+  gap: 8px;
+
+  font-weight: 700;
+
+  color: #12345a;
+
+  white-space: nowrap;
+}
+
+.upcomingDelay {
+  color: #d92d20;
+
+  font-size: .85rem;
+
+  font-weight: 800;
+}
+.trainHeader {
+  margin-top: 10px;
+
+  display: flex;
+
+  justify-content: space-between;
+
+  align-items: flex-start;
+
+  gap: 14px;
+}
+
+.trainMain {
+  flex: 1;
+
+  min-width: 0;
+}
+
+.trainLineRow {
+  display: flex;
+
+  align-items: center;
+
+  gap: 10px;
+}
+
+.trainRoute {
   margin-top: 8px;
 
-  font-size: 1.1rem;
+  font-size: .95rem;
+
+  color: #61758d;
+
+  line-height: 1.4;
+}
+
+.platformInline {
+  color: #8c9caf;
+}
+
+.etaCard {
+  flex-shrink: 0;
+
+  min-width: 110px;
+
+  padding: 10px 14px;
+
+  border-radius: 18px;
+
+  background:
+    rgba(
+      245,
+      248,
+      252,
+      .9
+    );
+
+  text-align: center;
+}
+
+.etaLabel {
+  font-size: .68rem;
+
+  text-transform: uppercase;
+
+  letter-spacing: .08em;
+
+  color: #8c9caf;
+}
+
+.etaValue {
+  margin-top: 2px;
+
+  font-size: 1.65rem;
 
   font-weight: 800;
 
-  color: #18324a;
+  color: #12345a;
+
+  line-height: 1;
 }
 
-.adText {
-  margin-top: 6px;
+.etaUnit {
+  margin-left: 4px;
 
-  color: #55708e;
+  font-size: .8rem;
+
+  font-weight: 600;
+
+  color: #6f8095;
 }

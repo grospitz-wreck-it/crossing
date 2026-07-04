@@ -45,11 +45,13 @@ export default function Admin() {
 
   const [loading, setLoading] =
     useState(true);
-
+const [adStats, setAdStats] =
+  useState<any[]>([]);
   useEffect(() => {
     fetch(
       "/api/measurements/stats"
     )
+    
       .then((res) =>
         res.json()
       )
@@ -57,6 +59,13 @@ export default function Admin() {
       .finally(() =>
         setLoading(false)
       );
+        fetch(
+    "/api/admin/ads/stats"
+  )
+    .then((res) =>
+      res.json()
+    )
+    .then(setAdStats);
   }, []);
 
   const stats =
@@ -190,6 +199,64 @@ export default function Admin() {
       };
     }, [rows]);
 
+    const adOverview =
+  useMemo(() => {
+
+    const impressions =
+      adStats.reduce(
+        (sum, row) =>
+          sum +
+          Number(
+            row.impressions ?? 0
+          ),
+        0
+      );
+
+    const clicks =
+      adStats.reduce(
+        (sum, row) =>
+          sum +
+          Number(
+            row.clicks ?? 0
+          ),
+        0
+      );
+
+    const revenue =
+      adStats.reduce(
+        (sum, row) =>
+          sum +
+          (
+            (
+              Number(
+                row.impressions
+              ) / 1000
+            ) *
+            Number(
+              row.cpm ?? 0
+            )
+          ),
+        0
+      );
+
+    return {
+      impressions,
+      clicks,
+      revenue:
+        revenue.toFixed(2),
+
+      ctr:
+        impressions
+          ? (
+              (clicks /
+                impressions) *
+              100
+            ).toFixed(2)
+          : "0.00",
+    };
+  }, [adStats]);
+
+
   return (
     <main
       style={{
@@ -245,6 +312,137 @@ export default function Admin() {
               title="Ø Dauer"
               value={`${stats.avgDuration ?? "-"} s`}
             />
+            <h2
+  style={{
+    marginBottom: 20,
+  }}
+>
+  Werbung
+</h2>
+
+<div
+  style={{
+    display: "grid",
+    gridTemplateColumns:
+      "repeat(auto-fit,minmax(220px,1fr))",
+    gap: 16,
+    marginBottom: 32,
+  }}
+>
+  <Card
+    title="Impressions"
+    value={
+      adOverview.impressions
+    }
+  />
+
+  <Card
+    title="Clicks"
+    value={
+      adOverview.clicks
+    }
+  />
+
+  <Card
+    title="CTR"
+    value={`${adOverview.ctr}%`}
+  />
+
+  <Card
+    title="Umsatz"
+    value={`€ ${adOverview.revenue}`}
+  />
+</div>
+<h2>
+  Kampagnen
+</h2>
+
+<table
+  style={{
+    width: "100%",
+    marginBottom: 40,
+  }}
+>
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Impressions</th>
+      <th>Clicks</th>
+      <th>CTR</th>
+      <th>CPM</th>
+      <th>Umsatz</th>
+    </tr>
+  </thead>
+
+  <tbody>
+    {adStats.map(
+      (row) => {
+
+        const impressions =
+          Number(
+            row.impressions
+          );
+
+        const clicks =
+          Number(
+            row.clicks
+          );
+
+        const ctr =
+          impressions
+            ? (
+                (clicks /
+                  impressions) *
+                100
+              ).toFixed(2)
+            : "0.00";
+
+        const revenue =
+          (
+            (impressions /
+              1000) *
+            Number(
+              row.cpm ?? 0
+            )
+          ).toFixed(2);
+
+        return (
+          <tr
+            key={row.id}
+          >
+            <td>
+              {row.name}
+            </td>
+
+            <td>
+              {
+                impressions
+              }
+            </td>
+
+            <td>
+              {clicks}
+            </td>
+
+            <td>
+              {ctr}%
+            </td>
+
+            <td>
+              €
+              {row.cpm}
+            </td>
+
+            <td>
+              €
+              {revenue}
+            </td>
+          </tr>
+        );
+      }
+    )}
+  </tbody>
+</table>
           </div>
 
           <h2>
