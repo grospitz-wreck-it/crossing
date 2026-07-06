@@ -4,7 +4,7 @@ import {
   useEffect,
   useState,
 } from "react";
-
+import LoadingScreen from "./components/LoadingScreen";
 function formatSeconds(
   seconds: number
 ) {
@@ -97,22 +97,7 @@ function formatIsoTime(
     }
   );
 }
-function getClosureDuration(
-  start?: string,
-  end?: string
-) {
-  if (!start || !end) {
-    return null;
-  }
 
-  return Math.round(
-    (
-      new Date(end).getTime() -
-      new Date(start).getTime()
-    ) /
-      60000
-  );
-}
 function getOrigin(
   train: any
 ) {
@@ -140,7 +125,10 @@ export default function Home() {
 
   const [countdown, setCountdown] =
     useState(0);
-
+const [
+  showMoreTrains,
+  setShowMoreTrains,
+] = useState(false);
   const [
     measurementState,
     setMeasurementState,
@@ -172,14 +160,24 @@ const [ad, setAd] =
       );
 
       const json =
-        await res.json();
+  await res.json();
 
-      setData(json);
-      setCountdown(
-        json.state === "OPEN"
-          ? json.nextCloseIn
-          : json.nextOpenIn
-      );
+setData(json);
+
+const adRes = await fetch(
+  "/api/ads?crossingId=kirchlengern"
+);
+
+const adJson =
+  await adRes.json();
+
+setAd(adJson);
+
+setCountdown(
+  json.state === "OPEN"
+    ? json.nextCloseIn
+    : json.nextOpenIn
+);
     } catch (err) {
       console.error(err);
     }
@@ -463,11 +461,7 @@ useEffect(() => {
 }, []);
 
 if (!data) {
-  return (
-    <main className="container">
-      Loading...
-    </main>
-  );
+  return <LoadingScreen />;
 }
 const closeTime =
   formatIsoTime(
@@ -480,10 +474,7 @@ const openTime =
   );
 
 const closureDuration =
-  getClosureDuration(
-    data.phase?.start,
-    data.phase?.end
-  );
+  data.phase?.durationMinutes;
 
 const train =
   data.phase?.trains?.[0];
@@ -625,8 +616,68 @@ return (
   <div className="trainCard">
 
   <div className="trainLabel">
-    Nächster Zug
+  Nächste Schließphase
+</div>
+
+<div className="closureSummary">
+
+  <div className="closureTime">
+
+    {formatIsoTime(
+      data.phase?.start
+    )}
+
+    {" → "}
+
+    {formatIsoTime(
+      data.phase?.end
+    )}
+
   </div>
+
+  <div className="closureFacts">
+
+    <div className="closureFact">
+
+      ⏱
+
+      <strong>
+        {
+          data.phase
+            ?.durationMinutes
+        }
+      </strong>
+
+      <span>
+        Min.
+      </span>
+
+    </div>
+
+    <div className="closureFact">
+
+      🚆
+
+      <strong>
+        {
+          data.phase
+            ?.trainCount
+        }
+      </strong>
+
+      <span>
+        {data.phase
+          ?.trainCount === 1
+          ? "Zug"
+          : "Züge"}
+
+      </span>
+
+    </div>
+
+  </div>
+
+</div>
 
   <div className="trainHeader">
 
@@ -668,31 +719,24 @@ return (
 
 </div>
 
-      <div className="trainRoute">
+      <div className="trainDirection">
+  {data.phase?.trains?.[0]?.directionLabel}
+</div>
 
-        {getOrigin(
-          data.phase?.trains?.[0]
-        )}
+<div className="trainMeta">
+  {data.phase?.trains?.[0]?.platform && (
+    <>
+      Gleis {data.phase.trains[0].platform}
+    </>
+  )}
 
-        {" → "}
-
-        {getDestination(
-          data.phase?.trains?.[0]
-        )}
-
-        {data.phase?.trains?.[0]
-          ?.platform && (
-          <span className="platformInline">
-            · Gleis{" "}
-            {
-              data.phase
-                ?.trains?.[0]
-                ?.platform
-            }
-          </span>
-        )}
-
-      </div>
+  {data.phase?.trains?.[0]?.delayMinutes > 0 && (
+    <>
+      {" · +"}
+      {data.phase.trains[0].delayMinutes} Min.
+    </>
+  )}
+</div>
 
     </div>
 
@@ -722,124 +766,220 @@ return (
 
   </div>
 
-<div className="upcomingList">
 
-  <div className="upcomingLabel">
-    Danach
-  </div>
 
-    {data.trains
-      ?.filter(
-  (t: any) =>
-    t.etaSeconds > 0 &&
-    t.etaSeconds <= 1800
-)
-.slice(1, 10)
-      .map((train: any) => (
+{data.phase?.trains?.length > 1 && (
+  <>
 
-        <div
-  key={train.journeyId}
-  className="upcomingTrain"
->
-
-  <div className="upcomingMain">
-
-    <div className="upcomingLine">
-
-      <strong>
-        {train.line}
-      </strong>
-
-      {train.delayMinutes >
-        0 && (
-        <span className="miniDelay">
-          +{train.delayMinutes}
-        </span>
-      )}
-
-    </div>
-
-    <div className="upcomingRoute">
-  → {train.destination}
-</div>
-
-  </div>
-
-  <div className="upcomingTime">
-
-  {formatIsoTime(
-    train.arrival
-  )}
-
-  {train.delayMinutes >
-    0 && (
-    <span className="upcomingDelay">
-      +{train.delayMinutes}
-    </span>
-  )}
-
-</div>
-
-</div>
-      ))}
-
-  </div>
-
-  </div>
-
-{data.phase?.trains?.length >
-  1 && (
-  <div className="trainCard">
-    <div className="trainLabel">
-      Weitere Züge
-      dieser Phase
-    </div>
-
-    {data.phase.trains
-      .slice(1)
-      .map(
-        (
-          train: any,
-          index: number
-        ) => (
-          <div
-            key={index}
-            className="extraTrain"
-          >
-            <div
-              style={{
-                fontWeight: 700,
-                fontSize:
-                  "1.1rem",
-              }}
-            >
-              {train.line}
-              {" · "}
-              {
-                train.trainNumber
-              }
-            </div>
-
-            <div
-              style={{
-                marginTop: 4,
-                color:
-                  "#55708e",
-              }}
-            >
-              {getOrigin(
-                train
-              )}
-              {" → "}
-              {getDestination(
-                train
-              )}
-            </div>
-          </div>
+    <button
+      className="expandButton"
+      onClick={() =>
+        setShowMoreTrains(
+          !showMoreTrains
         )
-      )}
+      }
+    >
+      <span>
+        {showMoreTrains
+          ? "⌃"
+          : "⌄"}
+      </span>
+
+      Weitere Züge dieser
+      Schließphase
+
+      <div className="expandCount">
+        +
+        {data.phase.trains.length -
+          1}
+      </div>
+    </button>
+
+    {showMoreTrains && (
+      <div className="extraTrains">
+
+        {data.phase.trains
+          .slice(1)
+          .map((train) => (
+            <div
+              key={
+                train.journeyId
+              }
+              className="extraTrain"
+            >
+
+              <div>
+
+  <div className="extraTrainHeader">
+
+    <strong>
+      {train.line}
+    </strong>
+
+    {train.delayMinutes > 0 && (
+      <span className="delay">
+        +{train.delayMinutes}
+      </span>
+    )}
+
   </div>
+
+  <div className="extraTrainRoute">
+    {train.directionLabel}
+  </div>
+
+  <div className="extraTrainMeta">
+
+    {train.platform && (
+      <>Gleis {train.platform}</>
+    )}
+
+    {train.delayMinutes > 0 && (
+      <>
+        {" · +"}
+        {train.delayMinutes} Min.
+      </>
+    )}
+
+  </div>
+
+</div>
+              <div>
+                {formatIsoTime(
+                  train.crossingTime
+                )}
+              </div>
+
+            </div>
+          ))}
+
+      </div>
+    )}
+
+  </>
 )}
+</div>
+{ad && (
+  <a
+    href={ad.target_url}
+    target="_blank"
+    rel="noopener noreferrer"
+    className="adCard"
+  >
+    <img
+      src={ad.image_url}
+      alt=""
+      className="adImage"
+    />
+  </a>
+)}
+{data.closures &&
+  data.closures.length > 1 && (
+    <>
+
+      <div className="laterHeading">
+        Später
+      </div>
+
+      <div className="closureList">
+
+        {data.closures
+          .slice(1)
+          .map(
+            (
+              closure: any,
+              index: number
+            ) => (
+              <div
+                key={index}
+                className="closureCard"
+              >
+
+                <div className="closureCardTop">
+
+                  <div className="closureCardTime">
+
+                    {formatIsoTime(
+                      closure.start
+                    )}
+
+                    {" → "}
+
+                    {formatIsoTime(
+                      closure.end
+                    )}
+
+                  </div>
+
+                  <div className="closureCardMeta">
+
+                    ⏱{" "}
+                    {
+                      closure.durationMinutes
+                    }{" "}
+                    Min.
+
+                    {" • "}
+
+                    🚆{" "}
+                    {
+                      closure.trainCount
+                    }
+
+                  </div>
+
+                </div>
+
+                <div className="closureCardTrains">
+
+                  {closure.trains.map(
+                    (
+                      train: any
+                    ) => (
+                      <div
+                        key={
+                          train.journeyId
+                        }
+                        className="closureTrain"
+                      >
+
+                        <strong>
+                          {train.line}
+                        </strong>
+
+                        <span>
+
+                          {formatIsoTime(
+                            train.crossingTime
+                          )}
+
+                        </span>
+
+                        {train.delayMinutes >
+                          0 && (
+                          <span className="miniDelay">
+                            +
+                            {
+                              train.delayMinutes
+                            }
+                          </span>
+                        )}
+
+                      </div>
+                    )
+                  )}
+
+                </div>
+
+              </div>
+            )
+          )}
+
+      </div>
+
+    </>
+)}
+
 {message && (
   <div
     className="measurementMessage"
