@@ -3,7 +3,7 @@ import { getDepartures } from "../../../../../../../packages/db-api-client/src/i
 import { parseIrisDepartures } from "../../../../../../../packages/db-api-client/src/parseIrisDepartures";
 
 import { findJourney } from "../../../../../../../packages/db-api-client/src/journeyFind";
-
+import { getDirectionLabel } from "../../../../../../../packages/prediction-engine/src/getDirectionLabel";
 import { getTrainContext } from "../../../../../../../packages/db-api-client/src/journey";
 
 import { crossings } from "../../../../../../../packages/crossing-model/src/crossings";
@@ -155,7 +155,11 @@ console.log("CACHE MISS");
     getCrossingDirection(
       train.route
     ),
-
+directionLabel:
+  getDirectionLabel(
+    context.stopDetails,
+    crossing.name
+  ),
   delayMinutes:
   crossingStop.scheduledTime &&
   crossingStop.realtimeTime
@@ -201,35 +205,30 @@ console.log("CACHE MISS");
     }
   }
   const upcoming =
-    trains
-      .filter(
-        (t) =>
-          t.etaSeconds > 0
-      )
-      .sort(
-        (a, b) =>
-          a.etaSeconds -
-          b.etaSeconds
-      );
+  trains
+    .filter(
+      (t) =>
+        t.etaSeconds > 0
+    )
+    .sort(
+      (a, b) =>
+        a.etaSeconds -
+        b.etaSeconds
+    );
 
-  const nextTrain =
-  upcoming[0];
+const MERGE_GAP_SECONDS =
+  30;
 
-let state = "OPEN";
+const closures: {
+  start: Date;
+  end: Date;
+  trains: any[];
+}[] = [];
 
-let nextCloseIn = 0;
-let nextOpenIn = 0;
-
-let phaseStart:
-  string | null = null;
-
-let phaseEnd:
-  string | null = null;
-
-if (nextTrain) {
+for (const train of upcoming) {
   const crossingTime =
     new Date(
-      nextTrain.crossingTime
+      train.crossingTime
     );
 
   const closeAt =
@@ -246,45 +245,91 @@ if (nextTrain) {
         1000
     );
 
+  const last =
+    closures[
+      closures.length - 1
+    ];
+
+  if (
+    !last ||
+    closeAt.getTime() >
+      last.end.getTime() +
+        MERGE_GAP_SECONDS *
+          1000
+  ) {
+    closures.push({
+      start: closeAt,
+      end: openAt,
+      trains: [train],
+    });
+  } else {
+    if (
+      openAt.getTime() >
+      last.end.getTime()
+    ) {
+      last.end = openAt;
+    }
+
+    last.trains.push(
+      train
+    );
+  }
+}
+
+const nextClosure =
+  closures[0];
+
+let state = "OPEN";
+
+let nextCloseIn = 0;
+let nextOpenIn = 0;
+
+let phaseStart:
+  string | null = null;
+
+let phaseEnd:
+  string | null = null;
+
+if (nextClosure) {
   phaseStart =
-    closeAt.toISOString();
+    nextClosure.start.toISOString();
 
   phaseEnd =
-    openAt.toISOString();
+    nextClosure.end.toISOString();
 
   const now =
     Date.now();
 
   if (
     now <
-    closeAt.getTime()
+    nextClosure.start.getTime()
   ) {
     state = "OPEN";
 
     nextCloseIn =
       Math.floor(
         (
-          closeAt.getTime() -
+          nextClosure.start.getTime() -
           now
         ) / 1000
       );
   } else if (
     now <
-    openAt.getTime()
+    nextClosure.end.getTime()
   ) {
     state = "CLOSED";
 
     nextOpenIn =
       Math.floor(
         (
-          openAt.getTime() -
+          nextClosure.end.getTime() -
           now
         ) / 1000
       );
   }
 }
 
-  const response = {
+const response = {
   crossing: {
     id: crossing.id,
     name: crossing.name,
@@ -298,13 +343,59 @@ if (nextTrain) {
 
   nextOpenIn,
 
-  phase: {
-    start: phaseStart,
-    end: phaseEnd,
-    trains: nextTrain
-      ? [nextTrain]
-      : [],
-  },
+  phase: nextClosure
+    ? {
+        start: phaseStart,
+
+        end: phaseEnd,
+
+        durationMinutes:
+          Math.round(
+            (
+              nextClosure.end.getTime() -
+              nextClosure.start.getTime()
+            ) /
+              60000
+          ),
+
+        trainCount:
+          nextClosure.trains
+            .length,
+
+        trains:
+          nextClosure.trains,
+      }
+    : null,
+
+  closureCount:
+    closures.length,
+
+  closures:
+    closures.map(
+      (closure) => ({
+        start:
+          closure.start.toISOString(),
+
+        end:
+          closure.end.toISOString(),
+
+        durationMinutes:
+          Math.round(
+            (
+              closure.end.getTime() -
+              closure.start.getTime()
+            ) /
+              60000
+          ),
+
+        trainCount:
+          closure.trains
+            .length,
+
+        trains:
+          closure.trains,
+      })
+    ),
 
   trainCount:
     trains.length,

@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",
+    "@vercel/blob": "^2.5.0",
     "fast-xml-parser": "^5.9.2",
     "next": "^15.0.0",
     "react": "^19.0.0",
