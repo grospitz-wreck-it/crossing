@@ -83,6 +83,8 @@ export async function GET(
       ad.image_url,
 
     targetUrl:
-      ad.target_url,
+  ad.target_url?.startsWith("http")
+    ? ad.target_url
+    : `https://${ad.target_url}`,
   });
 }
