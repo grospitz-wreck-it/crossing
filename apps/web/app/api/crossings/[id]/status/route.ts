@@ -137,6 +137,7 @@ try {
             crossing.name
         );
 
+    
       if (
         !crossingStop?.realtimeTime
       ) {
@@ -155,6 +156,17 @@ try {
             Date.now()
           ) / 1000
         );
+
+// TODO:
+// Aktuell gelten alle Züge auf
+// Bahnsteiggleis 1 oder 2 als haltend.
+//
+// Sobald die Journey-Daten getrennte
+// Ankunfts-/Abfahrtszeiten liefern,
+// wird diese Logik ersetzt.
+const isStoppingTrain =
+  train.platform === "1" ||
+  train.platform === "2";
 
       trains.push({
   journeyId,
@@ -179,6 +191,12 @@ try {
 
   platform:
     train.platform,
+// TODO:
+// Aktuell gelten alle Regionalzüge auf
+// Bahnsteiggleisen als haltend.
+// Später anhand der Journey-Daten
+// (Ankunft/Abfahrt) automatisch erkennen.
+isStoppingTrain,
 
   direction:
     getCrossingDirection(
@@ -259,22 +277,84 @@ const closures: {
 
 for (const train of upcoming) {
   const crossingTime =
+  new Date(
+    train.crossingTime
+  );
+
+let closeOffset =
+  crossing.closeOffsetSeconds;
+
+let openOffset =
+  crossing.openOffsetSeconds;
+
+// Vorläufig gelten alle Regionalzüge
+// auf Gleis 1 und 2 als haltend.
+const rule =
+  crossing.rules?.find(
+    (rule) =>
+      rule.platform ===
+        train.platform &&
+      rule.stopping ===
+        train.isStoppingTrain
+  );
+
+if (rule) {
+  if (
+    rule.closeOffsetSeconds !==
+    undefined
+  ) {
+    closeOffset =
+      rule.closeOffsetSeconds;
+  }
+
+  if (
+    rule.openOffsetSeconds !==
+    undefined
+  ) {
+    openOffset =
+      rule.openOffsetSeconds;
+  }
+}for (const train of upcoming) {
+  const crossingTime =
     new Date(
       train.crossingTime
     );
 
+  let closeOffset =
+    crossing.closeOffsetSeconds;
+
+  let openOffset =
+    crossing.openOffsetSeconds;
+
+  const rule =
+    crossing.rules?.find(
+      (rule) =>
+        rule.platform ===
+          train.platform &&
+        rule.stopping ===
+          train.isStoppingTrain
+    );
+
+  if (rule) {
+    closeOffset =
+      rule.closeOffsetSeconds ??
+      closeOffset;
+
+    openOffset =
+      rule.openOffsetSeconds ??
+      openOffset;
+  }
+
   const closeAt =
     new Date(
       crossingTime.getTime() -
-      crossing.closeOffsetSeconds *
-        1000
+        closeOffset * 1000
     );
 
   const openAt =
     new Date(
       crossingTime.getTime() +
-      crossing.openOffsetSeconds *
-        1000
+        openOffset * 1000
     );
 
   const last =
@@ -307,7 +387,7 @@ for (const train of upcoming) {
     );
   }
 }
-
+}
 const nextClosure =
   closures[0];
 const MAX_LOOKAHEAD_MINUTES =

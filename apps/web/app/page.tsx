@@ -3,6 +3,7 @@
 import {
   useEffect,
   useState,
+  useRef,
 } from "react";
 import LoadingScreen from "./components/LoadingScreen";
 function formatSeconds(
@@ -153,6 +154,10 @@ const [
 const [ad, setAd] =
   useState<any>(null);
 
+const refreshTimeout =
+  useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
 async function load() {
   try {
     const res = await fetch(
@@ -436,11 +441,6 @@ useEffect(() => {
     }
   }
 
-  document.addEventListener(
-    "visibilitychange",
-    handleVisibility
-  );
-
   window.addEventListener(
     "focus",
     refresh
@@ -479,7 +479,45 @@ useEffect(() => {
   return () =>
     clearInterval(timer);
 }, []);
+useEffect(() => {
+  if (!data?.phase) {
+    return;
+  }
 
+  if (refreshTimeout.current) {
+    clearTimeout(
+      refreshTimeout.current
+    );
+  }
+
+  const target =
+    new Date(
+      data.state === "OPEN"
+        ? data.phase.start
+        : data.phase.end
+    ).getTime();
+
+  const delay =
+    Math.max(
+      0,
+      target - Date.now()
+    ) + 500;
+
+  refreshTimeout.current =
+    setTimeout(() => {
+      load();
+    }, delay);
+
+  return () => {
+    if (
+      refreshTimeout.current
+    ) {
+      clearTimeout(
+        refreshTimeout.current
+      );
+    }
+  };
+}, [data]);
 useEffect(() => {
   function refresh() {
     load();
@@ -724,7 +762,7 @@ return (
       data.phase?.start
     )}
 
-    {" → "}
+    {" bis "}
 
     {formatIsoTime(
       data.phase?.end
@@ -981,7 +1019,7 @@ return (
                       closure.start
                     )}
 
-                    {" → "}
+                    {" bis "}
 
                     {formatIsoTime(
                       closure.end
