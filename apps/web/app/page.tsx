@@ -123,8 +123,8 @@ export default function Home() {
   const [data, setData] =
     useState<any>(null);
 
-  const [countdown, setCountdown] =
-    useState(0);
+  const [now, setNow] =
+  useState(Date.now());
 const [
   showMoreTrains,
   setShowMoreTrains,
@@ -170,11 +170,7 @@ async function load() {
 
     setData(json);
 
-    setCountdown(
-      json.state === "OPEN"
-        ? json.nextCloseIn
-        : json.nextOpenIn
-    );
+  
 
     try {
       const adRes =
@@ -198,13 +194,12 @@ async function load() {
 
       setAd(null);
     }
-  } catch (error) {
+    } catch (error) {
     console.error(
       "Failed to load status:",
       error
     );
 
-    // Loading-Screen verlassen
     setData({
       error: true,
       state: "UNKNOWN",
@@ -214,10 +209,10 @@ async function load() {
       trainCount: 0,
     });
 
-    setCountdown(0);
     setAd(null);
   }
 }
+
 async function saveUnexpectedTrain() {
   if (!data?.predictionId) {
     return;
@@ -427,93 +422,158 @@ useEffect(() => {
       interval
     );
 }, [firstClickAt]);
-
 useEffect(() => {
-  const timer = setInterval(() => {
-    setCountdown(
-      (prev: number) => {
-        const next =
-          Math.max(
-            0,
-            prev - 1
-          );
+  function refresh() {
+    load();
+  }
 
-        return next;
-      }
+  function handleVisibility() {
+    if (
+      document.visibilityState ===
+      "visible"
+    ) {
+      refresh();
+    }
+  }
+
+  document.addEventListener(
+    "visibilitychange",
+    handleVisibility
+  );
+
+  window.addEventListener(
+    "focus",
+    refresh
+  );
+
+  window.addEventListener(
+    "pageshow",
+    refresh
+  );
+
+  return () => {
+    document.removeEventListener(
+      "visibilitychange",
+      handleVisibility
     );
-  }, 1000);
+
+    window.removeEventListener(
+      "focus",
+      refresh
+    );
+
+    window.removeEventListener(
+      "pageshow",
+      refresh
+    );
+  };
+}, []);
+
+  
+useEffect(() => {
+  const timer =
+    setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
 
   return () =>
     clearInterval(timer);
 }, []);
+
 useEffect(() => {
-  if (
-    countdown === 0 &&
-    data
-  ) {
+  function refresh() {
     load();
   }
-}, [countdown]);
 
-useEffect(() => {
-  fetch(
-    "/api/ads/serve?crossingId=kirchlengern"
-  )
-    .then((r) => r.json())
-    .then((ad) => {
-      setAd(ad);
+  function handleVisibility() {
+    if (
+      document.visibilityState ===
+      "visible"
+    ) {
+      refresh();
+    }
+  }
 
-      if (!ad) {
-        return;
-      }
+  document.addEventListener(
+    "visibilitychange",
+    handleVisibility
+  );
 
-      fetch(
-        "/api/ads/impression",
-        {
-          method: "POST",
+  window.addEventListener(
+    "focus",
+    refresh
+  );
 
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
+  window.addEventListener(
+    "pageshow",
+    refresh
+  );
 
-          body: JSON.stringify({
-            campaignId:
-              ad.campaign_id,
+  return () => {
+    document.removeEventListener(
+      "visibilitychange",
+      handleVisibility
+    );
 
-            creativeId:
-              ad.id,
+    window.removeEventListener(
+      "focus",
+      refresh
+    );
 
-            crossingId:
-              "kirchlengern",
-
-            sessionId:
-              crypto.randomUUID(),
-          }),
-        }
-      );
-    })
-    .catch(console.error);
+    window.removeEventListener(
+      "pageshow",
+      refresh
+    );
+  };
 }, []);
+
 
 if (!data) {
   return <LoadingScreen />;
 }
+
+if (!data.phase || !data.phase.trains?.length) {
+  return (
+    <main className="container">
+      <div className="heroCard">
+        Keine aktuellen Zugdaten verfügbar.
+      </div>
+    </main>
+  );
+}
+
 const closeTime =
   formatIsoTime(
-    data.phase?.start
+    data.phase.start
   );
 
 const openTime =
   formatIsoTime(
-    data.phase?.end
+    data.phase.end
   );
 
 const closureDuration =
-  data.phase?.durationMinutes;
+  data.phase.durationMinutes;
 
 const train =
-  data.phase?.trains?.[0];
+  data.phase.trains[0];
+  const countdown =
+  data?.phase
+    ? Math.max(
+        0,
+        Math.floor(
+          (
+            new Date(
+              data.state ===
+                "OPEN"
+                ? data.phase.start
+                : data.phase.end
+            ).getTime() -
+            now
+          ) / 1000
+        )
+      )
+    : 0;
 if (!train) {
   return (
     <main className="container">
@@ -638,14 +698,14 @@ return (
 {data.state === "CLOSED" &&
   ad && (
     <a
-      href={ad.target_url}
+      href={ad.targetUrl}
       target="_blank"
-      rel="noreferrer"
+      rel="noopener noreferrer"
       className="adCard"
     >
       <img
-        src={ad.image_url}
-        alt=""
+        src={ad.imageUrl}
+        alt={ad.title}
         className="adImage"
       />
     </a>
@@ -849,17 +909,17 @@ return (
 
   <div className="extraTrainHeader">
 
-    <strong>
-      {train.line}
-    </strong>
-
-    {train.delayMinutes > 0 && (
-      <span className="delay">
-        +{train.delayMinutes}
-      </span>
-    )}
-
+  <div className="extraTrainLine">
+    {train.line}
   </div>
+
+  <div className="extraTrainDelay">
+    {train.delayMinutes > 0
+      ? `+${train.delayMinutes}`
+      : ""}
+  </div>
+
+</div>
 
   <div className="extraTrainRoute">
     {train.directionLabel}
@@ -867,18 +927,11 @@ return (
 
   <div className="extraTrainMeta">
 
-    {train.platform && (
-      <>Gleis {train.platform}</>
-    )}
+  {train.platform && (
+    <>Gleis {train.platform}</>
+  )}
 
-    {train.delayMinutes > 0 && (
-      <>
-        {" · +"}
-        {train.delayMinutes} Min.
-      </>
-    )}
-
-  </div>
+</div>
 
 </div>
               <div>
@@ -896,20 +949,7 @@ return (
   </>
 )}
 </div>
-{ad && (
-  <a
-    href={ad.target_url}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="adCard"
-  >
-    <img
-      src={ad.image_url}
-      alt=""
-      className="adImage"
-    />
-  </a>
-)}
+
 {data.closures &&
   data.closures.length > 1 && (
     <>
@@ -970,41 +1010,49 @@ return (
                 <div className="closureCardTrains">
 
                   {closure.trains.map(
-                    (
-                      train: any
-                    ) => (
-                      <div
-                        key={
-                          train.journeyId
-                        }
-                        className="closureTrain"
-                      >
+  (train: any) => (
+    <div
+      key={train.journeyId}
+      className="closureTrain"
+    >
 
-                        <strong>
-                          {train.line}
-                        </strong>
+      <div className="closureTrainInfo">
 
-                        <span>
+        <div className="closureTrainLine">
+          {train.line}
+        </div>
 
-                          {formatIsoTime(
-                            train.crossingTime
-                          )}
+        <div className="closureTrainDirection">
+          {train.directionLabel}
+        </div>
 
-                        </span>
+        <div className="closureTrainPlatform">
+          {train.platform
+            ? `Gleis ${train.platform}`
+            : ""}
+        </div>
 
-                        {train.delayMinutes >
-                          0 && (
-                          <span className="miniDelay">
-                            +
-                            {
-                              train.delayMinutes
-                            }
-                          </span>
-                        )}
+      </div>
 
-                      </div>
-                    )
-                  )}
+      <div className="closureTrainRight">
+
+        <span className="closureTrainTime">
+          {formatIsoTime(
+            train.crossingTime
+          )}
+        </span>
+
+        <span className="closureTrainDelay">
+          {train.delayMinutes > 0
+            ? `+${train.delayMinutes}`
+            : ""}
+        </span>
+
+      </div>
+
+    </div>
+  )
+)}
 
                 </div>
 
