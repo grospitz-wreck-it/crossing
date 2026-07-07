@@ -3,12 +3,10 @@ import { getDepartures } from "../../../../../../../packages/db-api-client/src/i
 import { parseIrisDepartures } from "../../../../../../../packages/db-api-client/src/parseIrisDepartures";
 
 import { findJourney } from "../../../../../../../packages/db-api-client/src/journeyFind";
-import { getDirectionLabel } from "../../../../../../../packages/prediction-engine/src/getDirectionLabel";
 import { getTrainContext } from "../../../../../../../packages/db-api-client/src/journey";
-
+import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings } from "../../../../../../../packages/crossing-model/src/crossings";
 
-import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 let cachedResponse: any = null;
 
 let cacheTimestamp = 0;
@@ -59,12 +57,43 @@ console.log("CACHE MISS");
     );
   }
 
-  const departures =
+  let departures = [];
+
+try {
+  departures =
     parseIrisDepartures(
       await getDepartures(
         crossing.eva
       )
     );
+} catch (error) {
+  console.error(
+    "Failed to load departures:",
+    error
+  );
+
+  return Response.json({
+    crossing: {
+      id: crossing.id,
+      name: crossing.name,
+      lat: crossing.lat,
+      lon: crossing.lon,
+    },
+
+    state: "UNKNOWN",
+
+    nextCloseIn: 0,
+    nextOpenIn: 0,
+
+    phase: null,
+
+    closureCount: 0,
+    closures: [],
+
+    trainCount: 0,
+    trains: [],
+  });
+}
 
   const trains = [];
 
@@ -156,10 +185,13 @@ console.log("CACHE MISS");
       train.route
     ),
 directionLabel:
-  getDirectionLabel(
-    context.stopDetails,
-    crossing.name
-  ),
+  context.stopDetails?.length
+    ? `Richtung ${
+        context.stopDetails[
+          context.stopDetails.length - 1
+        ].name
+      }`
+    : null,
   delayMinutes:
   crossingStop.scheduledTime &&
   crossingStop.realtimeTime
@@ -278,7 +310,18 @@ for (const train of upcoming) {
 
 const nextClosure =
   closures[0];
+const MAX_LOOKAHEAD_MINUTES =
+  30;
 
+const visibleClosures =
+  closures.filter(
+    (closure) =>
+      closure.start.getTime() <=
+      Date.now() +
+        MAX_LOOKAHEAD_MINUTES *
+          60 *
+          1000
+  );
 let state = "OPEN";
 
 let nextCloseIn = 0;
@@ -368,39 +411,38 @@ const response = {
     : null,
 
   closureCount:
-    closures.length,
+  visibleClosures.length,
 
-  closures:
-    closures.map(
-      (closure) => ({
-        start:
-          closure.start.toISOString(),
+closures:
+  visibleClosures.map(
+    (closure) => ({
+      start:
+        closure.start.toISOString(),
 
-        end:
-          closure.end.toISOString(),
+      end:
+        closure.end.toISOString(),
 
-        durationMinutes:
-          Math.round(
-            (
-              closure.end.getTime() -
-              closure.start.getTime()
-            ) /
-              60000
-          ),
+      durationMinutes:
+        Math.round(
+          (
+            closure.end.getTime() -
+            closure.start.getTime()
+          ) / 60000
+        ),
 
-        trainCount:
-          closure.trains
-            .length,
+      trainCount:
+        closure.trains
+          .length,
 
-        trains:
-          closure.trains,
-      })
-    ),
+      trains:
+        closure.trains,
+    })
+  ),
 
-  trainCount:
-    trains.length,
+trainCount:
+  trains.length,
 
-  trains,
+trains,
 };
 
 cachedResponse =
