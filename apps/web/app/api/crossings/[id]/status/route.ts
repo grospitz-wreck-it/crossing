@@ -44,7 +44,7 @@ console.log("CACHE MISS");
       (c) =>
         c.id === id
     );
-
+console.log(crossing?.rules);
   if (!crossing) {
     return Response.json(
       {
