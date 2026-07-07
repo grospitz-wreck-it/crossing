@@ -276,45 +276,78 @@ const closures: {
 
 for (const train of upcoming) {
   const crossingTime =
-  new Date(
-    train.crossingTime
-  );
+    new Date(
+      train.crossingTime
+    );
 
-let closeOffset =
-  crossing.closeOffsetSeconds;
+  let closeOffset =
+    crossing.closeOffsetSeconds;
 
-let openOffset =
-  crossing.openOffsetSeconds;
+  let openOffset =
+    crossing.openOffsetSeconds;
 
-// Vorläufig gelten alle Regionalzüge
-// auf Gleis 1 und 2 als haltend.
-const rule =
-  (crossing as any).rules?.find(
-    (rule) =>
-      rule.platform ===
-        train.platform &&
-      rule.stopping ===
-        train.isStoppingTrain
-  );
+  const rule =
+    (crossing as any).rules?.find(
+      (rule: any) =>
+        rule.platform ===
+          train.platform &&
+        rule.stopping ===
+          train.isStoppingTrain
+    );
 
-if (rule) {
-  if (
-    rule.closeOffsetSeconds !==
-    undefined
-  ) {
+  if (rule) {
     closeOffset =
-      rule.closeOffsetSeconds;
+      rule.closeOffsetSeconds ??
+      closeOffset;
+
+    openOffset =
+      rule.openOffsetSeconds ??
+      openOffset;
   }
 
+  const closeAt =
+    new Date(
+      crossingTime.getTime() -
+        closeOffset * 1000
+    );
+
+  const openAt =
+    new Date(
+      crossingTime.getTime() +
+        openOffset * 1000
+    );
+
+  const last =
+    closures[
+      closures.length - 1
+    ];
+
   if (
-    rule.openOffsetSeconds !==
-    undefined
+    !last ||
+    closeAt.getTime() >
+      last.end.getTime() +
+        MERGE_GAP_SECONDS *
+          1000
   ) {
-    openOffset =
-      rule.openOffsetSeconds;
+    closures.push({
+      start: closeAt,
+      end: openAt,
+      trains: [train],
+    });
+  } else {
+    if (
+      openAt.getTime() >
+      last.end.getTime()
+    ) {
+      last.end = openAt;
+    }
+
+    last.trains.push(
+      train
+    );
   }
 }
-}
+
 const nextClosure =
   closures[0];
 const MAX_LOOKAHEAD_MINUTES =
