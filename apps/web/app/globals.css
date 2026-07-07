@@ -358,6 +358,7 @@ body {
 }
 
 .trainLabel {
+  margin-bottom: 18px;
   color: #7a8ca5;
 
   font-size: 0.8rem;
@@ -823,9 +824,8 @@ body {
 .trainLineRow {
   display: flex;
 
-  align-items: center;
-
-  gap: 10px;
+  gap: 12px;
+  align-items: baseline;
 }
 
 .trainRoute {
@@ -844,7 +844,7 @@ body {
 
 .etaCard {
   flex-shrink: 0;
-
+  align-self: center;
   min-width: 110px;
 
   padding: 10px 14px;
@@ -908,8 +908,8 @@ body {
 .closureFacts {
   display: flex;
 
-  gap: 14px;
-
+  
+  gap: 12px;
   margin-top: 14px;
 }
 
@@ -937,15 +937,17 @@ body {
 .expandButton {
   width: 100%;
 
-  margin-top: 18px;
+  margin-top: 24px;
 
-  padding: 16px 0;
+  padding: 18px 0;
 
   display: flex;
 
   align-items: center;
 
   justify-content: space-between;
+
+  gap: 16px;
 
   background: transparent;
 
@@ -955,21 +957,49 @@ body {
 
   color: #6c7d93;
 
-  font-size: .95rem;
+  font-size: 1rem;
 
   font-weight: 700;
 
   cursor: pointer;
+
+  transition: color .2s ease;
+}
+
+.expandButton:hover {
+  color: #12345a;
 }
 
 .expandButton span:first-child {
-  width: 20px;
+  width: 24px;
+
+  flex-shrink: 0;
+
+  text-align: center;
+
+  font-size: 1.2rem;
+
+  line-height: 1;
+}
+
+.expandButton > :nth-child(2) {
+  flex: 1;
+
+  text-align: left;
 }
 
 .expandCount {
+  min-width: 42px;
+
+  text-align: right;
+
   color: #12345a;
 
+  font-size: 1.05rem;
+
   font-weight: 800;
+
+  flex-shrink: 0;
 }
 
 .extraTrains {
@@ -978,8 +1008,9 @@ body {
   flex-direction: column;
 
   gap: 14px;
-
-  margin-top: 10px;
+margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #edf2f7;
 }
 
 .extraTrain {
@@ -1112,11 +1143,13 @@ body {
 }
 
 .closureTrainDirection{
+  margin-top: 8px;
   font-size:.9rem;
   color:#52657c;
 }
 
 .closureTrainMeta{
+  margin-top: 10px;
   font-size:.8rem;
   color:#8695a8;
 }

@@ -869,28 +869,29 @@ return (
   <>
 
     <button
-      className="expandButton"
-      onClick={() =>
-        setShowMoreTrains(
-          !showMoreTrains
-        )
-      }
-    >
-      <span>
-        {showMoreTrains
-          ? "⌃"
-          : "⌄"}
-      </span>
+  className="expandButton"
+  onClick={() =>
+    setShowMoreTrains(
+      !showMoreTrains
+    )
+  }
+>
+  <span>
+    {showMoreTrains
+      ? "⌃"
+      : "⌄"}
+  </span>
 
-      Weitere Züge dieser
-      Schließphase
+  <span>
+    Weitere Züge dieser
+    Schließphase
+  </span>
 
-      <div className="expandCount">
-        +
-        {data.phase.trains.length -
-          1}
-      </div>
-    </button>
+  <div className="expandCount">
+    +
+    {data.phase.trains.length - 1}
+  </div>
+</button>
 
     {showMoreTrains && (
       <div className="extraTrains">
