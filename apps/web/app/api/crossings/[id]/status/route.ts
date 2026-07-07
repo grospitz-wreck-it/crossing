@@ -5,7 +5,6 @@ import { findJourney } from "../../../../../../../packages/db-api-client/src/jou
 import { getTrainContext } from "../../../../../../../packages/db-api-client/src/journey";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings } from "../../../../../../../packages/crossing-model/src/crossings";
-import type { Crossing } from "../../../../../../../packages/crossing-model/src/types";
 
 
 let cachedResponse: any = null;
@@ -44,8 +43,7 @@ console.log("CACHE MISS");
   crossings.find(
     (c) =>
       c.id === id
-  ) as Crossing | undefined;
-console.log(crossing?.rules);
+  );
   if (!crossing) {
     return Response.json(
       {
@@ -291,7 +289,7 @@ let openOffset =
 // Vorläufig gelten alle Regionalzüge
 // auf Gleis 1 und 2 als haltend.
 const rule =
-  crossing.rules?.find(
+  (crossing as any).rules?.find(
     (rule) =>
       rule.platform ===
         train.platform &&
@@ -314,78 +312,6 @@ if (rule) {
   ) {
     openOffset =
       rule.openOffsetSeconds;
-  }
-}for (const train of upcoming) {
-  const crossingTime =
-    new Date(
-      train.crossingTime
-    );
-
-  let closeOffset =
-    crossing.closeOffsetSeconds;
-
-  let openOffset =
-    crossing.openOffsetSeconds;
-
-  const rule =
-    crossing.rules?.find(
-      (rule) =>
-        rule.platform ===
-          train.platform &&
-        rule.stopping ===
-          train.isStoppingTrain
-    );
-
-  if (rule) {
-    closeOffset =
-      rule.closeOffsetSeconds ??
-      closeOffset;
-
-    openOffset =
-      rule.openOffsetSeconds ??
-      openOffset;
-  }
-
-  const closeAt =
-    new Date(
-      crossingTime.getTime() -
-        closeOffset * 1000
-    );
-
-  const openAt =
-    new Date(
-      crossingTime.getTime() +
-        openOffset * 1000
-    );
-
-  const last =
-    closures[
-      closures.length - 1
-    ];
-
-  if (
-    !last ||
-    closeAt.getTime() >
-      last.end.getTime() +
-        MERGE_GAP_SECONDS *
-          1000
-  ) {
-    closures.push({
-      start: closeAt,
-      end: openAt,
-      trains: [train],
-    });
-  } else {
-    if (
-      openAt.getTime() >
-      last.end.getTime()
-    ) {
-      last.end = openAt;
-    }
-
-    last.trains.push(
-      train
-    );
   }
 }
 }
