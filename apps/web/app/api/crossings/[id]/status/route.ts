@@ -1,11 +1,12 @@
 import { getDepartures } from "../../../../../../../packages/db-api-client/src/irisDepartures";
-
 import { parseIrisDepartures } from "../../../../../../../packages/db-api-client/src/parseIrisDepartures";
 
 import { findJourney } from "../../../../../../../packages/db-api-client/src/journeyFind";
 import { getTrainContext } from "../../../../../../../packages/db-api-client/src/journey";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings } from "../../../../../../../packages/crossing-model/src/crossings";
+import type { Crossing } from "../../../../../../../packages/crossing-model/src/types";
+
 
 let cachedResponse: any = null;
 
@@ -40,10 +41,10 @@ if (
 
 console.log("CACHE MISS");
   const crossing =
-    crossings.find(
-      (c) =>
-        c.id === id
-    );
+  crossings.find(
+    (c) =>
+      c.id === id
+  ) as Crossing | undefined;
 console.log(crossing?.rules);
   if (!crossing) {
     return Response.json(
