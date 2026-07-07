@@ -62,29 +62,30 @@ export async function GET(
     });
 
   const ad =
-    result.rows?.[0];
+  result.rows?.[0] as any;
 
-  if (!ad) {
-    return Response.json(
-      null
-    );
-  }
+if (!ad) {
+  return Response.json(
+    null
+  );
+}
 
-  return Response.json({
-    id: ad.id,
+return Response.json({
+  id: ad.id,
 
-    campaignId:
-      ad.campaign_id,
+  campaignId:
+    ad.campaign_id,
 
-    title:
-      ad.title,
+  title:
+    ad.title,
 
-    imageUrl:
-      ad.image_url,
+  imageUrl:
+    ad.image_url,
 
-    targetUrl:
-  ad.target_url?.startsWith("http")
-    ? ad.target_url
-    : `https://${ad.target_url}`,
-  });
+  targetUrl:
+    ad.target_url.startsWith("http")
+      ? ad.target_url
+      : `https://${ad.target_url}`,
+});
+  
 }
