@@ -153,35 +153,71 @@ const [
 const [ad, setAd] =
   useState<any>(null);
 
-  async function load() {
+async function load() {
+  try {
+    const res = await fetch(
+      "/api/crossings/kirchlengern/status"
+    );
+
+    if (!res.ok) {
+      throw new Error(
+        `Status API returned ${res.status}`
+      );
+    }
+
+    const json =
+      await res.json();
+
+    setData(json);
+
+    setCountdown(
+      json.state === "OPEN"
+        ? json.nextCloseIn
+        : json.nextOpenIn
+    );
+
     try {
-      const res = await fetch(
-        "/api/crossings/kirchlengern/status"
+      const adRes =
+        await fetch(
+          "/api/ads/kirchlengern"
+        );
+
+      if (adRes.ok) {
+        const ad =
+          await adRes.json();
+
+        setAd(ad);
+      } else {
+        setAd(null);
+      }
+    } catch (error) {
+      console.error(
+        "Failed to load ad:",
+        error
       );
 
-      const json =
-  await res.json();
-
-setData(json);
-
-const adRes = await fetch(
-  "/api/ads?crossingId=kirchlengern"
-);
-
-const adJson =
-  await adRes.json();
-
-setAd(adJson);
-
-setCountdown(
-  json.state === "OPEN"
-    ? json.nextCloseIn
-    : json.nextOpenIn
-);
-    } catch (err) {
-      console.error(err);
+      setAd(null);
     }
+  } catch (error) {
+    console.error(
+      "Failed to load status:",
+      error
+    );
+
+    // Loading-Screen verlassen
+    setData({
+      error: true,
+      state: "UNKNOWN",
+      phase: null,
+      closures: [],
+      trains: [],
+      trainCount: 0,
+    });
+
+    setCountdown(0);
+    setAd(null);
   }
+}
 async function saveUnexpectedTrain() {
   if (!data?.predictionId) {
     return;
@@ -478,18 +514,19 @@ const closureDuration =
 
 const train =
   data.phase?.trains?.[0];
-
+if (!train) {
+  return (
+    <main className="container">
+      <div className="heroCard">
+        Keine aktuellen Zugdaten verfügbar.
+      </div>
+    </main>
+  );
+}
 const heroImage =
   data.state === "OPEN"
     ? "/images/barrier-open.webp"
     : "/images/barrier-closed.webp";
-
-
-console.log({
-  line: data.phase?.trains?.[0]?.line,
-  delayMinutes:
-    data.phase?.trains?.[0]?.delayMinutes,
-});
 
 return (
   <main className="container">
