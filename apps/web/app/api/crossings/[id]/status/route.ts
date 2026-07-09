@@ -99,11 +99,13 @@ try {
   for (const train of departures) {
     try {
       const journey =
-        await findJourney(
-          train.category,
-          train.journeyNumber,
-          crossing.eva
-        );
+  await findJourney(
+    train.category,
+    train.journeyNumber,
+    crossing.observationEvas?.length
+      ? crossing.observationEvas
+      : crossing.eva
+  );
 
       const parsedJourney =
         JSON.parse(
