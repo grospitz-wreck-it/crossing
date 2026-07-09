@@ -1,6 +1,9 @@
 export type JourneyStop = {
   name: string;
   delay: number;
+
+  platform?: string;
+
   scheduledTime?: string;
   realtimeTime?: string;
 };
@@ -19,6 +22,9 @@ export type DecodedJourney = {
 type StopInfo = {
   name: string;
   delay: number;
+
+  platform?: string;
+
   scheduledTime?: string;
   realtimeTime?: string;
 };
@@ -82,7 +88,17 @@ export function decodeJourney(
           parsed[
             item.arrival
           ];
-
+if (stopName === "Kirchlengern") {
+  console.log(
+    "ARRIVAL RAW",
+    arrival
+  );
+}
+console.log(
+  "ARRIVAL PARSED",
+  parsed[arrival?.platform],
+  parsed[arrival?.scheduledPlatform]
+);
         const scheduledTime =
           parsed?.[
             arrival?.scheduledTime
@@ -97,27 +113,39 @@ export function decodeJourney(
           Number(
             arrival?.delay ?? 0
           );
-
+const platform =
+  arrival?.platform != null
+    ? String(
+        parsed[
+          arrival.platform
+        ]
+      )
+    : undefined;
         if (
           typeof stopName ===
           "string"
         ) {
           stopInfos.push({
-            name: stopName,
-            delay,
-            scheduledTime:
-              Array.isArray(
-                scheduledTime
-              )
-                ? scheduledTime[1]
-                : undefined,
-            realtimeTime:
-              Array.isArray(
-                realtimeTime
-              )
-                ? realtimeTime[1]
-                : undefined,
-          });
+  name: stopName,
+
+  delay,
+
+  platform,
+
+  scheduledTime:
+    Array.isArray(
+      scheduledTime
+    )
+      ? scheduledTime[1]
+      : undefined,
+
+  realtimeTime:
+    Array.isArray(
+      realtimeTime
+    )
+      ? realtimeTime[1]
+      : undefined,
+});
         }
       } catch {
         // ignore invalid stop

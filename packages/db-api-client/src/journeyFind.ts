@@ -4,39 +4,51 @@ const BASE_URL =
 export async function findJourney(
   category: string,
   journeyNumber: number,
-  evaNumber: string
+  evaNumbers: string | string[]
 ) {
-  const input = {
-    0: JSON.stringify([
-      {
-        journeyNumber: 1,
-        category: 2,
-        evaNumberAlongRoute: 3,
-        limit: 4,
-      },
-      journeyNumber,
-      category,
-      evaNumber,
-      1,
-    ]),
-  };
+  const evas = Array.isArray(evaNumbers)
+    ? evaNumbers
+    : [evaNumbers];
 
-  const url =
-    `${BASE_URL}/rpc/journey.find` +
-    `?batch=1&input=` +
-    encodeURIComponent(
-      JSON.stringify(input)
-    );
+  for (const evaNumber of evas) {
+    const input = {
+      0: JSON.stringify([
+        {
+          journeyNumber: 1,
+          category: 2,
+          evaNumberAlongRoute: 3,
+          limit: 4,
+        },
+        journeyNumber,
+        category,
+        evaNumber,
+        1,
+      ]),
+    };
 
-  const res = await fetch(url, {
-    cache: "no-store",
-  });
+    const url =
+      `${BASE_URL}/rpc/journey.find` +
+      `?batch=1&input=` +
+      encodeURIComponent(
+        JSON.stringify(input)
+      );
 
-  if (!res.ok) {
-    throw new Error(
-      `journey.find ${res.status}`
-    );
+    const res = await fetch(url, {
+      cache: "no-store",
+    });
+
+    if (!res.ok) {
+      throw new Error(
+        `journey.find ${res.status}`
+      );
+    }
+
+    const data = await res.json();
+
+    if (data?.[0]?.result?.data) {
+      return data;
+    }
   }
 
-  return res.json();
+  return [];
 }

@@ -13,7 +13,7 @@ export async function getDepartures(
         startTime: -1,
       },
       evaNumber,
-      150,
+      100,
       10,
     ]),
   };
@@ -26,7 +26,8 @@ export async function getDepartures(
     );
 
   console.log(url);
-
+console.log("IRIS INPUT:", input);
+console.log("IRIS URL:", url);
   const res = await fetch(url, {
     cache: "no-store",
   });
@@ -39,10 +40,7 @@ export async function getDepartures(
   const text =
     await res.text();
 
-  console.log(
-    "BODY:",
-    text.slice(0, 2000)
-  );
+  console.log("BODY:", text);
 
   if (!res.ok) {
     throw new Error(
@@ -50,5 +48,9 @@ export async function getDepartures(
     );
   }
 
-  return JSON.parse(text);
+  const json = JSON.parse(text);
+
+
+
+return json;
 }
