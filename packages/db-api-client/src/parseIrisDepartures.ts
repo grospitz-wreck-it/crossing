@@ -12,166 +12,156 @@ export function parseIrisDepartures(
   response: any
 ): IrisDeparture[] {
   try {
-    const raw =
-      response?.[0]?.result?.data;
+    const raw = response?.[0]?.result?.data;
 
     if (!raw) {
       return [];
     }
 
-    const parsed =
-      JSON.parse(raw);
+    const parsed = JSON.parse(raw);
 
-    const departures =
-      parsed?.[1];
+    const departures = parsed?.[1];
 
-    if (
-      !Array.isArray(
-        departures
-      )
-    ) {
+    if (!Array.isArray(departures)) {
       return [];
     }
 
+    const resolve = (value: any): any => {
+      if (typeof value === "number") {
+        return parsed?.[value];
+      }
+
+      return value;
+    };
+
     return departures
       .map((ref: number) => {
-        const dep =
-          parsed?.[ref];
-          
-          console.log(
-  "DEP KEYS",
-  Object.keys(dep)
-);
+        const dep = parsed?.[ref];
 
-console.log(
-  "RAW DEP",
-  dep
-);
         if (!dep) {
           return null;
         }
 
-        const train =
-          parsed?.[
-            dep.train
-          ];
+        const train = parsed?.[dep.train];
 
-        const line =
-          typeof train?.line ===
-          "number"
-            ? parsed?.[
-                train.line
-              ]
-            : train?.line;
-
+        // ICE/IC nutzen teilweise customLine statt line
         const category =
-          typeof train?.category ===
-          "number"
-            ? parsed?.[
-                train.category
-              ]
-            : train?.category;
+  String(
+    resolve(train?.category) ?? ""
+  );
 
-        const journeyNumber =
-          typeof train?.journeyNumber ===
-          "number"
-            ? parsed?.[
-                train
-                  .journeyNumber
-              ]
-            : train?.journeyNumber;
+const journeyNumber =
+  Number(
+    resolve(train?.journeyNumber)
+  ) || 0;
+
+// Fernverkehr nutzt häufig customLine
+// ("ICE 78", "IC 2215", ...)
+// Regionalverkehr nutzt line.
+let line =
+  resolve(train?.line);
+
+if (
+  !line &&
+  train?.customLine != null
+) {
+  line = resolve(
+    train.customLine
+  );
+}
+
+// Falls customLine nur eine Zahl ist,
+// aber der Name im Train-Objekt steckt.
+if (
+  (!line ||
+    /^\d+$/.test(
+      String(line)
+    )) &&
+  typeof train?.name ===
+    "number"
+) {
+  line = resolve(
+    train.name
+  );
+}
+
+// Letzter Fallback
+if (
+  !line &&
+  category &&
+  journeyNumber
+) {
+  line =
+    `${category} ${journeyNumber}`;
+}
 
         const destination =
-          typeof dep?.scheduledDestination ===
-          "number"
-            ? parsed?.[
-                dep
-                  .scheduledDestination
-              ]
-            : dep?.scheduledDestination;
+          resolve(
+            dep?.scheduledDestination
+          );
+
+        const platform =
+          resolve(dep?.platform) != null
+            ? String(
+                resolve(dep?.platform)
+              )
+            : undefined;
 
         const delay =
           parsed?.[
             dep.departure
           ]?.delay ?? 0;
-const platformRef =
-  dep?.platform;
 
-const platform =
-  typeof platformRef ===
-  "number"
-    ? parsed?.[
-        platformRef
-      ]
-    : platformRef;
         const routeRefs =
           parsed?.[
             dep.route
           ];
 
-        const route =
-          Array.isArray(
-            routeRefs
-          )
-            ? routeRefs
-                .map(
-                  (
-                    stopRef: number
-                  ) => {
-                    const stop =
-                      parsed?.[
-                        stopRef
-                      ];
+        const route = Array.isArray(
+          routeRefs
+        )
+          ? routeRefs
+              .map(
+                (stopRef: number) => {
+                  const stop =
+                    parsed?.[
+                      stopRef
+                    ];
 
-                    const nameRef =
-                      stop?.name;
+                  return resolve(
+                    stop?.name
+                  );
+                }
+              )
+              .filter(Boolean)
+          : [];
 
-                    return typeof nameRef ===
-                      "number"
-                      ? parsed?.[
-                          nameRef
-                        ]
-                      : nameRef;
-                  }
-                )
-                .filter(Boolean)
-            : [];
+                return {
+          line:
+  String(
+    line ?? "unknown"
+  ),
 
-        const result = {
-  line:
-    line ??
-    "unknown",
+          category:
+  String(
+    category ?? "unknown"
+  ),
 
-  category:
-    category ??
-    "unknown",
+          journeyNumber,
 
-  journeyNumber:
-    Number(
-      journeyNumber
-    ) || 0,
+          destination:
+            destination ??
+            "unknown",
 
-  destination:
-    destination ??
-    "unknown",
+          delay,
 
-  delay,
+          route,
 
-  route,
-
-  platform,
-};
-
-        console.log(
-          "PARSED DEPARTURE",
-          result
-        );
-
-        return result;
+          platform,
+        };
       })
-      .filter(
-        Boolean
-      ) as IrisDeparture[];
+      .filter(Boolean) as IrisDeparture[];
+
   } catch (error) {
     console.error(
       "parseIrisDepartures failed",
