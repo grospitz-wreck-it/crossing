@@ -216,9 +216,10 @@ const isStoppingTrain =
 isStoppingTrain,
 
   direction:
-    getCrossingDirection(
-      train.route
-    ),
+  getCrossingDirection(
+    train.route,
+    crossing,
+  ),
 directionLabel:
   context.stopDetails?.length
     ? `Richtung ${
