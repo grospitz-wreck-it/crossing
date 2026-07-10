@@ -1,6 +1,6 @@
 import { getDepartures } from "../../../../../../../packages/db-api-client/src/irisDepartures";
 import { parseIrisDepartures } from "../../../../../../../packages/db-api-client/src/parseIrisDepartures";
-
+import { getThroughTrains } from "../../../../../../../packages/db-api-client/src/getThroughTrains";
 import { findJourney } from "../../../../../../../packages/db-api-client/src/journeyFind";
 import { getTrainContext } from "../../../../../../../packages/db-api-client/src/journey";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
@@ -95,8 +95,20 @@ try {
 }
 
   const trains = [];
-
+  
+const throughTrains =
+  await getThroughTrains(
+    crossing
+  );
   for (const train of departures) {
+    if (train.category === "ICE") {
+  console.log(
+    "[ICE] Departure",
+    train.line,
+    train.journeyNumber,
+    train.platform
+  );
+}
     try {
       const journey =
   await findJourney(
@@ -130,7 +142,11 @@ try {
         await getTrainContext(
           journeyId
         );
-
+        if (train.category === "ICE") {
+  console.log(
+    JSON.stringify(context, null, 2)
+  );
+}
       const crossingStop =
         context.stopDetails?.find(
           (stop) =>
@@ -243,7 +259,6 @@ directionLabel:
     crossingTime.toISOString(),
 
   etaSeconds,
-
   stopDetails:
     context.stopDetails,
 });
@@ -255,17 +270,112 @@ directionLabel:
       );
     }
   }
+
+  for (const train of throughTrains) {
+  const context =
+    await getTrainContext(
+      train.journeyId
+    );
+
+  const observationStop =
+  context.stopDetails.find(
+    (stop) =>
+      stop.name ===
+      train.observationStation
+  );
+
+  if (
+    !observationStop?.realtimeTime
+  ) {
+    continue;
+  }
+
+  const crossingTime =
+    new Date(
+      new Date(
+        observationStop.realtimeTime
+      ).getTime() -
+        train.fallbackOffsetSeconds *
+          1000
+    );
+
+  const etaSeconds =
+    Math.floor(
+      (
+        crossingTime.getTime() -
+        Date.now()
+      ) / 1000
+    );
+
+  trains.push({
+    journeyId:
+      train.journeyId,
+
+    line:
+      train.line,
+
+    category:
+      train.category,
+
+    journeyNumber:
+      train.journeyNumber,
+
+    origin:
+      context.stopDetails[0]
+        ?.name,
+
+    destination:
+      train.destination,
+
+    platform:
+      train.platform,
+
+    isStoppingTrain:
+      false,
+
+    direction:
+      "unknown",
+
+    directionLabel:
+      "Durchfahrt",
+
+    delayMinutes:
+      train.delay,
+
+    currentStop:
+      context.currentStop,
+
+    nextStop:
+      context.nextStop,
+
+    crossingTime:
+      crossingTime.toISOString(),
+
+    arrival:
+      crossingTime.toISOString(),
+
+    etaSeconds,
+
+    stopDetails:
+      context.stopDetails,
+  });
+}
+console.log(
+  "[ALL TRAINS]",
+  trains.map((t) => ({
+    line: t.line,
+    category: t.category,
+    etaSeconds: t.etaSeconds,
+    crossingTime:
+      t.crossingTime,
+  }))
+);
   const upcoming =
   trains
     .filter(
       (t) =>
         t.etaSeconds > 0
     )
-    .sort(
-      (a, b) =>
-        a.etaSeconds -
-        b.etaSeconds
-    );
 
 const MERGE_GAP_SECONDS =
   30;
@@ -349,7 +459,14 @@ for (const train of upcoming) {
     );
   }
 }
-
+console.log(
+  "[CLOSURES]",
+  closures.map((c) => ({
+    start: c.start.toISOString(),
+    end: c.end.toISOString(),
+    trains: c.trains.map((t) => t.line),
+  }))
+);
 const nextClosure =
   closures[0];
 const MAX_LOOKAHEAD_MINUTES =
