@@ -245,11 +245,9 @@ const isStoppingTrain =
 // (Ankunft/Abfahrt) automatisch erkennen.
 isStoppingTrain,
 
-  direction:
-  getCrossingDirection(
-    train.route,
-    crossing,
-  ),
+  direction: getCrossingDirection(
+  train.route
+),
 directionLabel:
   context.stopDetails?.length
     ? `Richtung ${
