@@ -17,7 +17,7 @@ export function parseIrisDepartures(
 ): IrisDeparture[] {
   try {
     const raw =
-      response?.[1]?.result?.data;
+      response?.[0]?.result?.data;
 
     if (!raw) {
       return [];
