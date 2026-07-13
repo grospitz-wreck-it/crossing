@@ -1,3 +1,7 @@
+import {
+  fetchBahnExpertJson,
+} from "./bahnExpertHttp";
+
 const BASE_URL =
   "https://bahn.expert";
 
@@ -25,32 +29,8 @@ export async function getDepartures(
       JSON.stringify(input)
     );
 
-  console.log(url);
-console.log("IRIS INPUT:", input);
-console.log("IRIS URL:", url);
-  const res = await fetch(url, {
-    cache: "no-store",
-  });
-
-  console.log(
-    "STATUS:",
-    res.status
+  return fetchBahnExpertJson(
+    url,
+    "iris.departures"
   );
-
-  const text =
-    await res.text();
-
-  console.log("BODY:", text);
-
-  if (!res.ok) {
-    throw new Error(
-      `iris.departures ${res.status}`
-    );
-  }
-
-  const json = JSON.parse(text);
-
-
-
-return json;
 }
