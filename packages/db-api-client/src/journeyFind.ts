@@ -8,6 +8,7 @@ const BASE_URL =
 export async function findJourney(
   category: string,
   journeyNumber: number,
+  initialDepartureDate: [string, string],
   evaNumbers: string | string[]
 ) {
   const evas = Array.isArray(evaNumbers)
@@ -20,11 +21,13 @@ export async function findJourney(
         {
           journeyNumber: 1,
           category: 2,
-          evaNumberAlongRoute: 3,
-          limit: 4,
+          initialDepartureDate: 3,
+          evaNumberAlongRoute: 4,
+          limit: 5,
         },
         journeyNumber,
         category,
+        initialDepartureDate,
         evaNumber,
         1,
       ]),
@@ -43,7 +46,9 @@ export async function findJourney(
         "journey.find"
       );
 
-    if (data?.[0]?.result?.data) {
+    if (
+      data?.[0]?.result?.data
+    ) {
       return data;
     }
   }

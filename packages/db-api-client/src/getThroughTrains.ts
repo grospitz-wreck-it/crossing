@@ -16,6 +16,11 @@ export type ThroughTrain = {
 
   journeyNumber: number;
 
+  initialDepartureDate: [
+    string,
+    string,
+  ];
+
   destination: string;
 
   delay: number;
@@ -25,7 +30,9 @@ export type ThroughTrain = {
   platform?: string;
 
   observationEva: string;
+
   observationStation: string;
+
   trackDistanceMeters: number;
 
   fallbackOffsetSeconds: number;
@@ -34,9 +41,13 @@ export type ThroughTrain = {
 
   livePosition: {
     latitude: number;
+
     longitude: number;
+
     time: string;
+
     speed: number;
+
     metaSource: string;
   } | null;
 };
@@ -71,13 +82,17 @@ export async function getThroughTrains(
         .map((train) => ({
           type: "through" as const,
 
-          line: train.line,
+          line:
+            train.line,
 
           category:
             train.category,
 
           journeyNumber:
             train.journeyNumber,
+
+          initialDepartureDate:
+            train.initialDepartureDate,
 
           destination:
             train.destination,
@@ -93,8 +108,10 @@ export async function getThroughTrains(
 
           observationEva:
             rule.observationEva,
+
           observationStation:
-  rule.observationStation,
+            rule.observationStation,
+
           trackDistanceMeters:
             rule.trackDistanceMeters,
 
@@ -117,60 +134,60 @@ export async function getThroughTrains(
   const result: ThroughTrain[] = [];
 
   for (const train of uniqueDepartures) {
+    await new Promise(
+      (resolve) =>
+        setTimeout(
+          resolve,
+          250
+        )
+    );
 
-  await new Promise(
-    (resolve) =>
-      setTimeout(
-        resolve,
-        250
-      )
-  );
-
-  try {
+    try {
       const journey =
         await findJourney(
           train.category,
           train.journeyNumber,
+          train.initialDepartureDate,
           train.observationEva
         );
 
       const raw =
-  journey?.[0]
-    ?.result?.data;
+        journey?.[0]
+          ?.result?.data;
 
-if (
-  !raw ||
-  raw === "[null]"
-) {
-  console.log(
-    "No journey data:",
-    train.line,
-    train.journeyNumber
-  );
+      if (
+        !raw ||
+        raw === "[null]"
+      ) {
+        console.log(
+          "No journey data:",
+          train.line,
+          train.journeyNumber
+        );
 
-  continue;
-}
+        continue;
+      }
 
-let parsedJourney: any;
+      let parsedJourney: any;
 
-try {
-  parsedJourney =
-    JSON.parse(raw);
-} catch (error) {
-  console.error(
-    "Invalid journey:",
-    train.line,
-    train.journeyNumber
-  );
+      try {
+        parsedJourney =
+          JSON.parse(raw);
+      } catch (error) {
+        console.error(
+          "Invalid journey:",
+          train.line,
+          train.journeyNumber
+        );
 
-  console.log(raw);
+        console.log(raw);
 
-  continue;
-}
+        continue;
+      }
 
-const journeyRef =
-  parsedJourney?.[1]
-    ?.journeyId;
+      const journeyRef =
+        parsedJourney?.[1]
+          ?.journeyId;
 
       const journeyId =
         parsedJourney?.[
@@ -199,18 +216,22 @@ const journeyRef =
         livePosition,
       });
     } catch (error) {
-  console.error(
-    "TRAIN:",
-    train.line,
-    train.journeyNumber
-  );
+      console.error(
+        "TRAIN:",
+        train.line,
+        train.journeyNumber
+      );
 
-  console.error(error);
+      console.error(error);
 
-  if (error instanceof Error) {
-    console.error(error.stack);
-  }
-}
+      if (
+        error instanceof Error
+      ) {
+        console.error(
+          error.stack
+        );
+      }
+    }
   }
 
   console.log(

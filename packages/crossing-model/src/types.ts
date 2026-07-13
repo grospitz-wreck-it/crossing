@@ -7,7 +7,21 @@ export type CrossingRule = {
 
   openOffsetSeconds?: number;
 };
+export type ThroughRule = {
+  observationEva: string;
 
+  observationStation: string;
+
+  categories: string[];
+
+  trackDistanceMeters: number;
+
+  fallbackOffsetSeconds: number;
+
+  direction:
+    | "eastbound"
+    | "westbound";
+};
 export type Crossing = {
   id: string;
 
@@ -16,7 +30,9 @@ export type Crossing = {
   eva: string;
 
   observationEvas: string[];
+
   requiredRouteStops: string[];
+
   lat: number;
 
   lon: number;
@@ -26,6 +42,8 @@ export type Crossing = {
   openOffsetSeconds: number;
 
   rules?: CrossingRule[];
+
+  throughRules?: ThroughRule[];
 
   confidence: number;
 };
