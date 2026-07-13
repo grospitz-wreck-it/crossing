@@ -1,3 +1,7 @@
+import {
+  fetchBahnExpertJson,
+} from "./bahnExpertHttp";
+
 const BASE_URL =
   "https://bahn.expert";
 
@@ -33,17 +37,11 @@ export async function findJourney(
         JSON.stringify(input)
       );
 
-    const res = await fetch(url, {
-      cache: "no-store",
-    });
-
-    if (!res.ok) {
-      throw new Error(
-        `journey.find ${res.status}`
+    const data =
+      await fetchBahnExpertJson(
+        url,
+        "journey.find"
       );
-    }
-
-    const data = await res.json();
 
     if (data?.[0]?.result?.data) {
       return data;
