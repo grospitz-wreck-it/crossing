@@ -1,6 +1,9 @@
 import {
   decodeJourney,
 } from "./journeyDecoder";
+import {
+  fetchBahnExpertJson,
+} from "./bahnExpertHttp";
 
 const BASE_URL =
   "https://bahn.expert";
@@ -24,21 +27,10 @@ export async function getJourney(
       JSON.stringify(input)
     );
 
-  const res = await fetch(
+  return fetchBahnExpertJson(
     url,
-    {
-      cache:
-        "no-store",
-    }
+    "bahn.expert"
   );
-
-  if (!res.ok) {
-    throw new Error(
-      `bahn.expert ${res.status}`
-    );
-  }
-
-  return res.json();
 }
 
 export function extractPosition(
