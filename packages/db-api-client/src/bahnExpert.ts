@@ -1,3 +1,7 @@
+import {
+  fetchBahnExpertJson,
+} from "./bahnExpertHttp";
+
 const BASE_URL = "https://bahn.expert";
 
 export async function getDepartures(
@@ -23,15 +27,8 @@ export async function getDepartures(
       JSON.stringify(input)
     );
 
-  const res = await fetch(url, {
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    throw new Error(
-      `bahn.expert ${res.status}`
-    );
-  }
-
-  return res.json();
+  return fetchBahnExpertJson(
+    url,
+    "bahn.expert"
+  );
 }
