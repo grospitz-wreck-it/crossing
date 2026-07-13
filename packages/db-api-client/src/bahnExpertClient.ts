@@ -1,3 +1,7 @@
+import {
+  fetchBahnExpertJson,
+} from "./bahnExpertHttp";
+
 const BASE_URL = "https://bahn.expert";
 
 export async function getDepartures(
@@ -21,15 +25,8 @@ export async function getDepartures(
     `${BASE_URL}/rpc/iris.departures?batch=1&input=` +
     encodeURIComponent(JSON.stringify(input));
 
-  const response = await fetch(url, {
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error(
-      `bahn.expert error ${response.status}`
-    );
-  }
-
-  return response.json();
+  return fetchBahnExpertJson(
+    url,
+    "bahn.expert"
+  );
 }
