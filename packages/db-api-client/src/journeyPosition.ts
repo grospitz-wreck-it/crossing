@@ -1,3 +1,7 @@
+import {
+  fetchBahnExpertJson,
+} from "./bahnExpertHttp";
+
 const BASE_URL =
   "https://bahn.expert";
 
@@ -17,18 +21,11 @@ export async function getJourneyPosition(
       JSON.stringify(input)
     );
 
-  const res = await fetch(url, {
-    cache: "no-store",
-  });
-
-  if (!res.ok) {
-    throw new Error(
-      `journeyPosition ${res.status}`
-    );
-  }
-
   const data =
-    await res.json();
+    await fetchBahnExpertJson(
+      url,
+      "journeyPosition"
+    );
 
   console.log(
     "JOURNEY POSITION RAW"
