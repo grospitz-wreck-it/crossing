@@ -59,12 +59,43 @@ console.log("CACHE MISS");
   let departures = [];
 
 try {
+  const rawDepartures =
+    await getDepartures(
+      crossing.eva
+    );
+
+  console.log(
+    "RAW DEPARTURES"
+  );
+
+  console.dir(
+    rawDepartures,
+    {
+      depth: null,
+    }
+  );
+
   departures =
     parseIrisDepartures(
-      await getDepartures(
-        crossing.eva
-      )
+      rawDepartures
     );
+
+  console.log(
+    "PARSED DEPARTURES"
+  );
+
+  console.dir(
+    departures,
+    {
+      depth: null,
+    }
+  );
+
+  console.log(
+    "DEPARTURE COUNT",
+    departures.length
+  );
+
 } catch (error) {
   console.error(
     "Failed to load departures:",
