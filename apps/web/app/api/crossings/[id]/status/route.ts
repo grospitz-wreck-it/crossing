@@ -126,11 +126,13 @@ try {
 }
 
   const trains = [];
-  
-const throughTrains =
-  await getThroughTrains(
-    crossing
-  );
+  console.log("THROUGH RULES:", crossing.throughRules);
+  const throughTrains =
+  await getThroughTrains(crossing);
+
+console.log("=== THROUGH TRAINS ===");
+console.dir(throughTrains, { depth: null });
+console.log("Anzahl:", throughTrains.length);
   for (const train of departures) {
     if (train.category === "ICE") {
   console.log(
@@ -301,6 +303,12 @@ directionLabel:
   }
 
   for (const train of throughTrains) {
+    console.log(
+  "[THROUGH]",
+  train.line,
+  train.category,
+  train.journeyNumber
+);
   const context =
     await getTrainContext(
       train.journeyId
@@ -363,7 +371,7 @@ directionLabel:
       false,
 
     direction:
-      "unknown",
+  train.direction,
 
     directionLabel:
       "Durchfahrt",
