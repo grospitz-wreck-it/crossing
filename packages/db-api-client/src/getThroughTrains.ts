@@ -116,6 +116,30 @@ const matching = parsed.filter((train) => {
   return true;
 });
 
+console.log(
+  `=== ${rule.observationStation} ===`
+);
+
+console.log(
+  "Alle ICE-Kandidaten:"
+);
+
+console.dir(
+  parsed
+    .filter(
+      (t) =>
+        rule.categories.includes(
+          t.category
+        )
+    )
+    .map((t) => ({
+      line: t.line,
+      destination:
+        t.destination,
+      route: t.route,
+    })),
+  { depth: null }
+);
 
     departures.push(
       ...matching.map((train) => ({
@@ -243,9 +267,10 @@ console.log(
 );
 
 if (result.length === 0) {
-  throw new Error(
+  console.warn(
     "getThroughTrains(): keine Through-Trains gefunden"
   );
+  return [];
 }
 
 return result;
