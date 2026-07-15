@@ -52,14 +52,20 @@ export async function getJourneyPosition(
     return null;
   }
 
-  const parsed =
-    JSON.parse(raw);
+  const parsed = JSON.parse(raw);
 
-  console.log(
-    "POSITION PARSED"
-  );
+const schema = parsed[0];
 
-  console.log(parsed);
+const decoded = {
+  longitude: parsed[schema.longitude],
+  latitude: parsed[schema.latitude],
+  time: parsed[schema.time]?.[1],
+  metaSource: parsed[schema.metaSource],
+  speed: parsed[schema.speed],
+};
 
-  return parsed;
+console.log("POSITION DECODED");
+console.dir(decoded, { depth: null });
+
+return decoded;
 }
