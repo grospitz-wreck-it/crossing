@@ -134,8 +134,10 @@ try {
     () => getThroughTrains(crossing)
   );
   
-const test: "eastbound" | "westbound" =
-  throughTrains[0].direction;
+console.log(
+  "ThroughTrains:",
+  throughTrains.length
+);
 console.log("=== THROUGH TRAINS ===");
 console.dir(throughTrains, { depth: null });
 console.log("Anzahl:", throughTrains.length);
