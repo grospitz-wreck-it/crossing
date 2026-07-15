@@ -6,7 +6,7 @@ import { getTrainContext } from "../../../../../../../packages/db-api-client/src
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { calculateThroughEta } from "../../../../../../../packages/prediction-engine/src/calculateThroughEta";
-
+import { withMemoryCache } from "../../../../../../../packages/db-api-client/src/memoryCache";
 let cachedResponse: any = null;
 
 let cacheTimestamp = 0;
@@ -126,9 +126,14 @@ try {
 }
 
   const trains = [];
-  console.log("THROUGH RULES:", crossing.throughRules);
+
   const throughTrains =
-  await getThroughTrains(crossing);
+  await withMemoryCache(
+    `through-${crossing.id}`,
+    5000,
+    () => getThroughTrains(crossing)
+  );
+  
 const test: "eastbound" | "westbound" =
   throughTrains[0].direction;
 console.log("=== THROUGH TRAINS ===");
@@ -302,18 +307,23 @@ directionLabel:
       );
     }
   }
-for (const train of throughTrains) {
+const contexts = await Promise.all(
+  throughTrains.map((train) =>
+    getTrainContext(
+      train.journeyId
+    )
+  )
+);
+
+for (const [index, train] of throughTrains.entries()) {
+  const context = contexts[index];
+
   console.log(
     "[THROUGH]",
     train.line,
     train.category,
     train.journeyNumber
   );
-
-  const context =
-    await getTrainContext(
-      train.journeyId
-    );
 
   const observationStop =
     context.stopDetails.find(
@@ -327,53 +337,54 @@ for (const train of throughTrains) {
   ) {
     continue;
   }
-let crossingTime: Date;
 
-if (
-  train.livePosition &&
-  train.livePosition.speed > 20
-) {
-  const eta =
-    calculateThroughEta({
-      crossingLat: crossing.lat,
-      crossingLon: crossing.lon,
-      fallbackOffsetSeconds:
-        train.fallbackOffsetSeconds,
-      livePosition:
-        train.livePosition,
-    });
+  let crossingTime: Date;
 
-  const gpsTime =
-    new Date(
-      train.livePosition.time
-    );
+  if (
+    train.livePosition &&
+    train.livePosition.speed > 20
+  ) {
+    const eta =
+      calculateThroughEta({
+        crossingLat: crossing.lat,
+        crossingLon: crossing.lon,
+        fallbackOffsetSeconds:
+          train.fallbackOffsetSeconds,
+        livePosition:
+          train.livePosition,
+      });
 
-  crossingTime =
-    new Date(
-      gpsTime.getTime() +
-        eta.etaSeconds * 1000
-    );
-
-  console.log(
-    "[GPS ETA]",
-    train.line,
-    eta
-  );
-} else {
-  crossingTime =
-    new Date(
+    const gpsTime =
       new Date(
-        observationStop.realtimeTime
-      ).getTime() +
-        train.fallbackOffsetSeconds *
-          1000
-    );
+        train.livePosition.time
+      );
 
-  console.log(
-    "[FALLBACK ETA]",
-    train.line
-  );
-}
+    crossingTime =
+      new Date(
+        gpsTime.getTime() +
+          eta.etaSeconds * 1000
+      );
+
+    console.log(
+      "[GPS ETA]",
+      train.line,
+      eta
+    );
+  } else {
+    crossingTime =
+      new Date(
+        new Date(
+          observationStop.realtimeTime
+        ).getTime() +
+          train.fallbackOffsetSeconds *
+            1000
+      );
+
+    console.log(
+      "[FALLBACK ETA]",
+      train.line
+    );
+  }
 
   const etaSeconds =
     Math.floor(
@@ -410,7 +421,7 @@ if (
       false,
 
     direction:
-  train.direction,
+      train.direction,
 
     directionLabel:
       "Durchfahrt",
