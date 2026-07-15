@@ -10,38 +10,70 @@ type Props = {
   open: boolean;
 
   customers: any[];
-showCustomerDialog: boolean;
 
-newCustomerName: string;
-setNewCustomerName: (
-  value: string
-) => void;
+  crossings: any[];
 
-onNewCustomer: () => void;
+  selectedCrossings: string[];
 
-onOpenCustomerDialog: () => void;
+  setSelectedCrossings: (
+    value: string[]
+  ) => void;
 
-onCloseCustomerDialog: () => void;
+  showCustomerDialog: boolean;
+
+  newCustomerName: string;
+
+  setNewCustomerName: (
+    value: string
+  ) => void;
+
+  onNewCustomer: () => void;
+
+  onOpenCustomerDialog: () => void;
+
+  onCloseCustomerDialog: () => void;
+
   customerId: string;
-  setCustomerId: (value: string) => void;
+
+  setCustomerId: (
+    value: string
+  ) => void;
 
   name: string;
-  setName: (value: string) => void;
+
+  setName: (
+    value: string
+  ) => void;
 
   cpm: string;
-  setCpm: (value: string) => void;
+
+  setCpm: (
+    value: string
+  ) => void;
 
   budget: string;
-  setBudget: (value: string) => void;
+
+  setBudget: (
+    value: string
+  ) => void;
 
   startDate: string;
-  setStartDate: (value: string) => void;
+
+  setStartDate: (
+    value: string
+  ) => void;
 
   endDate: string;
-  setEndDate: (value: string) => void;
+
+  setEndDate: (
+    value: string
+  ) => void;
 
   targetUrl: string;
-  setTargetUrl: (value: string) => void;
+
+  setTargetUrl: (
+    value: string
+  ) => void;
 
   setFile: (
     file: File | null
@@ -60,6 +92,10 @@ export default function CampaignDrawer({
   open,
 
   customers,
+  crossings,
+
+selectedCrossings,
+setSelectedCrossings,
 showCustomerDialog,
 
 newCustomerName,
@@ -186,7 +222,53 @@ onCloseCustomerDialog,
   + Neuer Kunde
 </Button>
         </Section>
+<Section title="Bahnübergänge">
+  <div
+    style={{
+      display: "grid",
+      gap: 10,
+    }}
+  >
+    {crossings.map(
+      (crossing) => (
+        <label
+          key={crossing.id}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            cursor: "pointer",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={selectedCrossings.includes(
+              crossing.id
+            )}
+            onChange={(e) => {
+              if (e.target.checked) {
+                setSelectedCrossings([
+                  ...selectedCrossings,
+                  crossing.id,
+                ]);
+              } else {
+                setSelectedCrossings(
+                  selectedCrossings.filter(
+                    (id) =>
+                      id !==
+                      crossing.id
+                  )
+                );
+              }
+            }}
+          />
 
+          {crossing.name}
+        </label>
+      )
+    )}
+  </div>
+</Section>
         <Section title="Kampagne">
           <Field
             value={name}

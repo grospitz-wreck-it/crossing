@@ -1,5 +1,4 @@
-import { db }
-from "@/app/lib/db";
+import { db } from "@/app/lib/db";
 
 export async function GET(
   request: Request,
@@ -11,9 +10,8 @@ export async function GET(
     }>;
   }
 ) {
-  const {
-    crossingId,
-  } = await params;
+  const { crossingId } =
+    await params;
 
   const result =
     await db.execute({
@@ -53,39 +51,33 @@ export async function GET(
         ORDER BY
           campaigns.priority DESC,
           creatives.created_at DESC
-
-        LIMIT 1
       `,
       args: [
         crossingId,
       ],
     });
 
-  const ad =
-  result.rows?.[0] as any;
+  const ads = result.rows.map(
+    (ad: any) => ({
+      id: ad.id,
 
-if (!ad) {
-  return Response.json(
-    null
+      campaignId:
+        ad.campaign_id,
+
+      title:
+        ad.title,
+
+      imageUrl:
+        ad.image_url,
+
+      targetUrl:
+        ad.target_url?.startsWith(
+          "http"
+        )
+          ? ad.target_url
+          : `https://${ad.target_url}`,
+    })
   );
-}
 
-return Response.json({
-  id: ad.id,
-
-  campaignId:
-    ad.campaign_id,
-
-  title:
-    ad.title,
-
-  imageUrl:
-    ad.image_url,
-
-  targetUrl:
-    ad.target_url.startsWith("http")
-      ? ad.target_url
-      : `https://${ad.target_url}`,
-});
-  
+  return Response.json(ads);
 }

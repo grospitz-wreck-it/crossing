@@ -66,6 +66,9 @@ const [endDate, setEndDate] =
       .slice(0, 10)
   );
 
+const [availableCrossings, setAvailableCrossings] =
+  useState<any[]>([]);
+
 const [crossings, setCrossings] =
   useState<string[]>([
     "kirchlengern",
@@ -87,7 +90,10 @@ const [newCustomerName, setNewCustomerName] =
     await fetch(
       "/api/admin/customers"
     );
-
+const crossingsRes =
+  await fetch(
+    "/api/admin/crossings"
+  );
   setCampaigns(
     await campaignsRes.json()
   );
@@ -95,6 +101,9 @@ const [newCustomerName, setNewCustomerName] =
   setCustomers(
     await customersRes.json()
   );
+  setAvailableCrossings(
+  await crossingsRes.json()
+);
 }
 
 async function uploadFile() {
@@ -564,6 +573,14 @@ async function createCustomer() {
   open={showDrawer}
 
   customers={customers}
+
+  crossings={availableCrossings}
+
+  selectedCrossings={crossings}
+
+  setSelectedCrossings={
+    setCrossings
+  }
 
   showCustomerDialog={
     showCustomerDialog
