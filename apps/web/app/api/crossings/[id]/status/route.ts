@@ -11,7 +11,7 @@ let cachedResponse: any = null;
 
 let cacheTimestamp = 0;
 
-const CACHE_TTL = 30_000;
+const CACHE_TTL = 0;
 export async function GET(
   request: Request,
   {
@@ -223,6 +223,8 @@ const isStoppingTrain =
   train.platform === "1" ||
   train.platform === "2";
 
+
+
       trains.push({
   journeyId,
 
@@ -415,7 +417,11 @@ for (const [index, train] of throughTrains.entries()) {
       train.destination,
 
     platform:
-      train.platform,
+  train.direction === "westbound"
+    ? "1"
+    : train.direction === "eastbound"
+    ? "2"
+    : undefined,
 
     isStoppingTrain:
       false,
@@ -427,7 +433,7 @@ for (const [index, train] of throughTrains.entries()) {
       "Durchfahrt",
 
     delayMinutes:
-      train.delay,
+  context.delayMinutes,
 
     currentStop:
       context.currentStop,
@@ -695,6 +701,7 @@ trainCount:
 
 trains,
 };
+
 
 cachedResponse =
   response;
