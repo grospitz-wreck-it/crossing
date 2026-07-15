@@ -5,7 +5,7 @@ import { findJourney } from "../../../../../../../packages/db-api-client/src/jou
 import { getTrainContext } from "../../../../../../../packages/db-api-client/src/journey";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings } from "../../../../../../../packages/crossing-model/src/crossings";
-
+import { calculateThroughEta } from "../../../../../../../packages/prediction-engine/src/calculateThroughEta";
 
 let cachedResponse: any = null;
 
@@ -129,7 +129,8 @@ try {
   console.log("THROUGH RULES:", crossing.throughRules);
   const throughTrains =
   await getThroughTrains(crossing);
-
+const test: "eastbound" | "westbound" =
+  throughTrains[0].direction;
 console.log("=== THROUGH TRAINS ===");
 console.dir(throughTrains, { depth: null });
 console.log("Anzahl:", throughTrains.length);
@@ -301,40 +302,78 @@ directionLabel:
       );
     }
   }
+for (const train of throughTrains) {
+  console.log(
+    "[THROUGH]",
+    train.line,
+    train.category,
+    train.journeyNumber
+  );
 
-  for (const train of throughTrains) {
-    console.log(
-  "[THROUGH]",
-  train.line,
-  train.category,
-  train.journeyNumber
-);
   const context =
     await getTrainContext(
       train.journeyId
     );
 
   const observationStop =
-  context.stopDetails.find(
-    (stop) =>
-      stop.name ===
-      train.observationStation
-  );
+    context.stopDetails.find(
+      (stop) =>
+        stop.name ===
+        train.observationStation
+    );
 
   if (
     !observationStop?.realtimeTime
   ) {
     continue;
   }
+let crossingTime: Date;
 
-  const crossingTime =
+if (
+  train.livePosition &&
+  train.livePosition.speed > 20
+) {
+  const eta =
+    calculateThroughEta({
+      crossingLat: crossing.lat,
+      crossingLon: crossing.lon,
+      fallbackOffsetSeconds:
+        train.fallbackOffsetSeconds,
+      livePosition:
+        train.livePosition,
+    });
+
+  const gpsTime =
+    new Date(
+      train.livePosition.time
+    );
+
+  crossingTime =
+    new Date(
+      gpsTime.getTime() +
+        eta.etaSeconds * 1000
+    );
+
+  console.log(
+    "[GPS ETA]",
+    train.line,
+    eta
+  );
+} else {
+  crossingTime =
     new Date(
       new Date(
         observationStop.realtimeTime
-      ).getTime() -
+      ).getTime() +
         train.fallbackOffsetSeconds *
           1000
     );
+
+  console.log(
+    "[FALLBACK ETA]",
+    train.line
+  );
+}
 
   const etaSeconds =
     Math.floor(
@@ -406,6 +445,11 @@ console.log(
     crossingTime:
       t.crossingTime,
   }))
+);
+trains.sort(
+  (a, b) =>
+    new Date(a.crossingTime).getTime() -
+    new Date(b.crossingTime).getTime()
 );
   const upcoming =
   trains
