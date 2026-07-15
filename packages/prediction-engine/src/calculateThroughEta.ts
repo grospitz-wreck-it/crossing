@@ -1,5 +1,8 @@
+import { calculateEta } from "./calculateEta";
+
 export type ThroughEtaInput = {
-  trackDistanceMeters: number;
+  crossingLat: number;
+  crossingLon: number;
 
   fallbackOffsetSeconds: number;
 
@@ -24,38 +27,39 @@ export function calculateThroughEta(
   input: ThroughEtaInput
 ): ThroughEtaResult {
   const {
+    crossingLat,
+    crossingLon,
     fallbackOffsetSeconds,
     livePosition,
   } = input;
 
-  // Solange wir noch keine
-  // GPS-ETA berechnen,
-  // verwenden wir den
-  // bekannten Offset.
+  // Kein GPS oder Zug steht -> Fahrplanfallback
   if (
     !livePosition ||
-    !livePosition.speed ||
-    livePosition.speed < 5
+    livePosition.speed <= 5
   ) {
     return {
-      etaSeconds:
-        fallbackOffsetSeconds,
-
-      confidence: 0.5,
-
+      etaSeconds: fallbackOffsetSeconds,
+      confidence: 0.6,
       method: "fallback",
     };
   }
 
-  // GPS ist vorhanden.
-  // Die eigentliche Berechnung
-  // folgt im nächsten Schritt.
+  const eta =
+    calculateEta(
+      livePosition.latitude,
+      livePosition.longitude,
+      crossingLat,
+      crossingLon,
+      livePosition.speed
+    );
+
   return {
-    etaSeconds:
-      fallbackOffsetSeconds,
-
-    confidence: 0.75,
-
+    etaSeconds: Math.max(
+      0,
+      Math.round(eta.etaMinutes * 60)
+    ),
+    confidence: 0.95,
     method: "gps",
   };
 }
