@@ -164,7 +164,23 @@ console.log([
   body.endDate ?? null,
 ],
     });
-
+if (Array.isArray(body.crossings)) {
+  for (const crossingId of body.crossings) {
+    await db.execute({
+      sql: `
+        INSERT INTO campaign_crossings (
+          campaign_id,
+          crossing_id
+        )
+        VALUES (?, ?)
+      `,
+      args: [
+        campaignId,
+        crossingId,
+      ],
+    });
+  }
+}
     return Response.json({
       ok: true,
       id: campaignId,

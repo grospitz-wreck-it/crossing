@@ -42,7 +42,31 @@ export async function PATCH(
       id,
     ],
   });
+await db.execute({
+  sql: `
+    DELETE FROM campaign_crossings
+    WHERE campaign_id = ?
+  `,
+  args: [id],
+});
 
+if (Array.isArray(body.crossings)) {
+  for (const crossingId of body.crossings) {
+    await db.execute({
+      sql: `
+        INSERT INTO campaign_crossings (
+          campaign_id,
+          crossing_id
+        )
+        VALUES (?, ?)
+      `,
+      args: [
+        id,
+        crossingId,
+      ],
+    });
+  }
+}
   return Response.json({
     ok: true,
   });

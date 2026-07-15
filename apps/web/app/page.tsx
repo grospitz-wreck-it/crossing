@@ -121,15 +121,22 @@ const MAX_PHASE_MS =
   900 * 1000;
 
 export default function Home() {
-  const [data, setData] =
-    useState<any>(null);
+const [data, setData] =
+  useState<any>(null);
+  const [ads, setAds] =
+    useState<any[]>([]);
+
+  const [currentAdIndex, setCurrentAdIndex] =
+    useState(0);
 
   const [now, setNow] =
-  useState(Date.now());
-const [
-  showMoreTrains,
-  setShowMoreTrains,
-] = useState(false);
+    useState(Date.now());
+
+  const [
+    showMoreTrains,
+    setShowMoreTrains,
+  ] = useState(false);
+
   const [
     measurementState,
     setMeasurementState,
@@ -151,72 +158,74 @@ const [
     setMessage,
   ] = useState("");
 
-const [ad, setAd] =
-  useState<any>(null);
-
-const refreshTimeout =
-  useRef<ReturnType<typeof setTimeout> | null>(
-    null
-  );
-async function load() {
-  try {
-    const res = await fetch(
-      "/api/crossings/kirchlengern/status"
+  const refreshTimeout =
+    useRef<ReturnType<typeof setTimeout> | null>(
+      null
     );
 
-    if (!res.ok) {
-      throw new Error(
-        `Status API returned ${res.status}`
-      );
-    }
-
-    const json =
-      await res.json();
-
-    setData(json);
-
-  
-
+  async function load() {
     try {
-      const adRes =
-        await fetch(
-          "/api/ads/kirchlengern"
+      const res = await fetch(
+        "/api/crossings/kirchlengern/status"
+      );
+
+      if (!res.ok) {
+        throw new Error(
+          `Status API returned ${res.status}`
+        );
+      }
+
+      const json =
+        await res.json();
+
+      setData(json);
+
+      try {
+        const adRes =
+          await fetch(
+            "/api/ads/kirchlengern"
+          );
+
+        if (adRes.ok) {
+          const list =
+            await adRes.json();
+
+          setAds(
+            Array.isArray(list)
+              ? list
+              : []
+          );
+
+          setCurrentAdIndex(0);
+        } else {
+          setAds([]);
+        }
+      } catch (error) {
+        console.error(
+          "Failed to load ad:",
+          error
         );
 
-      if (adRes.ok) {
-        const ad =
-          await adRes.json();
-
-        setAd(ad);
-      } else {
-        setAd(null);
+        setAds([]);
       }
     } catch (error) {
       console.error(
-        "Failed to load ad:",
+        "Failed to load status:",
         error
       );
 
-      setAd(null);
+      setData({
+        error: true,
+        state: "UNKNOWN",
+        phase: null,
+        closures: [],
+        trains: [],
+        trainCount: 0,
+      });
+
+      setAds([]);
     }
-    } catch (error) {
-    console.error(
-      "Failed to load status:",
-      error
-    );
-
-    setData({
-      error: true,
-      state: "UNKNOWN",
-      phase: null,
-      closures: [],
-      trains: [],
-      trainCount: 0,
-    });
-
-    setAd(null);
   }
-}
 
 async function saveUnexpectedTrain() {
   if (!data?.predictionId) {
@@ -389,6 +398,20 @@ if (
       apiRefresh
     );
 }, []);
+useEffect(() => {
+  if (ads.length <= 1) {
+    return;
+  }
+
+  const timer = setInterval(() => {
+    setCurrentAdIndex((i) =>
+      (i + 1) % ads.length
+    );
+  }, 30000);
+
+  return () =>
+    clearInterval(timer);
+}, [ads]);
 useEffect(() => {
   if (!firstClickAt) {
     return;
@@ -621,6 +644,8 @@ if (!train) {
     </main>
   );
 }
+const ad =
+  ads[currentAdIndex];
 const heroImage =
   data.state === "OPEN"
     ? "/images/barrier-open.webp"
