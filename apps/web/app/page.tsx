@@ -6,6 +6,8 @@ import {
   useRef,
 } from "react";
 import LoadingScreen from "./components/LoadingScreen";
+import { useCrossings } from "./context/CrossingsContext";
+
 function formatSeconds(
   seconds: number
 ) {
@@ -121,6 +123,8 @@ const MAX_PHASE_MS =
   900 * 1000;
 
 export default function Home() {
+const { activeId } = useCrossings();
+
 const [data, setData] =
   useState<any>(null);
   const [ads, setAds] =
@@ -154,6 +158,13 @@ const [data, setData] =
   >(null);
 
   const [
+    pendingEvent,
+    setPendingEvent,
+  ] = useState<
+    "close" | "open" | null
+  >(null);
+
+  const [
     message,
     setMessage,
   ] = useState("");
@@ -164,9 +175,13 @@ const [data, setData] =
     );
 
   async function load() {
+    if (!activeId) {
+      return;
+    }
+
     try {
       const res = await fetch(
-        "/api/crossings/kirchlengern/status"
+        `/api/crossings/${activeId}/status`
       );
 
       if (!res.ok) {
@@ -183,7 +198,7 @@ const [data, setData] =
       try {
         const adRes =
           await fetch(
-            "/api/ads/kirchlengern"
+            `/api/ads/${activeId}`
           );
 
         if (adRes.ok) {
@@ -261,9 +276,8 @@ async function saveUnexpectedTrain() {
   }, 3000);
 }
   async function saveMeasurement(
-  event:
-    | "close"
-    | "open"
+  event: "close" | "open",
+  precision: "exact" | "at_least"
 ) {
   if (!data) {
     return;
@@ -307,6 +321,8 @@ if (
 
           phase:
             data.phase,
+
+          precision,
         }),
       }
     );
@@ -384,7 +400,36 @@ if (
   }, 3000);
 }
 
+const wakeLockRef =
+    useRef<any>(null);
+
+  async function requestWakeLock() {
+    if (!("wakeLock" in navigator)) {
+      return;
+    }
+
+    try {
+      wakeLockRef.current =
+        await (
+          navigator as any
+        ).wakeLock.request(
+          "screen"
+        );
+    } catch (error) {
+      console.error(
+        "Wake Lock request failed:",
+        error
+      );
+    }
+  }
+
   useEffect(() => {
+  if (!activeId) {
+    return;
+  }
+
+  setData(null);
+
   load();
 
   const apiRefresh =
@@ -397,7 +442,41 @@ if (
     clearInterval(
       apiRefresh
     );
+}, [activeId]);
+
+useEffect(() => {
+  requestWakeLock();
+
+  function handleWakeLockVisibility() {
+    if (
+      document.visibilityState ===
+      "visible"
+    ) {
+      requestWakeLock();
+    }
+  }
+
+  document.addEventListener(
+    "visibilitychange",
+    handleWakeLockVisibility
+  );
+
+  return () => {
+    document.removeEventListener(
+      "visibilitychange",
+      handleWakeLockVisibility
+    );
+
+    if (wakeLockRef.current) {
+      wakeLockRef.current
+        .release()
+        .catch(() => {});
+
+      wakeLockRef.current = null;
+    }
+  };
 }, []);
+
 useEffect(() => {
   if (ads.length <= 1) {
     return;
@@ -490,7 +569,7 @@ useEffect(() => {
       refresh
     );
   };
-}, []);
+}, [activeId]);
 
   
 useEffect(() => {
@@ -586,7 +665,7 @@ useEffect(() => {
       refresh
     );
   };
-}, []);
+}, [activeId]);
 
 
 if (!data) {
@@ -655,7 +734,9 @@ return (
   <main className="container">
 
   <div className="logo">
-    GEMEINDE KIRCHLENGERN
+    {data.crossing?.name
+      ? `GEMEINDE ${data.crossing.name.toUpperCase()}`
+      : "GEMEINDE KIRCHLENGERN"}
   </div>
 
   <div
@@ -858,7 +939,7 @@ return (
   {
     data.phase
       ?.trains?.[0]
-      ?.trainNumber
+      ?.journeyNumber
   }
 
 </span>
@@ -964,7 +1045,7 @@ return (
           .map((train) => (
             <div
               key={
-                train.journeyId
+                train.id
               }
               className="extraTrain"
             >
@@ -1076,7 +1157,7 @@ return (
                   {closure.trains.map(
   (train: any) => (
     <div
-      key={train.journeyId}
+      key={train.id}
       className="closureTrain"
     >
 
@@ -1145,8 +1226,53 @@ return (
     Messung läuft
   </div>
 )}
-    <div className="measurementButtons">
-      <button
+
+{pendingEvent ? (
+  <div className="measurementButtons">
+    <div className="precisionPrompt">
+      {pendingEvent === "close"
+        ? "Seit wann ist sie unten?"
+        : "Seit wann ist sie oben?"}
+    </div>
+
+    <button
+      className="cta ctaOpen"
+      onClick={() => {
+        saveMeasurement(
+          pendingEvent,
+          "exact"
+        );
+        setPendingEvent(null);
+      }}
+    >
+      GERADE EBEN
+    </button>
+
+    <button
+      className="cta ctaSecondary"
+      onClick={() => {
+        saveMeasurement(
+          pendingEvent,
+          "at_least"
+        );
+        setPendingEvent(null);
+      }}
+    >
+      WAR SCHON EINE WEILE SO
+    </button>
+
+    <button
+      className="cancelButton"
+      onClick={() =>
+        setPendingEvent(null)
+      }
+    >
+      Abbrechen
+    </button>
+  </div>
+) : (
+  <div className="measurementButtons">
+    <button
   className={`cta ctaClose ${
     measurementState ===
     "close-recorded"
@@ -1158,9 +1284,7 @@ return (
     "close-recorded"
   }
   onClick={() =>
-    saveMeasurement(
-      "close"
-    )
+    setPendingEvent("close")
   }
 >
   SCHRANKE RUNTER
@@ -1178,9 +1302,7 @@ return (
     "open-recorded"
   }
   onClick={() =>
-    saveMeasurement(
-      "open"
-    )
+    setPendingEvent("open")
   }
 >
   SCHRANKE HOCH
@@ -1192,6 +1314,7 @@ return (
   ⚠ GÜTERZUG / SONDERFALL
 </button>
     </div>
+)}
  
   </main>
 );

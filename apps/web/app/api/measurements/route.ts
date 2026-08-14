@@ -13,6 +13,8 @@ export async function GET() {
   );
 }
 
+const VALID_PRECISIONS = ["exact", "at_least"];
+
 export async function POST(
   request: Request
 ) {
@@ -20,23 +22,40 @@ export async function POST(
     const body =
       await request.json();
 
+    // "exact": Nutzer hat den Wechsel (Schranke runter/hoch) live
+    // mitbekommen - actualAt ist eine präzise Punktmessung und fließt
+    // 1:1 in die Kalibrierung ein.
+    //
+    // "at_least": Schranke war beim Eintreffen schon in dem gemeldeten
+    // Zustand - actualAt ist nur eine ZENSIERTE OBERE SCHRANKE für den
+    // echten Zeitpunkt (der reale Wechsel lag irgendwann VOR actualAt,
+    // wie lange, ist unbekannt). Darf NIE als Punktschätzer gemittelt
+    // werden - nur als einseitiger Hinweis "Vorhersage ist mindestens
+    // X Sekunden zu spät", falls actualAt vor der vorhergesagten Zeit
+    // liegt. Andernfalls ist die Messung nicht auswertbar.
+    const precision = VALID_PRECISIONS.includes(body.precision)
+      ? body.precision
+      : "exact";
+
     await db.execute({
       sql: `
         INSERT INTO measurements (
           prediction_id,
           event_type,
           actual_at,
-          phase_json
+          phase_json,
+          precision
         )
-        VALUES (?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
       `,
       args: [
-        body.predictionId,
+        body.predictionId ?? null,
         body.event,
         body.actualAt,
         JSON.stringify(
           body.phase
         ),
+        precision,
       ],
     });
 

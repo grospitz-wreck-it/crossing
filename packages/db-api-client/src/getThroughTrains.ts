@@ -1,277 +1,145 @@
-import type {
-  Crossing,
-} from "../../crossing-model/src/types";
+import type { Crossing } from "../../crossing-model/src/types";
+import { getStationTimetable } from "./getStationTimetable";
 
-import { getDepartures } from "./irisDepartures";
-import { parseIrisDepartures } from "./parseIrisDepartures";
-import { findJourney } from "./journeyFind";
-import { getJourneyPosition } from "./journeyPosition";
-
+// Zug, der den Bahnübergang ohne eigenen Halt durchfährt (z.B. ICE
+// Amsterdam <-> Berlin). Da uns nur die offizielle Timetables-API zur
+// Verfügung steht (keine Live-GPS-Position), wird die Durchfahrtszeit am
+// Übergang ausschließlich über einen festen Zeitoffset ("Fahrplan-Fallback")
+// von einer entfernten Beobachtungsstation abgeleitet - siehe README.
 export type ThroughTrain = {
   type: "through";
 
   line: string;
-
   category: string;
-
   journeyNumber: number;
 
-  initialDepartureDate: [
-    string,
-    string,
-  ];
-
-  destination: string;
-
-  delay: number;
-
+  destination?: string;
+  origin?: string;
   route: string[];
 
-  platform?: string;
+  delayMinutes: number;
 
   observationEva: string;
-
   observationStation: string;
-
-  trackDistanceMeters: number;
+  observationActualTime: string; // ISO - tatsächliche (verspätete) Zeit an der Beobachtungsstation
 
   fallbackOffsetSeconds: number;
-direction:
-  | "eastbound"
-  | "westbound";
-  journeyId: string;
+  trackDistanceMeters: number;
 
-  livePosition: {
-    latitude: number;
+  direction: "eastbound" | "westbound";
 
-    longitude: number;
-
-    time: string;
-
-    speed: number;
-
-    metaSource: string;
-  } | null;
+  // Geschätzte Durchfahrtszeit am Übergang = observationActualTime + fallbackOffsetSeconds.
+  crossingTime: string; // ISO
 };
 
 export async function getThroughTrains(
   crossing: Crossing
 ): Promise<ThroughTrain[]> {
-
   if (!crossing.throughRules?.length) {
     return [];
   }
 
+  const candidates: ThroughTrain[] = [];
 
-  const departures: Omit<
-    ThroughTrain,
-    "journeyId" | "livePosition"
-  >[] = [];
-
+  // Reihenfolge der throughRules ist bewusst relevant: steht derselbe Zug
+  // an mehreren Beobachtungsstationen (z.B. Osnabrück UND Bünde), gewinnt
+  // unten die zuletzt verarbeitete Regel. Näher am Übergang liegende
+  // Stationen sollten daher in crossings.ts als letztes stehen, damit ihre
+  // genauere (weil zeitnähere) Schätzung die einer weiter entfernten
+  // Station überschreibt.
   for (const rule of crossing.throughRules) {
-    console.log(
-      `\n--- Observation EVA ${rule.observationEva} (${rule.observationStation}) ---`
-    );
+    let events;
 
-    const rawDepartures = await getDepartures(
-  rule.observationEva
-);
+    try {
+      events = await getStationTimetable(rule.observationEva);
+    } catch (error) {
+      console.error(
+        `getThroughTrains: Timetable für ${rule.observationStation} (${rule.observationEva}) fehlgeschlagen`,
+        error
+      );
+      continue;
+    }
 
-const parsed =
-  parseIrisDepartures(rawDepartures);
+    const matching = events.filter((train) => {
+      if (train.cancelled) {
+        return false;
+      }
 
+      if (!rule.categories.includes(train.category)) {
+        return false;
+      }
 
-const matching = parsed.filter((train) => {
-  // Nur gewünschte Zugkategorien
-  if (!rule.categories.includes(train.category)) {
-    return false;
-  }
+      // Zug muss alle Pflicht-Stationen der Linie im Laufweg haben, damit
+      // wir keine falschen Züge (z.B. andere ICE-Linien) erwischen.
+      const hasRequiredRoute = crossing.requiredRouteStops.every(
+        (requiredStop) => train.route.includes(requiredStop)
+      );
 
-  // Zug muss alle Pflicht-Halte enthalten
-  const hasRequiredRoute =
-    crossing.requiredRouteStops.every(
-      (requiredStop) =>
-        train.route.includes(requiredStop)
-    );
+      if (!hasRequiredRoute) {
+        return false;
+      }
 
-  if (!hasRequiredRoute) {
-    return false;
-  }
+      if (
+        rule.direction === "westbound" &&
+        train.destination !== "Amsterdam Centraal"
+      ) {
+        return false;
+      }
 
-  // Richtung anhand des Zielbahnhofs
-  if (
-    rule.direction === "westbound" &&
-    train.destination !== "Amsterdam Centraal"
-  ) {
-    return false;
-  }
+      if (
+        rule.direction === "eastbound" &&
+        train.destination !== "Berlin Südkreuz"
+      ) {
+        return false;
+      }
 
-  if (
-    rule.direction === "eastbound" &&
-    train.destination !== "Berlin Südkreuz"
-  ) {
-    return false;
-  }
+      return true;
+    });
 
-  return true;
-});
+    for (const train of matching) {
+      const crossingTime = new Date(
+        train.actualTime.getTime() +
+          rule.fallbackOffsetSeconds * 1000
+      );
 
-console.log(
-  `=== ${rule.observationStation} ===`
-);
+      candidates.push({
+        type: "through",
 
-console.log(
-  "Alle ICE-Kandidaten:"
-);
-
-console.dir(
-  parsed
-    .filter(
-      (t) =>
-        rule.categories.includes(
-          t.category
-        )
-    )
-    .map((t) => ({
-      line: t.line,
-      destination:
-        t.destination,
-      route: t.route,
-    })),
-  { depth: null }
-);
-
-    departures.push(
-      ...matching.map((train) => ({
-        type: "through" as const,
         line: train.line,
         category: train.category,
         journeyNumber: train.journeyNumber,
-        initialDepartureDate: train.initialDepartureDate,
+
         destination: train.destination,
-        delay: train.delay,
+        origin: train.origin,
         route: train.route,
-        platform: train.platform,
+
+        delayMinutes: train.delayMinutes,
+
         observationEva: rule.observationEva,
         observationStation: rule.observationStation,
-        trackDistanceMeters: rule.trackDistanceMeters,
+        observationActualTime: train.actualTime.toISOString(),
+
         fallbackOffsetSeconds: rule.fallbackOffsetSeconds,
+        trackDistanceMeters: rule.trackDistanceMeters,
+
         direction: rule.direction,
-      }))
-    );
+
+        crossingTime: crossingTime.toISOString(),
+      });
+    }
   }
 
-
-
-  const uniqueDepartures = Array.from(
+  // Dedupe über category+journeyNumber. Map.set() mit demselben Key
+  // überschreibt den vorherigen Eintrag -> siehe Kommentar oben zur
+  // Reihenfolge der throughRules.
+  const unique = Array.from(
     new Map(
-      departures.map((train) => [
+      candidates.map((train) => [
         `${train.category}-${train.journeyNumber}`,
         train,
       ])
     ).values()
   );
 
-  const result = (
-  await Promise.all(
-    uniqueDepartures.map(
-      async (train): Promise<ThroughTrain | null> => {
-        console.log(
-          `\n===== ${train.category} ${train.journeyNumber} (${train.line}) =====`
-        );
-
-        try {
-
-          const journey =
-            await findJourney(
-              train.category,
-              train.journeyNumber,
-              train.initialDepartureDate,
-              train.observationEva
-            );
-
-          const raw =
-            journey?.[0]?.result?.data;
-
-          if (
-            !raw ||
-            raw === "[null]"
-          ) {
-            return null;
-          }
-
-          let parsedJourney: any;
-
-          try {
-            parsedJourney =
-              JSON.parse(raw);
-          } catch {
-          
-            return null;
-          }
-
-          const journeyRef =
-            parsedJourney?.[1]?.journeyId;
-
-          const journeyId =
-            parsedJourney?.[
-              journeyRef
-            ];
-
-          if (!journeyId) {
-            
-            return null;
-          }
-
-          const livePosition =
-            await getJourneyPosition(
-              journeyId
-            );
-
-          console.log(
-            "LivePosition:",
-            livePosition
-          );
-
-          return {
-            ...train,
-            journeyId,
-            livePosition,
-          };
-        } catch (error) {
-          console.error(
-            `${train.category} ${train.journeyNumber}`,
-            error
-          );
-
-          return null;
-        }
-      }
-    )
-  )
-).filter(
-  (
-    train
-  ): train is ThroughTrain =>
-    train !== null
-);
-
-console.log(
-  result.map((t) => ({
-    line: t.line,
-    category: t.category,
-    journeyId: t.journeyId,
-    live:
-      t.livePosition !== null,
-  }))
-);
-
-if (result.length === 0) {
-  console.warn(
-    "getThroughTrains(): keine Through-Trains gefunden"
-  );
-  return [];
-}
-
-return result;
+  return unique;
 }
