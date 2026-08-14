@@ -1,4 +1,6 @@
 import "./globals.css";
+import { CrossingsProvider } from "./context/CrossingsContext";
+import Header from "./components/Header";
 
 export default function RootLayout({
   children,
@@ -7,7 +9,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="de">
-      <body>{children}</body>
+      <body>
+        <CrossingsProvider>
+          <Header />
+          {children}
+        </CrossingsProvider>
+      </body>
     </html>
   );
 }
