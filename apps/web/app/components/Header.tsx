@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { signOut } from "next-auth/react";
 import { useCrossings } from "../context/CrossingsContext";
 
 export default function Header() {
@@ -34,6 +35,7 @@ export default function Header() {
     }
 
     document.addEventListener("mousedown", handleClickOutside);
+
     return () =>
       document.removeEventListener(
         "mousedown",
@@ -63,7 +65,10 @@ export default function Header() {
             </div>
 
             {saved.map((crossing) => (
-              <div key={crossing.id} className="appHeaderDropdownRow">
+              <div
+                key={crossing.id}
+                className="appHeaderDropdownRow"
+              >
                 <button
                   className={`appHeaderDropdownItem ${
                     crossing.id === activeId
@@ -82,7 +87,9 @@ export default function Header() {
                   <button
                     className="appHeaderDropdownRemove"
                     aria-label={`${crossing.name} entfernen`}
-                    onClick={() => removeCrossing(crossing.id)}
+                    onClick={() =>
+                      removeCrossing(crossing.id)
+                    }
                   >
                     ✕
                   </button>
@@ -117,6 +124,20 @@ export default function Header() {
                   Alle Schranken hinzugefügt
                 </div>
               )}
+
+            <div className="appHeaderDropdownDivider" />
+
+            <button
+              type="button"
+              className="appHeaderDropdownLogout"
+              onClick={() =>
+                signOut({
+                  callbackUrl: "/",
+                })
+              }
+            >
+              Abmelden
+            </button>
           </div>
         )}
       </div>

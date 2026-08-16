@@ -1,10 +1,28 @@
-import { crossings } from "../../../../../packages/crossing-model/src/crossings";
+import { db } from "../../lib/db";
 
 export async function GET() {
-  const list = crossings.map((c) => ({
-    id: c.id,
-    name: c.name,
-  }));
+  try {
+    const result = await db.execute(`
+      SELECT
+        id,
+        name
+      FROM crossings
+      WHERE status = 'active'
+      ORDER BY name ASC
+    `);
 
-  return Response.json(list);
+    const list = result.rows.map((row) => ({
+      id: String(row.id),
+      name: String(row.name),
+    }));
+
+    return Response.json(list);
+  } catch (error) {
+    console.error("GET /api/crossings failed:", error);
+
+    return Response.json(
+      { error: "Failed to load crossings" },
+      { status: 500 }
+    );
+  }
 }
