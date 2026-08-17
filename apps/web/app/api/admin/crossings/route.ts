@@ -3,6 +3,7 @@ import { db } from "../../../lib/db";
 
 const CODE_ALPHABET = "23456789CFGHJMPQRVWX";
 const SEPARATOR = "+";
+const DB_TRANSPORT_API = "https://v6.db.transport.rest";
 
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const r = 6371;
@@ -41,11 +42,13 @@ function decodeFullPlusCode(value: string) {
 }
 
 async function geocodeLocality(locality: string) {
-  const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(locality)}`, { headers: { "User-Agent": "Crossings/1.0 (meineschranke)" }, cache: "no-store" });
-  if (!response.ok) return null;
-  const data = await response.json();
-  if (!data?.[0]) return null;
-  return { lat: Number(data[0].lat), lon: Number(data[0].lon) };
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(locality)}`, { headers: { "User-Agent": "Crossings/1.0 (meineschranke)" }, cache: "no-store" });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data?.[0]) return null;
+    return { lat: Number(data[0].lat), lon: Number(data[0].lon) };
+  } catch { return null; }
 }
 
 function recoverShortCode(shortCode: string, referenceLat: number, referenceLon: number) {
@@ -86,6 +89,36 @@ async function resolvePlusCode(value: string) {
 
 async function resolveLocation(value: string) { return parseCoordinates(value) || await resolvePlusCode(value); }
 
+function uniqueLines(station: any) {
+  const lines = Array.isArray(station?.lines) ? station.lines : [];
+  return lines.map((line: any) => String(line?.id || line?.name || "")).filter(Boolean).slice(0, 12);
+}
+
+async function discoverStations(lat: number, lon: number) {
+  try {
+    const url = `${DB_TRANSPORT_API}/locations/nearby?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}&results=12&distance=25000&stops=true&poi=false&linesOfStops=true&language=de&pretty=false`;
+    const response = await fetch(url, { headers: { Accept: "application/json" }, next: { revalidate: 3600 } });
+    if (!response.ok) return [];
+    const data = await response.json();
+    const raw = Array.isArray(data) ? data : [];
+    return raw.filter((item: any) => item?.type === "stop" || item?.type === "station").map((item: any) => {
+      const location = item.location || {};
+      return {
+        eva: String(item.id || ""),
+        stationName: String(item.name || item.id || ""),
+        lat: Number(location.latitude),
+        lon: Number(location.longitude),
+        distanceKm: distanceKm(lat, lon, Number(location.latitude), Number(location.longitude)),
+        lines: uniqueLines(item),
+        products: item.products || {},
+      };
+    }).filter((item: any) => item.eva && Number.isFinite(item.lat) && Number.isFinite(item.lon)).sort((a: any, b: any) => a.distanceKm - b.distanceKm);
+  } catch (error) {
+    console.error("DB station discovery failed", error);
+    return [];
+  }
+}
+
 async function loadCrossings() {
   const result = await db.execute(`SELECT id,name,eva,lat,lon,confidence,status,source,observation_evas,required_route_stops,close_offset_seconds,open_offset_seconds,created_at,updated_at FROM crossings ORDER BY name COLLATE NOCASE`);
   return result.rows;
@@ -97,9 +130,12 @@ export async function GET(request: Request) {
   const rows = await loadCrossings();
   if (locationInput) {
     const coords = await resolveLocation(locationInput);
-    if (!coords) return Response.json({ error: "Standort konnte nicht erkannt werden. Bitte Plus Code, Google-Maps-Koordinaten oder einen vollständigen Plus Code eingeben." }, { status: 400 });
-    const nearest = rows.map((row) => ({ ...row, distanceKm: distanceKm(coords.lat, coords.lon, Number(row.lat), Number(row.lon)) })).sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 5);
-    return Response.json({ input: locationInput, location: coords, nearest });
+    if (!coords) return Response.json({ error: "Standort konnte nicht erkannt werden. Bitte Google-Maps-Plus-Code, Koordinaten oder einen vollständigen Plus Code eingeben." }, { status: 400 });
+    const [nearest, stations] = await Promise.all([
+      Promise.resolve(rows.map((row) => ({ ...row, distanceKm: distanceKm(coords.lat, coords.lon, Number(row.lat), Number(row.lon)) })).sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 5)),
+      discoverStations(coords.lat, coords.lon),
+    ]);
+    return Response.json({ input: locationInput, location: coords, nearest, stations });
   }
   const withStations = await Promise.all(rows.map(async (row) => {
     const stations = await db.execute({ sql: `SELECT id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order`, args: [row.id] });
