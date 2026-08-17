@@ -19,6 +19,26 @@ export type ThroughTrain = {
   crossingTime: string;
 };
 
+function normalizeStationName(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function routeContainsStation(route: string[], requiredStop: string) {
+  const target = normalizeStationName(requiredStop);
+  if (!target) return true;
+  return route.some((stop) => {
+    const value = normalizeStationName(stop);
+    return value === target || value.includes(target) || target.includes(value);
+  });
+}
+
 export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain[]> {
   if (!crossing.throughRules?.length) return [];
 
@@ -29,10 +49,7 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
     try {
       events = await getStationTimetable(rule.observationEva);
     } catch (error) {
-      console.error(
-        `getThroughTrains: Timetable für ${rule.observationStation} (${rule.observationEva}) fehlgeschlagen`,
-        error
-      );
+      console.error(`getThroughTrains: Timetable für ${rule.observationStation} (${rule.observationEva}) fehlgeschlagen`, error);
       continue;
     }
 
@@ -40,14 +57,11 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
       if (train.cancelled) return false;
       if (!rule.categories.includes(train.category)) return false;
 
-      const hasRequiredRoute = crossing.requiredRouteStops.every((requiredStop) =>
-        train.route.includes(requiredStop)
+      const hasRequiredRoute = (crossing.requiredRouteStops || []).every((requiredStop) =>
+        routeContainsStation(train.route || [], requiredStop)
       );
       if (!hasRequiredRoute) return false;
 
-      // Automatisch erzeugte Regeln kennen häufig keine belastbare
-      // Himmelsrichtung. In diesem Fall darf die Richtung nicht als Filter
-      // verwendet werden. Explizite alte Regeln bleiben unverändert.
       if (rule.direction === "westbound" && train.destination !== "Amsterdam Centraal") return false;
       if (rule.direction === "eastbound" && train.destination !== "Berlin Südkreuz") return false;
 
@@ -76,7 +90,5 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
     }
   }
 
-  return Array.from(
-    new Map(candidates.map((train) => [`${train.category}-${train.journeyNumber}`, train])).values()
-  );
+  return Array.from(new Map(candidates.map((train) => [`${train.category}-${train.journeyNumber}`, train])).values());
 }
