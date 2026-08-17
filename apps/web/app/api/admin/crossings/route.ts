@@ -3,10 +3,19 @@ import { db } from "../../../lib/db";
 import { OpenLocationCode } from "open-location-code";
 
 type Station = { eva: string; stationName: string; ril100?: string; ibnr?: string; lat?: number; lon?: number; distanceKm?: number };
+type OpenLocationCodeRuntime = {
+  isValid(code: string): boolean;
+  isFull(code: string): boolean;
+  isShort(code: string): boolean;
+  decode(code: string): { latitudeCenter: number; longitudeCenter: number };
+  recoverNearest(code: string, latitude: number, longitude: number): string;
+};
 
-// open-location-code exposes these as instance methods in the npm package.
-// Keep one shared codec instance instead of calling methods on the class itself.
-const OLC = new OpenLocationCode();
+// open-location-code 1.0.3 implements these methods on the runtime instance,
+// while @types/open-location-code declares them on the constructor. Keep the
+// runtime behavior and make the boundary explicit so TypeScript cannot confuse
+// the instance with the constructor.
+const OLC = new OpenLocationCode() as unknown as OpenLocationCodeRuntime;
 
 function distanceKm(lat1:number,lon1:number,lat2:number,lon2:number){const r=6371,dLat=((lat2-lat1)*Math.PI)/180,dLon=((lon2-lon1)*Math.PI)/180,a=Math.sin(dLat/2)**2+Math.cos((lat1*Math.PI)/180)*Math.cos((lat2*Math.PI)/180)*Math.sin(dLon/2)**2;return r*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
 function parseCoordinates(value:string){const normalized=value.trim().replace(/\s*[,;]\s*/g," ").replace(/\s+/g," ");const m=normalized.match(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);if(!m)return null;const lat=Number(m[1]),lon=Number(m[2]);if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)return null;return{lat,lon,source:"coordinates" as const};}
