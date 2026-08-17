@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
 import { db } from "../../../lib/db";
+import { readStations } from "db-stations";
 
 const CODE_ALPHABET = "23456789CFGHJMPQRVWX";
 const SEPARATOR = "+";
-const DB_TRANSPORT_API = "https://v6.db.transport.rest";
 
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const r = 6371;
@@ -30,11 +30,7 @@ function decodeFullPlusCode(value: string) {
   if (separator < 0) return null;
   const digits = code.slice(0, separator).replace(/0/g, "");
   if (digits.length < 8 || digits.length % 2 !== 0) return null;
-
-  let lat = -90;
-  let lon = -180;
-  let latPlace = 400;
-  let lonPlace = 400;
+  let lat = -90, lon = -180, latPlace = 400, lonPlace = 400;
   for (let i = 0; i < Math.min(digits.length, 10); i += 2) {
     const latIndex = CODE_ALPHABET.indexOf(digits[i]);
     const lonIndex = CODE_ALPHABET.indexOf(digits[i + 1]);
@@ -85,9 +81,8 @@ function recoverShortCode(shortCode: string, referenceLat: number, referenceLon:
   if (separator < 4 || separator >= 8) return null;
   const shortDigits = compact.slice(0, separator);
   const suffix = compact.slice(separator + 1);
-  if (shortDigits.length > 7 || suffix.length < 1) return null;
   const prefixLength = 8 - shortDigits.length;
-  if (prefixLength < 1 || prefixLength % 2 !== 0) return null;
+  if (prefixLength < 1 || prefixLength % 2 !== 0 || !suffix.length) return null;
   const prefix = encodeReferencePrefix(referenceLat, referenceLon, prefixLength);
   return decodeFullPlusCode(prefix + shortDigits + SEPARATOR + suffix);
 }
@@ -96,17 +91,15 @@ async function resolvePlusCode(value: string) {
   const input = value.trim();
   const plusIndex = input.indexOf(SEPARATOR);
   if (plusIndex < 0) return null;
-
   const before = input.slice(0, plusIndex).trim();
   const after = input.slice(plusIndex + 1).trim();
-  const codePart = `${before}+${after.split(/\s+/)[0]}`;
+  const suffix = after.split(/\s+/)[0];
+  const codePart = `${before}+${suffix}`;
   const full = decodeFullPlusCode(codePart);
   if (full) return full;
-
   if (before.length < 4 || before.length > 7) return null;
   const locality = after.split(/\s+/).slice(1).join(" ").trim();
   if (!locality) return null;
-
   const reference = await geocodeLocality(locality);
   if (!reference) return null;
   const recovered = recoverShortCode(codePart, reference.lat, reference.lon);
@@ -115,29 +108,54 @@ async function resolvePlusCode(value: string) {
 
 async function resolveLocation(value: string) { return parseCoordinates(value) || await resolvePlusCode(value); }
 
-function uniqueLines(station: any) {
-  const lines = Array.isArray(station?.lines) ? station.lines : [];
-  return lines.map((line: any) => String(line?.id || line?.name || "")).filter(Boolean).slice(0, 12);
+type Station = {
+  type?: string;
+  id?: string;
+  ril100?: string;
+  nr?: number;
+  name?: string;
+  weight?: number;
+  location?: { latitude?: number; longitude?: number };
+  address?: { city?: string; zipcode?: string; street?: string };
+};
+
+let stationCatalogPromise: Promise<Station[]> | null = null;
+
+async function loadStationCatalog() {
+  if (!stationCatalogPromise) {
+    stationCatalogPromise = (async () => {
+      const stations: Station[] = [];
+      for await (const station of readStations() as AsyncIterable<Station>) stations.push(station);
+      return stations.filter((station) => Number.isFinite(station.location?.latitude) && Number.isFinite(station.location?.longitude));
+    })().catch((error) => {
+      stationCatalogPromise = null;
+      throw error;
+    });
+  }
+  return stationCatalogPromise;
 }
 
 async function discoverStations(lat: number, lon: number) {
-  try {
-    const url = `${DB_TRANSPORT_API}/locations/nearby?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}&results=12&distance=25000&stops=true&poi=false&linesOfStops=true&language=de&pretty=false`;
-    const response = await fetch(url, { headers: { Accept: "application/json" }, next: { revalidate: 3600 } });
-    if (!response.ok) return [];
-    const data = await response.json();
-    return (Array.isArray(data) ? data : [])
-      .filter((item: any) => item?.type === "stop" || item?.type === "station")
-      .map((item: any) => {
-        const location = item.location || {};
-        return { eva: String(item.id || ""), stationName: String(item.name || item.id || ""), lat: Number(location.latitude), lon: Number(location.longitude), distanceKm: distanceKm(lat, lon, Number(location.latitude), Number(location.longitude)), lines: uniqueLines(item), products: item.products || {} };
-      })
-      .filter((item: any) => item.eva && Number.isFinite(item.lat) && Number.isFinite(item.lon))
-      .sort((a: any, b: any) => a.distanceKm - b.distanceKm);
-  } catch (error) {
-    console.error("DB station discovery failed", error);
-    return [];
-  }
+  const stations = await loadStationCatalog();
+  return stations
+    .map((station) => {
+      const stationLat = Number(station.location?.latitude);
+      const stationLon = Number(station.location?.longitude);
+      return {
+        eva: String(station.id || ""),
+        stationName: String(station.name || station.id || ""),
+        ril100: String(station.ril100 || ""),
+        nr: station.nr ?? null,
+        lat: stationLat,
+        lon: stationLon,
+        city: String(station.address?.city || ""),
+        zipcode: String(station.address?.zipcode || ""),
+        distanceKm: distanceKm(lat, lon, stationLat, stationLon),
+      };
+    })
+    .filter((station) => station.eva && station.distanceKm <= 25)
+    .sort((a, b) => a.distanceKm - b.distanceKm)
+    .slice(0, 12);
 }
 
 async function loadCrossings() {
