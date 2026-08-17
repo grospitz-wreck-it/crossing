@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import "./globals.css";
-import PredictionFeedback from "./components/PredictionFeedback";
+import AppFeedbackMount from "./components/AppFeedbackMount";
 
 export default function RootLayout({
   children,
@@ -11,7 +11,7 @@ export default function RootLayout({
     <html lang="de">
       <body>
         {children}
-        <PredictionFeedback />
+        <AppFeedbackMount />
       </body>
     </html>
   );
