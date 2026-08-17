@@ -13,7 +13,7 @@ type Candidate = {
   relationId: number | null;
   source: string;
   waysCount: number;
-  geometry: Point[];
+  segments: Point[][];
 };
 
 function pointSegmentDistanceMeters(lat: number, lon: number, a: Point, b: Point) {
@@ -30,9 +30,7 @@ function pointSegmentDistanceMeters(lat: number, lon: number, a: Point, b: Point
 
 function geometryDistanceMeters(lat: number, lon: number, geometry: Point[]) {
   let best = Infinity;
-  for (let i = 1; i < geometry.length; i += 1) {
-    best = Math.min(best, pointSegmentDistanceMeters(lat, lon, geometry[i - 1], geometry[i]));
-  }
+  for (let i = 1; i < geometry.length; i += 1) best = Math.min(best, pointSegmentDistanceMeters(lat, lon, geometry[i - 1], geometry[i]));
   return best;
 }
 
@@ -51,81 +49,58 @@ function makeCandidate(lat: number, lon: number, geometry: Point[], tags: Record
     relationId: null,
     source,
     waysCount: 1,
-    geometry,
+    segments: [geometry],
   };
 }
 
 function groupCandidates(candidates: Candidate[]) {
   const grouped = new Map<string, Candidate>();
   for (const candidate of candidates) {
-    const key = candidate.relationId
-      ? `${candidate.routeType}:${candidate.relationId}`
-      : `${candidate.routeType}:${candidate.ref || "way"}:${candidate.wayId}`;
+    const key = candidate.relationId ? `${candidate.routeType}:${candidate.relationId}` : `${candidate.routeType}:${candidate.ref || "way"}:${candidate.wayId}`;
     const existing = grouped.get(key);
     if (!existing) {
-      grouped.set(key, { ...candidate });
+      grouped.set(key, { ...candidate, segments: [...candidate.segments] });
       continue;
     }
     existing.waysCount += candidate.waysCount;
     existing.distanceMeters = Math.min(existing.distanceMeters, candidate.distanceMeters);
-    existing.geometry = [...existing.geometry, ...candidate.geometry];
+    existing.segments.push(...candidate.segments);
   }
-  return [...grouped.values()]
-    .sort((a, b) => a.distanceMeters - b.distanceMeters)
-    .slice(0, 8);
+  return [...grouped.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 8);
 }
 
 async function tryOverpass(lat: number, lon: number) {
-  const query = `[out:json][timeout:20];(way(around:200,${lat},${lon})[railway=rail];);out geom tags;rel(bw)[type=route][route~"^(tracks|railway)$"];out tags;`;
-  const endpoints = [
-    "https://overpass-api.de/api/interpreter",
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
-  ];
+  const query = `[out:json][timeout:20];way(around:200,${lat},${lon})[railway=rail];out geom tags;rel(bw)[type=route][route~"^(tracks|railway)$"];out tags;`;
+  const endpoints = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
   let lastError = "";
 
   for (const endpoint of endpoints) {
     try {
       const url = `${endpoint}?${new URLSearchParams({ data: query }).toString()}`;
-      const response = await fetch(url, {
-        cache: "no-store",
-        headers: { accept: "application/json", "user-agent": "Crossings/1.0 (meineschranke.com)" },
-      });
+      const response = await fetch(url, { cache: "no-store", headers: { accept: "application/json", "user-agent": "Crossings/1.0 (meineschranke.com)" } });
       if (!response.ok) {
         const body = await response.text().catch(() => "");
         lastError = `${endpoint} HTTP_${response.status}${body ? ` ${body.slice(0, 180)}` : ""}`;
         continue;
       }
-
       const data = await response.json();
       const elements = Array.isArray(data?.elements) ? data.elements : [];
       const ways = elements.filter((element: any) => element?.type === "way" && Array.isArray(element?.geometry));
       const relations = elements.filter((element: any) => element?.type === "relation");
       const relationByWay = new Map<number, any[]>();
-
       for (const relation of relations) {
         const routeType = String(relation.tags?.route || "");
         if (relation.tags?.type !== "route" || !["tracks", "railway"].includes(routeType)) continue;
         for (const member of relation.members || []) {
           if (member.type !== "way") continue;
           const list = relationByWay.get(Number(member.ref)) || [];
-          list.push({
-            routeType,
-            ref: String(relation.tags?.ref || ""),
-            name: String(relation.tags?.name || ""),
-            from: String(relation.tags?.from || ""),
-            to: String(relation.tags?.to || ""),
-            relationId: Number(relation.id),
-          });
+          list.push({ routeType, ref: String(relation.tags?.ref || ""), name: String(relation.tags?.name || ""), from: String(relation.tags?.from || ""), to: String(relation.tags?.to || ""), relationId: Number(relation.id) });
           relationByWay.set(Number(member.ref), list);
         }
       }
-
       const candidates: Candidate[] = [];
       for (const way of ways) {
-        const geometry: Point[] = way.geometry
-          .map((point: any) => ({ lat: Number(point.lat), lon: Number(point.lon) }))
-          .filter((point: Point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
+        const geometry: Point[] = way.geometry.map((point: any) => ({ lat: Number(point.lat), lon: Number(point.lon) })).filter((point: Point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
         if (geometry.length < 2) continue;
         const local = makeCandidate(lat, lon, geometry, way.tags || {}, Number(way.id), "openstreetmap");
         if (!local) continue;
@@ -134,40 +109,19 @@ async function tryOverpass(lat: number, lon: number) {
           candidates.push(local);
           continue;
         }
-        for (const relation of relationsForWay) {
-          candidates.push({
-            ...local,
-            kind: "route",
-            routeType: relation.routeType,
-            ref: relation.ref || local.ref,
-            name: relation.name || local.name,
-            from: relation.from,
-            to: relation.to,
-            relationId: relation.relationId,
-          });
-        }
+        for (const relation of relationsForWay) candidates.push({ ...local, kind: "route", routeType: relation.routeType, ref: relation.ref || local.ref, name: relation.name || local.name, from: relation.from, to: relation.to, relationId: relation.relationId });
       }
-
-      return {
-        status: "OK" as const,
-        candidates: groupCandidates(candidates),
-        endpoint,
-        wayCount: ways.length,
-        relationCount: relations.length,
-      };
+      return { status: "OK" as const, candidates: groupCandidates(candidates), endpoint, wayCount: ways.length, relationCount: relations.length };
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
   }
-
   return { status: "OVERPASS_ERROR" as const, error: lastError, candidates: [] as Candidate[] };
 }
 
 function parseOsmMap(xml: string, lat: number, lon: number) {
   const nodes = new Map<string, Point>();
-  for (const match of xml.matchAll(/<node\b[^>]*\bid="(\d+)"[^>]*\blat="([+-]?[\d.]+)"[^>]*\blon="([+-]?[\d.]+)"[^>]*\/>/g)) {
-    nodes.set(match[1], { lat: Number(match[2]), lon: Number(match[3]) });
-  }
+  for (const match of xml.matchAll(/<node\b[^>]*\bid="(\d+)"[^>]*\blat="([+-]?[\d.]+)"[^>]*\blon="([+-]?[\d.]+)"[^>]*\/>/g)) nodes.set(match[1], { lat: Number(match[2]), lon: Number(match[3]) });
   const candidates: Candidate[] = [];
   for (const wayMatch of xml.matchAll(/<way\b[^>]*\bid="(\d+)"[^>]*>([\s\S]*?)<\/way>/g)) {
     const body = wayMatch[2];
@@ -190,21 +144,14 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const lat = Number(searchParams.get("lat"));
   const lon = Number(searchParams.get("lon"));
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
-    return NextResponse.json({ status: "INVALID_COORDINATES", candidates: [] }, { status: 400 });
-  }
-
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return NextResponse.json({ status: "INVALID_COORDINATES", candidates: [] }, { status: 400 });
   const overpass = await tryOverpass(lat, lon);
   if (overpass.status === "OK") return NextResponse.json(overpass);
-
   try {
     const delta = 0.0022;
     const bbox = `${lon - delta},${lat - delta},${lon + delta},${lat + delta}`;
     const mapUrl = `https://api.openstreetmap.org/api/0.6/map?bbox=${encodeURIComponent(bbox)}`;
-    const response = await fetch(mapUrl, {
-      cache: "no-store",
-      headers: { accept: "application/xml", "user-agent": "Crossings/1.0 (meineschranke.com)" },
-    });
+    const response = await fetch(mapUrl, { cache: "no-store", headers: { accept: "application/xml", "user-agent": "Crossings/1.0 (meineschranke.com)" } });
     if (response.ok) {
       const xml = await response.text();
       const candidates = parseOsmMap(xml, lat, lon);
