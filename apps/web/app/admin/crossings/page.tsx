@@ -30,8 +30,10 @@ export default function CrossingsAdmin() {
     const res = await fetch(`/api/admin/crossings?coordinates=${encodeURIComponent(coords)}`);
     const data = await res.json();
     setNearest(data.nearest || []);
-    const first = data.nearest?.[0];
-    if (first) setForm((f) => ({ ...f, lat: String(first.lat), lon: String(first.lon) }));
+    const normalized = coords.replace(/,/g, " ").trim().split(/\s+/).map(Number);
+    if (normalized.length >= 2 && normalized.every(Number.isFinite)) {
+      setForm((f) => ({ ...f, lat: String(normalized[0]), lon: String(normalized[1]) }));
+    }
   }
 
   async function save() {
@@ -55,7 +57,7 @@ export default function CrossingsAdmin() {
       <div className={styles.drawerHead}><div><div className={styles.eyebrow}>NEUER DATENSATZ</div><h2>Übergang einrichten</h2></div><button className={styles.close} onClick={() => setOpen(false)}>×</button></div>
       <div className={styles.steps}><span className={styles.active}>01 Standort</span><span>02 EVAs</span><span>03 Prognose</span></div>
       <div className={styles.content}>
-        <section><label>Google-Maps-Koordinaten</label><div className={styles.inline}><input value={coords} onChange={(e) => setCoords(e.target.value)} placeholder="z. B. 52.196944, 8.642139"/><button className={styles.secondary} onClick={findNearest}>Übergang suchen</button></div><small>Koordinaten können direkt aus Google Maps übernommen werden. Der Wizard sucht zunächst den nächstgelegenen bekannten Übergang.</small>{nearest.length > 0 && <div className={styles.matches}>{nearest.map((n) => <button key={n.id} onClick={() => update("name", String(n.name))}><strong>{n.name}</strong><span>{n.distanceKm.toFixed(2)} km · EVA {n.eva}</span></button>)}</div>}</section>
+        <section><label>Google-Maps-Koordinaten</label><div className={styles.inline}><input value={coords} onChange={(e) => setCoords(e.target.value)} placeholder="z. B. 52.196944, 8.642139"/><button className={styles.secondary} onClick={findNearest}>Übergang suchen</button></div><small>Koordinaten können direkt aus Google Maps übernommen werden. Der Wizard sucht zunächst den nächstgelegenen bekannten Übergang.</small>{nearest.length > 0 && <div className={styles.matches}>{nearest.map((n) => <div className={styles.match} key={n.id}><strong>{n.name}</strong><span>{n.distanceKm.toFixed(2)} km · EVA {n.eva}</span></div>)}</div>}</section>
         <div className={styles.grid}><Field label="Name" value={form.name} onChange={(v) => update("name", v)} placeholder="z. B. Kirchlengern"/><Field label="EVA des Übergangs" value={form.eva} onChange={(v) => update("eva", v)} placeholder="8003288"/><Field label="Breitengrad" value={form.lat} onChange={(v) => update("lat", v)} placeholder="52.196944"/><Field label="Längengrad" value={form.lon} onChange={(v) => update("lon", v)} placeholder="8.642139"/></div>
         <section><label>Angrenzende / beobachtete Bahnhöfe</label><small>Diese EVAs bilden später die Beobachtungsbasis für die DB-Fahrplananalyse.</small>{form.stations.map((s, i) => <div className={styles.station} key={i}><input value={s.eva} onChange={(e) => updateStation(i, { eva: e.target.value })} placeholder="EVA"/><input value={s.stationName} onChange={(e) => updateStation(i, { stationName: e.target.value })} placeholder="Bahnhof"/><select value={s.role} onChange={(e) => updateStation(i, { role: e.target.value })}><option value="primary">Primär</option><option value="observation">Beobachtung</option><option value="anchor">Anker</option></select><select value={s.direction} onChange={(e) => updateStation(i, { direction: e.target.value })}><option value="unknown">Richtung offen</option><option value="eastbound">Ostwärts</option><option value="westbound">Westwärts</option></select></div>)}<button className={styles.add} onClick={() => update("stations", [...form.stations, emptyStation()])}>+ Bahnhof hinzufügen</button></section>
         <section><label>Fahrweg / relevante Halte</label><textarea value={form.requiredRouteStops} onChange={(e) => update("requiredRouteStops", e.target.value)} placeholder={'Osnabrück Hbf\nBünde (Westf)\nHannover Hbf'} /></section>
