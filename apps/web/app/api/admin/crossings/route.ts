@@ -4,6 +4,7 @@ import { readStations } from "db-stations";
 
 const CODE_ALPHABET = "23456789CFGHJMPQRVWX";
 const SEPARATOR = "+";
+const PAIR_RESOLUTIONS = [20, 1, 0.05, 0.0025, 0.000125];
 
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const r = 6371;
@@ -22,91 +23,86 @@ function parseCoordinates(value: string) {
   return { lat, lon, source: "coordinates" as const };
 }
 
-function cleanCode(value: string) { return value.toUpperCase().trim(); }
+function cleanCode(value: string) { return value.toUpperCase().trim().replace(/\s+/g, ""); }
 
-function decodeFullPlusCode(value: string) {
-  const code = cleanCode(value).replace(/\s+/g, "");
+function encodeFull(latInput: number, lonInput: number, length = 10) {
+  let lat = Math.max(-90, Math.min(90, latInput));
+  let lon = ((lonInput + 180) % 360 + 360) % 360 - 180;
+  if (lat === 90) lat -= 1e-12;
+  lat += 90;
+  lon += 180;
+  let code = "";
+  for (let i = 0; i < Math.min(length, 10); i += 2) {
+    const resolution = PAIR_RESOLUTIONS[i / 2];
+    const latDigit = Math.floor(lat / resolution);
+    const lonDigit = Math.floor(lon / resolution);
+    code += CODE_ALPHABET[Math.max(0, Math.min(19, latDigit))];
+    code += CODE_ALPHABET[Math.max(0, Math.min(19, lonDigit))];
+    lat -= latDigit * resolution;
+    lon -= lonDigit * resolution;
+  }
+  return code.slice(0, 8) + SEPARATOR + code.slice(8);
+}
+
+function decodeFull(value: string) {
+  const code = cleanCode(value);
   const separator = code.indexOf(SEPARATOR);
-  if (separator < 0) return null;
-  const digits = code.slice(0, separator).replace(/0/g, "");
-  if (digits.length < 8 || digits.length % 2 !== 0) return null;
-  let lat = -90, lon = -180, latPlace = 400, lonPlace = 400;
-  for (let i = 0; i < Math.min(digits.length, 10); i += 2) {
+  if (separator !== 8) return null;
+  const digits = code.slice(0, separator) + code.slice(separator + 1);
+  if (digits.length < 2 || digits.length > 10 || digits.length % 2 !== 0) return null;
+  let lat = -90;
+  let lon = -180;
+  let latResolution = 20;
+  let lonResolution = 20;
+  for (let i = 0; i < digits.length; i += 2) {
     const latIndex = CODE_ALPHABET.indexOf(digits[i]);
     const lonIndex = CODE_ALPHABET.indexOf(digits[i + 1]);
     if (latIndex < 0 || lonIndex < 0) return null;
-    latPlace /= 20;
-    lonPlace /= 20;
-    lat += latIndex * latPlace;
-    lon += lonIndex * lonPlace;
+    const pairIndex = i / 2;
+    const resolution = PAIR_RESOLUTIONS[pairIndex];
+    if (!resolution) return null;
+    lat += latIndex * resolution;
+    lon += lonIndex * resolution;
+    latResolution = resolution;
+    lonResolution = resolution;
   }
-  return { lat: lat + latPlace / 2, lon: lon + lonPlace / 2, source: "plus-code" as const };
+  return { lat: lat + latResolution / 2, lon: lon + lonResolution / 2, source: "plus-code" as const };
+}
+
+function recoverShortCode(shortCode: string, referenceLat: number, referenceLon: number) {
+  const code = cleanCode(shortCode);
+  const separator = code.indexOf(SEPARATOR);
+  if (separator < 2 || separator >= 8) return null;
+  const paddingLength = 8 - separator;
+  if (paddingLength % 2 !== 0) return null;
+  const referenceCode = encodeFull(referenceLat, referenceLon, 10).replace(SEPARATOR, "");
+  const candidate = referenceCode.slice(0, paddingLength) + code;
+  const area = decodeFull(candidate.slice(0, 8) + SEPARATOR + candidate.slice(8));
+  if (!area) return null;
+  const resolution = 20 ** (2 - paddingLength / 2);
+  const half = resolution / 2;
+  let lat = area.lat;
+  let lon = area.lon;
+  if (referenceLat + half < lat && lat - resolution >= -90) lat -= resolution;
+  else if (referenceLat - half > lat && lat + resolution <= 90) lat += resolution;
+  if (referenceLon + half < lon) lon -= resolution;
+  else if (referenceLon - half > lon) lon += resolution;
+  return { lat, lon, source: "plus-code-recovered" as const };
 }
 
 async function geocodeLocality(locality: string) {
   try {
     const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&q=${encodeURIComponent(locality)}`, {
-      headers: { "User-Agent": "Crossings/1.0 (meineschranke)" },
+      headers: { "User-Agent": "Crossings/1.0 (meineschranke.com)" },
       cache: "no-store",
     });
     if (!response.ok) return null;
     const data = await response.json();
     if (!data?.[0]) return null;
-    return { lat: Number(data[0].lat), lon: Number(data[0].lon) };
+    const lat = Number(data[0].lat), lon = Number(data[0].lon);
+    return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
   } catch { return null; }
 }
-
-function encodeReferencePrefix(referenceLat: number, referenceLon: number, digitCount: number) {
-  let lat = Math.max(-90, Math.min(90, referenceLat)) + 90;
-  let lon = ((referenceLon + 180) % 360 + 360) % 360;
-  let result = "";
-  const pairCount = Math.floor(digitCount / 2);
-  let latPlace = 400;
-  let lonPlace = 400;
-  for (let i = 0; i < pairCount; i++) {
-    latPlace /= 20;
-    lonPlace /= 20;
-    const latIndex = Math.max(0, Math.min(19, Math.floor(lat / latPlace)));
-    const lonIndex = Math.max(0, Math.min(19, Math.floor(lon / lonPlace)));
-    result += CODE_ALPHABET[latIndex] + CODE_ALPHABET[lonIndex];
-    lat -= latIndex * latPlace;
-    lon -= lonIndex * lonPlace;
-  }
-  return result;
-}
-
-function recoverShortCode(shortCode: string, referenceLat: number, referenceLon: number) {
-  const compact = cleanCode(shortCode).replace(/\s+/g, "");
-  const separator = compact.indexOf(SEPARATOR);
-  if (separator < 4 || separator >= 8) return null;
-  const shortDigits = compact.slice(0, separator);
-  const suffix = compact.slice(separator + 1);
-  const prefixLength = 8 - shortDigits.length;
-  if (prefixLength < 1 || prefixLength % 2 !== 0 || !suffix.length) return null;
-  const prefix = encodeReferencePrefix(referenceLat, referenceLon, prefixLength);
-  return decodeFullPlusCode(prefix + shortDigits + SEPARATOR + suffix);
-}
-
-async function resolvePlusCode(value: string) {
-  const input = value.trim();
-  const plusIndex = input.indexOf(SEPARATOR);
-  if (plusIndex < 0) return null;
-  const before = input.slice(0, plusIndex).trim();
-  const after = input.slice(plusIndex + 1).trim();
-  const suffix = after.split(/\s+/)[0];
-  const codePart = `${before}+${suffix}`;
-  const full = decodeFullPlusCode(codePart);
-  if (full) return full;
-  if (before.length < 4 || before.length > 7) return null;
-  const locality = after.split(/\s+/).slice(1).join(" ").trim();
-  if (!locality) return null;
-  const reference = await geocodeLocality(locality);
-  if (!reference) return null;
-  const recovered = recoverShortCode(codePart, reference.lat, reference.lon);
-  return recovered ? { ...recovered, source: "plus-code-recovered" as const, locality } : null;
-}
-
-async function resolveLocation(value: string) { return parseCoordinates(value) || await resolvePlusCode(value); }
 
 type Station = {
   type?: string;
@@ -120,20 +116,46 @@ type Station = {
 };
 
 let stationCatalogPromise: Promise<Station[]> | null = null;
-
 async function loadStationCatalog() {
   if (!stationCatalogPromise) {
     stationCatalogPromise = (async () => {
       const stations: Station[] = [];
       for await (const station of readStations() as AsyncIterable<Station>) stations.push(station);
       return stations.filter((station) => Number.isFinite(station.location?.latitude) && Number.isFinite(station.location?.longitude));
-    })().catch((error) => {
-      stationCatalogPromise = null;
-      throw error;
-    });
+    })().catch((error) => { stationCatalogPromise = null; throw error; });
   }
   return stationCatalogPromise;
 }
+
+async function geocodeLocalityFromStations(locality: string) {
+  const normalized = locality.toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+  const stations = await loadStationCatalog();
+  const matches = stations.filter((station) => String(station.address?.city || "").toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() === normalized);
+  if (!matches.length) return null;
+  const lat = matches.reduce((sum, s) => sum + Number(s.location?.latitude), 0) / matches.length;
+  const lon = matches.reduce((sum, s) => sum + Number(s.location?.longitude), 0) / matches.length;
+  return { lat, lon };
+}
+
+async function resolvePlusCode(value: string) {
+  const input = value.trim();
+  const plusIndex = input.indexOf(SEPARATOR);
+  if (plusIndex < 0) return null;
+  const before = input.slice(0, plusIndex).trim();
+  const after = input.slice(plusIndex + 1).trim();
+  const suffix = after.split(/\s+/)[0];
+  const codePart = `${before}+${suffix}`;
+  const full = decodeFull(codePart);
+  if (full) return full;
+  if (before.length < 2 || before.length > 7) return null;
+  const locality = after.split(/\s+/).slice(1).join(" ").trim();
+  if (!locality) return null;
+  const reference = await geocodeLocalityFromStations(locality) || await geocodeLocality(locality);
+  if (!reference) return null;
+  return recoverShortCode(codePart, reference.lat, reference.lon);
+}
+
+async function resolveLocation(value: string) { return parseCoordinates(value) || await resolvePlusCode(value); }
 
 async function discoverStations(lat: number, lon: number) {
   const stations = await loadStationCatalog();
@@ -141,17 +163,7 @@ async function discoverStations(lat: number, lon: number) {
     .map((station) => {
       const stationLat = Number(station.location?.latitude);
       const stationLon = Number(station.location?.longitude);
-      return {
-        eva: String(station.id || ""),
-        stationName: String(station.name || station.id || ""),
-        ril100: String(station.ril100 || ""),
-        nr: station.nr ?? null,
-        lat: stationLat,
-        lon: stationLon,
-        city: String(station.address?.city || ""),
-        zipcode: String(station.address?.zipcode || ""),
-        distanceKm: distanceKm(lat, lon, stationLat, stationLon),
-      };
+      return { eva: String(station.id || ""), stationName: String(station.name || station.id || ""), ril100: String(station.ril100 || ""), nr: station.nr ?? null, lat: stationLat, lon: stationLon, city: String(station.address?.city || ""), zipcode: String(station.address?.zipcode || ""), distanceKm: distanceKm(lat, lon, stationLat, stationLon) };
     })
     .filter((station) => station.eva && station.distanceKm <= 25)
     .sort((a, b) => a.distanceKm - b.distanceKm)
