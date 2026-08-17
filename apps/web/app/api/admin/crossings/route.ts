@@ -2,253 +2,45 @@ import { randomUUID } from "crypto";
 import { db } from "../../../lib/db";
 import { OpenLocationCode } from "open-location-code";
 
-type Station = {
-  eva: string;
-  stationName: string;
-  ril100?: string;
-  ibnr?: string;
-  lat?: number;
-  lon?: number;
-  city?: string;
-  zipcode?: string;
-  distanceKm?: number;
-};
+type Station = { eva:string; stationName:string; ril100?:string; ibnr?:string; lat?:number; lon?:number; city?:string; zipcode?:string; distanceKm?:number };
 
-function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const r = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
-  return r * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
+function distanceKm(lat1:number,lon1:number,lat2:number,lon2:number){const r=6371,dLat=((lat2-lat1)*Math.PI)/180,dLon=((lon2-lon1)*Math.PI)/180,a=Math.sin(dLat/2)**2+Math.cos((lat1*Math.PI)/180)*Math.cos((lat2*Math.PI)/180)*Math.sin(dLon/2)**2;return r*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
+function parseCoordinates(value:string){const m=value.trim().replace(/,/g," ").match(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);if(!m)return null;const lat=Number(m[1]),lon=Number(m[2]);if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)return null;return{lat,lon,source:"coordinates" as const};}
+function splitPlusCodeInput(value:string){const input=value.trim().replace(/\s+/g," "),plusIndex=input.indexOf("+");if(plusIndex<0)return null;const left=input.slice(0,plusIndex).trim().toUpperCase(),rest=input.slice(plusIndex+1).trim(),parts=rest.split(/\s+/),right=parts.shift();if(!right)return null;return{code:`${left}+${right.toUpperCase()}`,locality:parts.join(" ").trim()};}
 
-function parseCoordinates(value: string) {
-  const input = value.trim().replace(/,/g, " ");
-  const match = input.match(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);
-  if (!match) return null;
-  const lat = Number(match[1]);
-  const lon = Number(match[2]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  return { lat, lon, source: "coordinates" as const };
-}
-
-function splitPlusCodeInput(value: string) {
-  const input = value.trim().replace(/\s+/g, " ");
-  const plusIndex = input.indexOf("+");
-  if (plusIndex < 0) return null;
-  const left = input.slice(0, plusIndex).trim().toUpperCase();
-  const rest = input.slice(plusIndex + 1).trim();
-  const parts = rest.split(/\s+/);
-  const right = parts.shift();
-  if (!right) return null;
-  return { code: `${left}+${right.toUpperCase()}`, locality: parts.join(" ").trim() };
-}
-
-async function findStationReference(locality: string) {
-  const normalized = locality.trim();
-  if (!normalized) return null;
-
-  try {
-    const result = await db.execute({
-      sql: `SELECT eva, name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL AND (name = ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE) ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 ELSE 1 END, length(name) LIMIT 1`,
-      args: [normalized, `${normalized}%`, normalized],
-    });
-    const row = result.rows[0];
-    if (row) {
-      const lat = Number(row.lat);
-      const lon = Number(row.lon);
-      if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon, source: "station-catalog" as const, station: String(row.name || row.eva || normalized) };
-    }
-  } catch {
-    // Migration 006 may not have been imported yet. Use the legacy table.
-  }
-
-  try {
-    const result = await db.execute({
-      sql: `SELECT eva, name, lat, lon FROM railway_stations WHERE lat IS NOT NULL AND lon IS NOT NULL AND (name = ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE) ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 ELSE 1 END, length(name) LIMIT 1`,
-      args: [normalized, `${normalized}%`, normalized],
-    });
-    const row = result.rows[0];
-    if (row) {
-      const lat = Number(row.lat);
-      const lon = Number(row.lon);
-      if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon, source: "railway-stations" as const, station: String(row.name || row.eva || normalized) };
-    }
-  } catch {
-    // Continue to external geocoding.
-  }
-
+async function resolveViaPlusCodesApi(code:string,locality:string){
+  if(!locality)return null;
+  const params=new URLSearchParams({address:`${code} ${locality}`,language:"de"});
+  const key=process.env.PLUS_CODES_API_KEY||process.env.GOOGLE_MAPS_API_KEY;
+  if(key)params.set("key",key);
+  try{
+    const response=await fetch(`https://plus.codes/api?${params.toString()}`,{headers:{"User-Agent":"Crossings/1.0 (meineschranke.com)"},cache:"no-store"});
+    if(!response.ok)return null;
+    const data=await response.json();
+    const location=data?.plus_code?.geometry?.location||data?.plus_code?.location;
+    const lat=Number(location?.lat),lon=Number(location?.lng??location?.lon);
+    if(Number.isFinite(lat)&&Number.isFinite(lon))return{lat,lon,source:"plus-codes-api" as const,globalCode:String(data?.plus_code?.global_code||"")};
+  }catch{}
   return null;
 }
 
-async function geocodeLocality(locality: string) {
-  const stationReference = await findStationReference(locality);
-  if (stationReference) return stationReference;
+async function findStationReference(locality:string){const normalized=locality.trim();if(!normalized)return null;try{const result=await db.execute({sql:`SELECT eva,name,lat,lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL AND (name = ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE) ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 ELSE 1 END,length(name) LIMIT 1`,args:[normalized,`${normalized}%`,normalized]});const row=result.rows[0];if(row){const lat=Number(row.lat),lon=Number(row.lon);if(Number.isFinite(lat)&&Number.isFinite(lon))return{lat,lon,source:"station-catalog" as const,station:String(row.name||row.eva||normalized)};}}catch{}try{const result=await db.execute({sql:`SELECT eva,name,lat,lon FROM railway_stations WHERE lat IS NOT NULL AND lon IS NOT NULL AND (name = ? COLLATE NOCASE OR name LIKE ? COLLATE NOCASE) ORDER BY CASE WHEN name = ? COLLATE NOCASE THEN 0 ELSE 1 END,length(name) LIMIT 1`,args:[normalized,`${normalized}%`,normalized]});const row=result.rows[0];if(row){const lat=Number(row.lat),lon=Number(row.lon);if(Number.isFinite(lat)&&Number.isFinite(lon))return{lat,lon,source:"railway-stations" as const,station:String(row.name||row.eva||normalized)};}}catch{}return null;}
 
-  for (const url of [
-    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&q=${encodeURIComponent(locality)}`,
-    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locality)}&count=1&language=de&format=json`,
-  ]) {
-    try {
-      const response = await fetch(url, { headers: { "User-Agent": "Crossings/1.0 (meineschranke.com)" }, cache: "no-store" });
-      if (!response.ok) continue;
-      const data = await response.json();
-      const item = data?.[0] || data?.results?.[0];
-      const lat = Number(item?.lat ?? item?.latitude);
-      const lon = Number(item?.lon ?? item?.longitude);
-      if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon, source: "geocoder" as const };
-    } catch {
-      // Try the next resolver.
-    }
-  }
-  return null;
-}
+async function geocodeLocality(locality:string){for(const url of [`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&q=${encodeURIComponent(locality)}`,`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locality)}&count=1&language=de&format=json`]){try{const response=await fetch(url,{headers:{"User-Agent":"Crossings/1.0 (meineschranke.com)"},cache:"no-store"});if(!response.ok)continue;const data=await response.json(),item=data?.[0]||data?.results?.[0],lat=Number(item?.lat??item?.latitude),lon=Number(item?.lon??item?.longitude);if(Number.isFinite(lat)&&Number.isFinite(lon))return{lat,lon,source:"geocoder" as const};}catch{}}return null;}
 
-async function resolvePlusCode(value: string) {
-  const parsed = splitPlusCodeInput(value);
-  if (!parsed) return null;
-  const { code, locality } = parsed;
+async function resolvePlusCode(value:string){const parsed=splitPlusCodeInput(value);if(!parsed)return null;const{code,locality}=parsed;try{if(OpenLocationCode.isFull(code)){const decoded=OpenLocationCode.decode(code);return{lat:decoded.latitudeCenter,lon:decoded.longitudeCenter,source:"plus-code" as const};}if(!OpenLocationCode.isShort(code)||!locality)return null;
+  const apiResult=await resolveViaPlusCodesApi(code,locality);
+  if(apiResult)return apiResult;
+  const reference=await findStationReference(locality)||await geocodeLocality(locality);
+  if(!reference)return null;
+  const recovered=OpenLocationCode.recoverNearest(code,reference.lat,reference.lon),decoded=OpenLocationCode.decode(recovered);
+  return{lat:decoded.latitudeCenter,lon:decoded.longitudeCenter,source:"plus-code-recovered" as const};
+}catch{return null;}}
+async function resolveLocation(value:string){return parseCoordinates(value)||await resolvePlusCode(value);}
 
-  try {
-    if (OpenLocationCode.isFull(code)) {
-      const decoded = OpenLocationCode.decode(code);
-      return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, source: "plus-code" as const };
-    }
-    if (!OpenLocationCode.isShort(code) || !locality) return null;
+async function discoverStations(lat:number,lon:number){const latDelta=25/111,lonDelta=25/(111*Math.max(Math.cos((lat*Math.PI)/180),0.1));try{const result=await db.execute({sql:`SELECT eva,name,lat,lon,ril100,ibnr FROM railway_station_catalog WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`,args:[lat-latDelta,lat+latDelta,lon-lonDelta,lon+lonDelta]});return result.rows.map(row=>({eva:String(row.eva||""),stationName:String(row.name||row.eva||""),ril100:String(row.ril100||""),ibnr:String(row.ibnr||row.eva||""),lat:Number(row.lat),lon:Number(row.lon)})).filter(s=>s.eva&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)).map(s=>({...s,distanceKm:distanceKm(lat,lon,s.lat,s.lon)})).filter(s=>s.distanceKm<=25).sort((a,b)=>a.distanceKm-b.distanceKm).slice(0,12);}catch{const result=await db.execute({sql:`SELECT eva,name,lat,lon FROM railway_stations WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`,args:[lat-latDelta,lat+latDelta,lon-lonDelta,lon+lonDelta]});return result.rows.map(row=>({eva:String(row.eva||""),stationName:String(row.name||row.eva||""),lat:Number(row.lat),lon:Number(row.lon)})).filter(s=>s.eva&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)).map(s=>({...s,distanceKm:distanceKm(lat,lon,s.lat,s.lon)})).filter(s=>s.distanceKm<=25).sort((a,b)=>a.distanceKm-b.distanceKm).slice(0,12);}}
+async function loadCrossings(){const result=await db.execute(`SELECT id,name,eva,lat,lon,confidence,status,source,observation_evas,required_route_stops,close_offset_seconds,open_offset_seconds,created_at,updated_at FROM crossings ORDER BY name COLLATE NOCASE`);return result.rows;}
 
-    const reference = await geocodeLocality(locality);
-    if (!reference) return null;
+export async function GET(request:Request){const{searchParams}=new URL(request.url),locationInput=searchParams.get("location")||searchParams.get("coordinates"),rows=await loadCrossings();if(locationInput){const coords=await resolveLocation(locationInput);if(!coords)return Response.json({error:"Standort konnte nicht erkannt werden. Bitte Google-Maps-Plus-Code, Koordinaten oder einen vollständigen Plus Code eingeben.",debug:{input:locationInput,parsed:splitPlusCodeInput(locationInput),stage:"location-resolution",plusCodesApiConfigured:Boolean(process.env.PLUS_CODES_API_KEY||process.env.GOOGLE_MAPS_API_KEY)}},{status:400});const nearest=rows.map(row=>({...row,distanceKm:distanceKm(coords.lat,coords.lon,Number(row.lat),Number(row.lon))})).sort((a,b)=>a.distanceKm-b.distanceKm).slice(0,5);let stations:Awaited<ReturnType<typeof discoverStations>>=[];try{stations=await discoverStations(coords.lat,coords.lon);}catch{}return Response.json({input:locationInput,location:coords,nearest,stations});}const withStations=await Promise.all(rows.map(async row=>{const stations=await db.execute({sql:`SELECT id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order`,args:[row.id]});return{...row,stations:stations.rows};}));return Response.json(withStations);}
 
-    const recovered = OpenLocationCode.recoverNearest(code, reference.lat, reference.lon);
-    const decoded = OpenLocationCode.decode(recovered);
-    return {
-      lat: decoded.latitudeCenter,
-      lon: decoded.longitudeCenter,
-      source: reference.source === "station-catalog" ? "plus-code-recovered-station-catalog" : reference.source === "railway-stations" ? "plus-code-recovered-railway-stations" : "plus-code-recovered",
-    } as const;
-  } catch {
-    return null;
-  }
-}
-
-async function resolveLocation(value: string) {
-  return parseCoordinates(value) || (await resolvePlusCode(value));
-}
-
-async function discoverStations(lat: number, lon: number) {
-  const latDelta = 25 / 111;
-  const lonDelta = 25 / (111 * Math.max(Math.cos((lat * Math.PI) / 180), 0.1));
-
-  try {
-    const result = await db.execute({
-      sql: `SELECT eva, name, lat, lon, ril100, ibnr FROM railway_station_catalog WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`,
-      args: [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta],
-    });
-
-    return result.rows
-      .map((row) => ({ eva: String(row.eva || ""), stationName: String(row.name || row.eva || ""), ril100: String(row.ril100 || ""), ibnr: String(row.ibnr || row.eva || ""), lat: Number(row.lat), lon: Number(row.lon) }))
-      .filter((station) => station.eva && Number.isFinite(station.lat) && Number.isFinite(station.lon))
-      .map((station) => ({ ...station, distanceKm: distanceKm(lat, lon, station.lat, station.lon) }))
-      .filter((station) => station.distanceKm <= 25)
-      .sort((a, b) => a.distanceKm - b.distanceKm)
-      .slice(0, 12);
-  } catch {
-    const result = await db.execute({
-      sql: `SELECT eva, name, lat, lon FROM railway_stations WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`,
-      args: [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta],
-    });
-
-    return result.rows
-      .map((row) => ({ eva: String(row.eva || ""), stationName: String(row.name || row.eva || ""), lat: Number(row.lat), lon: Number(row.lon) }))
-      .filter((station) => station.eva && Number.isFinite(station.lat) && Number.isFinite(station.lon))
-      .map((station) => ({ ...station, distanceKm: distanceKm(lat, lon, station.lat, station.lon) }))
-      .filter((station) => station.distanceKm <= 25)
-      .sort((a, b) => a.distanceKm - b.distanceKm)
-      .slice(0, 12);
-  }
-}
-
-async function loadCrossings() {
-  const result = await db.execute(`SELECT id, name, eva, lat, lon, confidence, status, source, observation_evas, required_route_stops, close_offset_seconds, open_offset_seconds, created_at, updated_at FROM crossings ORDER BY name COLLATE NOCASE`);
-  return result.rows;
-}
-
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const locationInput = searchParams.get("location") || searchParams.get("coordinates");
-  const rows = await loadCrossings();
-
-  if (locationInput) {
-    const coords = await resolveLocation(locationInput);
-    if (!coords) {
-      return Response.json({
-        error: "Standort konnte nicht erkannt werden. Bitte Google-Maps-Plus-Code, Koordinaten oder einen vollständigen Plus Code eingeben.",
-        debug: { input: locationInput, parsed: splitPlusCodeInput(locationInput), stage: "location-resolution" },
-      }, { status: 400 });
-    }
-
-    const nearest = rows
-      .map((row) => ({ ...row, distanceKm: distanceKm(coords.lat, coords.lon, Number(row.lat), Number(row.lon)) }))
-      .sort((a, b) => a.distanceKm - b.distanceKm)
-      .slice(0, 5);
-
-    let stations: Awaited<ReturnType<typeof discoverStations>> = [];
-    try {
-      stations = await discoverStations(coords.lat, coords.lon);
-    } catch {
-      stations = [];
-    }
-
-    return Response.json({ input: locationInput, location: coords, nearest, stations });
-  }
-
-  const withStations = await Promise.all(rows.map(async (row) => {
-    const stations = await db.execute({
-      sql: `SELECT id, eva, station_name, role, categories, direction, fallback_offset_seconds, track_distance_meters, sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order`,
-      args: [row.id],
-    });
-    return { ...row, stations: stations.rows };
-  }));
-
-  return Response.json(withStations);
-}
-
-export async function POST(request: Request) {
-  const body = await request.json();
-  const id = String(body.id || body.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const name = String(body.name || "").trim();
-  const eva = String(body.eva || "").trim();
-  const lat = Number(body.lat);
-  const lon = Number(body.lon);
-
-  if (!id || !name || !eva || !Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return Response.json({ error: "Name, EVA, Breite und Länge sind erforderlich." }, { status: 400 });
-  }
-
-  const stations = Array.isArray(body.stations) ? body.stations : [];
-  const observationEvas = stations.map((station: any) => String(station.eva || "").trim()).filter(Boolean);
-  if (!observationEvas.includes(eva)) observationEvas.unshift(eva);
-
-  await db.execute({
-    sql: `INSERT INTO crossings (id, name, eva, observation_evas, required_route_stops, lat, lon, close_offset_seconds, open_offset_seconds, rules, through_rules, diversion_rules, reroute_watch_rules, confidence, source, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '[]', '[]', ?, 'manual', 'active')`,
-    args: [id, name, eva, JSON.stringify(observationEvas), JSON.stringify([]), lat, lon, Number(body.closeOffsetSeconds ?? 80), Number(body.openOffsetSeconds ?? 20), JSON.stringify(body.rules || []), Number(body.confidence ?? 0.5)],
-  });
-
-  for (let i = 0; i < stations.length; i++) {
-    const station = stations[i];
-    const stationEva = String(station.eva || "").trim();
-    if (!stationEva) continue;
-
-    await db.execute({
-      sql: `INSERT OR IGNORE INTO railway_stations (eva, name) VALUES (?, ?)`,
-      args: [stationEva, String(station.stationName || station.name || stationEva)],
-    });
-
-    await db.execute({
-      sql: `INSERT OR REPLACE INTO crossing_station_links (id, crossing_id, eva, station_name, role, categories, direction, fallback_offset_seconds, track_distance_meters, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      args: [randomUUID(), id, stationEva, String(station.stationName || station.name || stationEva), station.role || (stationEva === eva ? "primary" : "observation"), JSON.stringify(station.categories || []), station.direction || "unknown", Number(station.fallbackOffsetSeconds || 0), Number(station.trackDistanceMeters || 0), i],
-    });
-  }
-
-  return Response.json({ id, ok: true }, { status: 201 });
-}
+export async function POST(request:Request){const body=await request.json(),id=String(body.id||body.name||"").trim().toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""),name=String(body.name||"").trim(),eva=String(body.eva||"").trim(),lat=Number(body.lat),lon=Number(body.lon);if(!id||!name||!eva||!Number.isFinite(lat)||!Number.isFinite(lon))return Response.json({error:"Name, EVA, Breite und Länge sind erforderlich."},{status:400});const stations=Array.isArray(body.stations)?body.stations:[],observationEvas=stations.map((s:any)=>String(s.eva||"").trim()).filter(Boolean);if(!observationEvas.includes(eva))observationEvas.unshift(eva);await db.execute({sql:`INSERT INTO crossings (id,name,eva,observation_evas,required_route_stops,lat,lon,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,confidence,source,status) VALUES (?,?,?,?,?,?,?,?,?,?,'[]','[]','[]',?,'manual','active')`,args:[id,name,eva,JSON.stringify(observationEvas),JSON.stringify([]),lat,lon,Number(body.closeOffsetSeconds??80),Number(body.openOffsetSeconds??20),JSON.stringify(body.rules||[]),Number(body.confidence??0.5)]});for(let i=0;i<stations.length;i++){const station=stations[i],stationEva=String(station.eva||"").trim();if(!stationEva)continue;await db.execute({sql:`INSERT OR IGNORE INTO railway_stations (eva,name) VALUES (?,?)`,args:[stationEva,String(station.stationName||station.name||stationEva)]});await db.execute({sql:`INSERT OR REPLACE INTO crossing_station_links (id,crossing_id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)`,args:[randomUUID(),id,stationEva,String(station.stationName||station.name||stationEva),station.role||(stationEva===eva?"primary":"observation"),JSON.stringify(station.categories||[]),station.direction||"unknown",Number(station.fallbackOffsetSeconds||0),Number(station.trackDistanceMeters||0),i]});}return Response.json({id,ok:true},{status:201});}
