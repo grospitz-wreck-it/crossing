@@ -6,6 +6,7 @@ import styles from "./page.module.css";
 type Station = { eva: string; stationName: string; role: string; categories: string[]; direction: string; fallbackOffsetSeconds: number; trackDistanceMeters: number };
 type Crossing = { id: string; name: string; eva: string; lat: number; lon: number; confidence: number; status: string; source: string; stations?: Station[] };
 type NearbyStation = { eva: string; stationName: string; ril100?: string; lat: number; lon: number; city?: string; zipcode?: string; distanceKm: number };
+type RailwayCandidate = { kind: string; routeType: string; ref: string; name: string; from: string; to: string; distanceMeters: number; wayId: number; relationId?: number | null; source: string };
 
 const emptyStation = (): Station => ({ eva: "", stationName: "", role: "observation", categories: ["RB", "RE", "IC", "ICE"], direction: "unknown", fallbackOffsetSeconds: 0, trackDistanceMeters: 0 });
 
@@ -18,6 +19,7 @@ export default function CrossingsAdmin() {
   const [location, setLocation] = useState<any>(null);
   const [lookupError, setLookupError] = useState("");
   const [nearbyStations, setNearbyStations] = useState<NearbyStation[]>([]);
+  const [railwayInfrastructure, setRailwayInfrastructure] = useState<{ status: string; candidates: RailwayCandidate[] }>({ status: "NOT_RUN", candidates: [] });
   const [stationLoading, setStationLoading] = useState(false);
   const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lookupRequest = useRef(0);
@@ -31,22 +33,10 @@ export default function CrossingsAdmin() {
 
   useEffect(() => { load(); return () => { if (lookupTimer.current) clearTimeout(lookupTimer.current); }; }, []);
 
-  function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) {
-    setForm((f) => ({ ...f, [key]: value }));
-  }
-
-  function updateStation(index: number, patch: Partial<Station>) {
-    setForm((f) => ({ ...f, stations: f.stations.map((s, i) => i === index ? { ...s, ...patch } : s) }));
-  }
-
-  function addNearbyStation(station: NearbyStation) {
-    if (form.stations.some((s) => s.eva === station.eva)) return;
-    update("stations", [...form.stations, { ...emptyStation(), eva: station.eva, stationName: station.stationName, trackDistanceMeters: station.distanceKm * 1000 }]);
-  }
-
-  function removeStation(index: number) {
-    update("stations", form.stations.filter((_, i) => i !== index));
-  }
+  function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) { setForm((f) => ({ ...f, [key]: value })); }
+  function updateStation(index: number, patch: Partial<Station>) { setForm((f) => ({ ...f, stations: f.stations.map((s, i) => i === index ? { ...s, ...patch } : s) })); }
+  function addNearbyStation(station: NearbyStation) { if (form.stations.some((s) => s.eva === station.eva)) return; update("stations", [...form.stations, { ...emptyStation(), eva: station.eva, stationName: station.stationName, trackDistanceMeters: station.distanceKm * 1000 }]); }
+  function removeStation(index: number) { update("stations", form.stations.filter((_, i) => i !== index)); }
 
   function looksLikeLocation(value: string) {
     const input = value.trim();
@@ -55,39 +45,30 @@ export default function CrossingsAdmin() {
     return /^[23456789CFGHJMPQRVWX]{4,7}\+[23456789CFGHJMPQRVWX]{2,7}(?:\s+.+)?$/i.test(input);
   }
 
+  function mapEmbedUrl() {
+    if (!location) return "";
+    const lat = Number(location.lat), lon = Number(location.lon), dLat = 0.003, dLon = 0.005;
+    return `https://www.openstreetmap.org/export/embed.html?bbox=${lon - dLon}%2C${lat - dLat}%2C${lon + dLon}%2C${lat + dLat}&layer=mapnik&marker=${lat}%2C${lon}`;
+  }
+
   async function resolveLocation(value = coords) {
     const input = value.trim();
     if (!looksLikeLocation(input)) return;
     const requestId = ++lookupRequest.current;
-    setLookupError("");
-    setStationLoading(true);
-    setNearbyStations([]);
+    setLookupError(""); setStationLoading(true); setNearbyStations([]); setRailwayInfrastructure({ status: "LOADING", candidates: [] });
     try {
       const res = await fetch(`/api/admin/crossings?location=${encodeURIComponent(input)}`, { cache: "no-store" });
       const data = await res.json().catch(() => ({}));
       if (requestId !== lookupRequest.current) return;
-      if (!res.ok) {
-        setNearest([]);
-        setLocation(null);
-        setLookupError(data.error || "Standort konnte nicht erkannt werden.");
-        return;
-      }
-      setLocation(data.location || null);
-      setNearest(data.nearest || []);
-      setNearbyStations(data.stations || []);
-      if (data.location) {
-        setForm((f) => ({ ...f, lat: String(data.location.lat), lon: String(data.location.lon) }));
-      }
-    } catch {
-      if (requestId === lookupRequest.current) setLookupError("Standort konnte nicht geladen werden. Bitte erneut versuchen.");
-    } finally {
-      if (requestId === lookupRequest.current) setStationLoading(false);
-    }
+      if (!res.ok) { setNearest([]); setLocation(null); setRailwayInfrastructure({ status: "ERROR", candidates: [] }); setLookupError(data.error || "Standort konnte nicht erkannt werden."); return; }
+      setLocation(data.location || null); setNearest(data.nearest || []); setNearbyStations(data.stations || []); setRailwayInfrastructure(data.railwayInfrastructure || { status: "NOT_RUN", candidates: [] });
+      if (data.location) setForm((f) => ({ ...f, lat: String(data.location.lat), lon: String(data.location.lon) }));
+    } catch { if (requestId === lookupRequest.current) { setRailwayInfrastructure({ status: "ERROR", candidates: [] }); setLookupError("Standort konnte nicht geladen werden. Bitte erneut versuchen."); } }
+    finally { if (requestId === lookupRequest.current) setStationLoading(false); }
   }
 
   function handleLocationChange(value: string) {
-    setCoords(value);
-    setLookupError("");
+    setCoords(value); setLookupError("");
     if (lookupTimer.current) clearTimeout(lookupTimer.current);
     if (!looksLikeLocation(value)) return;
     lookupTimer.current = setTimeout(() => { void resolveLocation(value); }, 500);
@@ -99,17 +80,9 @@ export default function CrossingsAdmin() {
       const payload = { ...form, lat: Number(form.lat), lon: Number(form.lon), closeOffsetSeconds: Number(form.closeOffsetSeconds), openOffsetSeconds: Number(form.openOffsetSeconds), confidence: Number(form.confidence), requiredRouteStops: [], stations: form.stations.filter((s) => s.eva.trim()) };
       const res = await fetch("/api/admin/crossings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
       if (!res.ok) { const data = await res.json(); throw new Error(data.error || "Speichern fehlgeschlagen"); }
-      await load();
-      setOpen(false);
-      setNearest([]);
-      setNearbyStations([]);
-      setLocation(null);
-      setCoords("");
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Speichern fehlgeschlagen");
-    } finally {
-      setSaving(false);
-    }
+      await load(); setOpen(false); setNearest([]); setNearbyStations([]); setRailwayInfrastructure({ status: "NOT_RUN", candidates: [] }); setLocation(null); setCoords("");
+    } catch (e) { alert(e instanceof Error ? e.message : "Speichern fehlgeschlagen"); }
+    finally { setSaving(false); }
   }
 
   return <main className={styles.page}>
@@ -121,6 +94,10 @@ export default function CrossingsAdmin() {
       <div className={styles.steps}><span className={styles.active}>01 Standort</span><span className={styles.active}>02 Stationen</span><span>03 Speichern</span></div>
       <div className={styles.content}>
         <section><label>Google Maps / Plus Code</label><div className={styles.inline}><input value={coords} onChange={(e) => handleLocationChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void resolveLocation(); } }} onBlur={() => void resolveLocation()} placeholder="z. B. 6F25+VRJ Rödinghausen"/><button className={styles.secondary} disabled={stationLoading} onClick={() => void resolveLocation()}>{stationLoading ? "Suche…" : "Standort prüfen"}</button></div><small>Akzeptiert Google-Maps-Plus-Codes und GPS-Koordinaten. Die Suche startet automatisch, sobald eine gültige Eingabe erkannt wird.</small>{lookupError && <div className={styles.error}>{lookupError}</div>}{location && <div className={styles.location}><strong>Standort erkannt</strong><span>{Number(location.lat).toFixed(6)}, {Number(location.lon).toFixed(6)} · {location.source === "plus-code-recovered" ? "Plus Code aufgelöst" : location.source === "plus-code" ? "Plus Code" : "GPS"}</span></div>}</section>
+
+        {location && <section className={styles.mapSection}><label>Standort &amp; Bahnstrecke prüfen</label><div className={styles.mapFrame}><iframe title="OSM-Karte zur Standortprüfung" src={mapEmbedUrl()} loading="lazy" referrerPolicy="no-referrer"/><div className={styles.mapBadge}>📍 Übergang</div></div><small>OpenStreetMap · Karte dient nur zur visuellen Kontrolle von Standort und Gleislage.</small></section>}
+
+        {location && <section className={styles.infrastructure}><div className={styles.infrastructureHead}><div><label>Erkannte Bahnstrecken</label><small>OpenStreetMap-Gleise im Umkreis von 150 m.</small></div><span className={railwayInfrastructure.status === "OK" ? styles.okBadge : ""}>{railwayInfrastructure.status === "OK" ? `${railwayInfrastructure.candidates.length} Kandidaten` : railwayInfrastructure.status === "LOADING" ? "wird gesucht…" : railwayInfrastructure.status}</span></div>{railwayInfrastructure.candidates.length ? <div className={styles.infrastructureList}>{railwayInfrastructure.candidates.map((c, i) => <div className={`${styles.infrastructureCard} ${i === 0 ? styles.infrastructurePrimary : ""}`} key={`${c.routeType}-${c.relationId || c.wayId}-${i}`}><div><strong>{c.ref ? `Strecke ${c.ref}` : "Gleis ohne Streckenreferenz"}</strong><span>{c.name || "Keine OSM-Bezeichnung"}{c.from || c.to ? ` · ${c.from || "?"} → ${c.to || "?"}` : ""} · {c.distanceMeters} m</span></div><button className={styles.addStation} onClick={() => { if (c.ref && !form.name) update("name", `Bahnübergang Strecke ${c.ref}`); }}>✓ prüfen</button></div>)}</div> : <div className={styles.emptySmall}>{railwayInfrastructure.status === "LOADING" ? "Bahnstrecken werden gesucht…" : "Keine OSM-Bahnstrecke im Suchradius gefunden."}</div>}</section>}
 
         <div className={styles.grid}><Field label="Name" value={form.name} onChange={(v) => update("name", v)} placeholder="z. B. Bahnübergang Bruchmühlen"/><Field label="EVA des Übergangs" value={form.eva} onChange={(v) => update("eva", v)} placeholder="EVA / Betriebsstelle"/><Field label="Breitengrad" value={form.lat} onChange={(v) => update("lat", v)} placeholder="wird automatisch gesetzt"/><Field label="Längengrad" value={form.lon} onChange={(v) => update("lon", v)} placeholder="wird automatisch gesetzt"/></div>
 
@@ -135,6 +112,4 @@ export default function CrossingsAdmin() {
   </main>;
 }
 
-function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) {
-  return <label className={styles.field}><span>{label}</span><input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}/></label>;
-}
+function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) { return <label className={styles.field}><span>{label}</span><input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}/></label>; }
