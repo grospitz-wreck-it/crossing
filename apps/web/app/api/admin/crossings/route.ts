@@ -47,11 +47,8 @@ function decodeFull(value: string) {
   if (separator !== 8) return null;
   const digits = code.slice(0, separator) + code.slice(separator + 1);
   if (digits.length < 2 || digits.length > 11) return null;
-
-  // OLC supports pair lengths and the grid refinement digit. A recovered
-  // short code such as 5HW4+XRP therefore has 7 digits after reconstruction.
-  const hasGrid = digits.length > 8 && digits.length % 2 === 1 || digits.length === 7 || digits.length === 9;
-  const pairDigits = hasGrid ? digits.length - 1 : digits.length;
+  const hasGrid = digits.length > 10;
+  const pairDigits = hasGrid ? 10 : digits.length;
   if (pairDigits % 2 !== 0 || pairDigits > 10) return null;
 
   let lat = -90, lon = -180;
@@ -70,16 +67,14 @@ function decodeFull(value: string) {
   }
 
   if (hasGrid) {
-    const gridIndex = CODE_ALPHABET.indexOf(digits[pairDigits]);
-    if (gridIndex < 0 || gridIndex >= 20) return null;
-    const row = Math.floor(gridIndex / 4);
-    const col = gridIndex % 4;
+    const gridIndex = CODE_ALPHABET.indexOf(digits[10]);
+    if (gridIndex < 0) return null;
+    const row = Math.floor(gridIndex / 4), col = gridIndex % 4;
     lat += row * (latResolution / 5);
     lon += col * (lonResolution / 4);
     latResolution /= 5;
     lonResolution /= 4;
   }
-
   return { lat: lat + latResolution / 2, lon: lon + lonResolution / 2, source: "plus-code" as const };
 }
 
@@ -89,35 +84,29 @@ function recoverShortCode(shortCode: string, referenceLat: number, referenceLon:
   if (separator < 2 || separator >= 8) return null;
   const paddingLength = 8 - separator;
   if (paddingLength % 2 !== 0) return null;
-  const referenceCode = encodeFull(referenceLat, referenceLon, 10).replace(SEPARATOR, "");
+  const referenceDigits = encodeFull(referenceLat, referenceLon, 10).replace(SEPARATOR, "");
   const shortDigits = code.replace(SEPARATOR, "");
-  const candidateDigits = referenceCode.slice(0, paddingLength) + shortDigits;
+  const candidateDigits = referenceDigits.slice(0, paddingLength) + shortDigits;
   const candidate = candidateDigits.slice(0, 8) + SEPARATOR + candidateDigits.slice(8);
-  const area = decodeFull(candidate);
-  if (!area) return null;
-
-  // Move the recovered cell to the cell nearest the locality reference.
-  const pairCount = Math.floor(candidateDigits.length / 2);
-  const pairResolution = PAIR_RESOLUTIONS[Math.max(0, pairCount - 1)];
-  const cellHeight = candidateDigits.length % 2 === 1 ? pairResolution / 5 : pairResolution;
-  const cellWidth = candidateDigits.length % 2 === 1 ? pairResolution / 4 : pairResolution;
-  let lat = area.lat, lon = area.lon;
-  if (referenceLat + cellHeight < lat) lat -= pairResolution;
-  else if (referenceLat - cellHeight > lat) lat += pairResolution;
-  if (referenceLon + cellWidth < lon) lon -= pairResolution;
-  else if (referenceLon - cellWidth > lon) lon += pairResolution;
-  return { lat, lon, source: "plus-code-recovered" as const };
+  return decodeFull(candidate) ? { ...decodeFull(candidate)!, source: "plus-code-recovered" as const } : null;
 }
 
 async function geocodeLocality(locality: string) {
-  try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&q=${encodeURIComponent(locality)}`, { headers: { "User-Agent": "Crossings/1.0 (meineschranke.com)" }, cache: "no-store" });
-    if (!response.ok) return null;
-    const data = await response.json();
-    if (!data?.[0]) return null;
-    const lat = Number(data[0].lat), lon = Number(data[0].lon);
-    return Number.isFinite(lat) && Number.isFinite(lon) ? { lat, lon } : null;
-  } catch { return null; }
+  const urls = [
+    `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locality)}&count=1&language=de&format=json`,
+    `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&q=${encodeURIComponent(locality)}`,
+  ];
+  for (const url of urls) {
+    try {
+      const response = await fetch(url, { headers: { "User-Agent": "Crossings/1.0 (meineschranke.com)" }, cache: "no-store" });
+      if (!response.ok) continue;
+      const data = await response.json();
+      const item = data?.results?.[0] || data?.[0];
+      const lat = Number(item?.latitude ?? item?.lat), lon = Number(item?.longitude ?? item?.lon);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) return { lat, lon };
+    } catch { /* try next geocoder */ }
+  }
+  return null;
 }
 
 type Station = { type?: string; id?: string; ril100?: string; nr?: number; name?: string; weight?: number; location?: { latitude?: number; longitude?: number }; address?: { city?: string; zipcode?: string; street?: string } };
@@ -132,11 +121,13 @@ async function loadStationCatalog() {
 }
 
 async function geocodeLocalityFromStations(locality: string) {
-  const normalized = locality.toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  const stations = await loadStationCatalog();
-  const matches = stations.filter((station) => String(station.address?.city || "").toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() === normalized);
-  if (!matches.length) return null;
-  return { lat: matches.reduce((sum, s) => sum + Number(s.location?.latitude), 0) / matches.length, lon: matches.reduce((sum, s) => sum + Number(s.location?.longitude), 0) / matches.length };
+  try {
+    const normalized = locality.toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const stations = await loadStationCatalog();
+    const matches = stations.filter((station) => String(station.address?.city || "").toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() === normalized);
+    if (!matches.length) return null;
+    return { lat: matches.reduce((sum, s) => sum + Number(s.location?.latitude), 0) / matches.length, lon: matches.reduce((sum, s) => sum + Number(s.location?.longitude), 0) / matches.length };
+  } catch { return null; }
 }
 
 async function resolvePlusCode(value: string) {
