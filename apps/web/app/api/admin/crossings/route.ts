@@ -3,8 +3,6 @@ import { db } from "../../../lib/db";
 import { readStations } from "db-stations";
 import { OpenLocationCode } from "open-location-code";
 
-const OLC = new OpenLocationCode();
-
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const r = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -56,15 +54,15 @@ async function resolvePlusCode(value: string) {
   if (!parsed) return null;
   const { code, locality } = parsed;
   try {
-    if (OLC.isFull(code)) {
-      const decoded = OLC.decode(code);
+    if (OpenLocationCode.isFull(code)) {
+      const decoded = OpenLocationCode.decode(code);
       return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, source: "plus-code" as const };
     }
-    if (!OLC.isShort(code) || !locality) return null;
+    if (!OpenLocationCode.isShort(code) || !locality) return null;
     const reference = await geocodeLocality(locality);
     if (!reference) return null;
-    const recovered = OLC.recoverNearest(code, reference.lat, reference.lon);
-    const decoded = OLC.decode(recovered);
+    const recovered = OpenLocationCode.recoverNearest(code, reference.lat, reference.lon);
+    const decoded = OpenLocationCode.decode(recovered);
     return { lat: decoded.latitudeCenter, lon: decoded.longitudeCenter, source: "plus-code-recovered" as const };
   } catch {
     return null;
