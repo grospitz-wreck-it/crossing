@@ -20,7 +20,7 @@ export default function LandingPage() {
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <Link href="/" className={styles.logoLink} aria-label="meineschranke Startseite"><Image src="/images/meineschranke_logo.webp" alt="meineschranke" width={236} height={64} priority className={styles.logo} style={{ width: "clamp(205px, 18vw, 245px)" }} /></Link>
+        <Link href="/" className={styles.logoLink} aria-label="meineschranke Startseite"><Image src="/images/meineschranke_logo.webp" alt="meineschranke" width={236} height={64} priority className={styles.logo} style={{ width: "clamp(215px, 19vw, 285px)" }} /></Link>
         <nav className={styles.nav} aria-label="Hauptnavigation"><a href="#funktionen">Funktionen</a><a href="#so-funktionierts">So funktioniert&apos;s</a><a href="#medien">In den Medien</a><a href="#faq">FAQ</a></nav>
         <div className={styles.headerActions}><a href="#ios" className={styles.appButton}> <span>iPhone App</span></a><Link href="/app" className={styles.primaryButton}>Web-App öffnen <span>→</span></Link></div>
       </header>
