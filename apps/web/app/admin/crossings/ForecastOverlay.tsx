@@ -1,0 +1,72 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+type Forecast = {
+  crossing?: { id: string; name: string; lat: number; lon: number; route?: string[] };
+  state?: string;
+  nextClosure?: { start: string; end: string; closeInSeconds: number; openInSeconds: number; trains: any[] } | null;
+  closures?: any[];
+  trains?: any[];
+  stations?: any[];
+  message?: string;
+  error?: string;
+};
+
+function fmtTime(value: string) { return new Intl.DateTimeFormat("de-DE", { hour: "2-digit", minute: "2-digit" }).format(new Date(value)); }
+function fmtCountdown(seconds: number) { if (seconds < 60) return `in ${Math.max(1, seconds)} Sek.`; const m = Math.floor(seconds / 60); return `in ${m} Min.`; }
+
+export default function ForecastOverlay() {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<Forecast | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const onClick = async (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      const row = target?.closest("div[class*='row']") as HTMLElement | null;
+      if (!row) return;
+      const small = row.querySelector("small");
+      const id = small?.textContent?.trim();
+      if (!id || !/^[a-z0-9-]+$/i.test(id)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(true); setLoading(true); setError(""); setData(null);
+      try {
+        const response = await fetch(`/api/admin/crossings/${encodeURIComponent(id)}/forecast`, { cache: "no-store" });
+        const json = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(json.error || "Prognose konnte nicht geladen werden.");
+        setData(json);
+      } catch (e) { setError(e instanceof Error ? e.message : "Prognose konnte nicht geladen werden."); }
+      finally { setLoading(false); }
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
+  }, []);
+
+  if (!open) return null;
+  const next = data?.nextClosure;
+  return <div onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }} style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(15,20,28,.42)", display: "flex", justifyContent: "flex-end" }}>
+    <aside style={{ width: "min(620px,100vw)", height: "100%", background: "#fff", boxShadow: "-25px 0 70px rgba(0,0,0,.2)", display: "flex", flexDirection: "column" }}>
+      <header style={{ padding: "26px 28px 20px", borderBottom: "1px solid #eceef1", display: "flex", justifyContent: "space-between", gap: 20 }}>
+        <div><div style={{ color: "#c1121f", fontSize: 10, fontWeight: 800, letterSpacing: ".14em", marginBottom: 7 }}>PROGNOSE</div><h2 style={{ margin: 0, fontSize: 28, letterSpacing: "-.035em" }}>{data?.crossing?.name || "Bahnübergang"}</h2></div>
+        <button onClick={() => setOpen(false)} style={{ border: 0, background: "#f1f2f4", borderRadius: 10, width: 38, height: 38, fontSize: 24, cursor: "pointer" }}>×</button>
+      </header>
+      <div style={{ overflow: "auto", padding: 28, display: "grid", gap: 18 }}>
+        {loading && <div style={{ padding: 20, background: "#fafafa", borderRadius: 12 }}>Prognose wird berechnet…</div>}
+        {error && <div style={{ padding: 14, background: "#fff4f4", border: "1px solid #f1d5d8", borderRadius: 12, color: "#b4232d" }}>{error}</div>}
+        {!loading && !error && data && <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ padding: 16, borderRadius: 12, background: data.state === "CLOSED" ? "#fff4f4" : "#f4fbf6" }}><small style={{ color: "#68717b" }}>Status</small><strong style={{ display: "block", marginTop: 5, fontSize: 20 }}>{data.state === "CLOSED" ? "GESCHLOSSEN" : data.state || "UNBEKANNT"}</strong></div>
+            <div style={{ padding: 16, borderRadius: 12, background: "#f7f8fa" }}><small style={{ color: "#68717b" }}>Nächste Schließung</small><strong style={{ display: "block", marginTop: 5, fontSize: 20 }}>{next ? fmtTime(next.start) : "–"}</strong>{next && <span style={{ color: "#68717b", fontSize: 12 }}>{fmtCountdown(next.closeInSeconds)}</span>}</div>
+          </div>
+          {data.message && <div style={{ padding: 14, background: "#fafafa", border: "1px dashed #dfe3e8", borderRadius: 12, color: "#68717b" }}>{data.message}</div>}
+          {next && <section><h3 style={{ margin: "0 0 8px" }}>Nächste Schließung</h3><div style={{ border: "1px solid #f1d5d8", background: "#fff7f7", borderRadius: 12, padding: 15 }}><strong>{fmtTime(next.start)} – {fmtTime(next.end)}</strong><div style={{ marginTop: 8, display: "grid", gap: 6 }}>{next.trains.map((train: any) => <div key={train.id} style={{ fontSize: 12, color: "#68717b" }}><b style={{ color: "#111827" }}>{train.line || train.category}</b> · {train.origin || ""} → {train.destination || ""}{train.delayMinutes ? ` · ${train.delayMinutes > 0 ? "+" : ""}${train.delayMinutes} Min.` : ""}</div>)}</div></div></section>}
+          <section><h3 style={{ margin: "0 0 8px" }}>Weitere Schließzeiten</h3><div style={{ display: "grid", gap: 7 }}>{(data.closures || []).map((closure: any, i: number) => <div key={`${closure.start}-${i}`} style={{ padding: 12, border: "1px solid #e5e7eb", borderRadius: 10, display: "flex", justifyContent: "space-between", gap: 10 }}><strong>{fmtTime(closure.start)} – {fmtTime(closure.end)}</strong><span style={{ color: "#68717b", fontSize: 12 }}>{closure.trainCount} Zug{closure.trainCount === 1 ? "" : "e"}</span></div>)}{!data.closures?.length && <div style={{ color: "#68717b" }}>Keine weiteren Schließungen im Vorschaufenster.</div>}</div></section>
+          <section><h3 style={{ margin: "0 0 8px" }}>Datenbasis</h3><div style={{ display: "grid", gap: 6 }}>{(data.stations || []).map((station: any) => <div key={station.eva} style={{ fontSize: 12, color: station.ok ? "#18834d" : "#b4232d" }}>{station.ok ? "✓" : "!"} {station.stationName} · EVA {station.eva}</div>)}</div></section>
+        </>}
+      </div>
+    </aside>
+  </div>;
+}
