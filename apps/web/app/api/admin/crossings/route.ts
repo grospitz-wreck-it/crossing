@@ -17,8 +17,7 @@ function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
 function parseCoordinates(value: string) {
   const match = value.replace(/,/g, " ").match(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);
   if (!match) return null;
-  const lat = Number(match[1]);
-  const lon = Number(match[2]);
+  const lat = Number(match[1]), lon = Number(match[2]);
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
   return { lat, lon, source: "coordinates" as const };
 }
@@ -29,8 +28,7 @@ function encodeFull(latInput: number, lonInput: number, length = 10) {
   let lat = Math.max(-90, Math.min(90, latInput));
   let lon = ((lonInput + 180) % 360 + 360) % 360 - 180;
   if (lat === 90) lat -= 1e-12;
-  lat += 90;
-  lon += 180;
+  lat += 90; lon += 180;
   let code = "";
   for (let i = 0; i < Math.min(length, 10); i += 2) {
     const resolution = PAIR_RESOLUTIONS[i / 2];
@@ -38,8 +36,7 @@ function encodeFull(latInput: number, lonInput: number, length = 10) {
     const lonDigit = Math.floor(lon / resolution);
     code += CODE_ALPHABET[Math.max(0, Math.min(19, latDigit))];
     code += CODE_ALPHABET[Math.max(0, Math.min(19, lonDigit))];
-    lat -= latDigit * resolution;
-    lon -= lonDigit * resolution;
+    lat -= latDigit * resolution; lon -= lonDigit * resolution;
   }
   return code.slice(0, 8) + SEPARATOR + code.slice(8);
 }
@@ -50,69 +47,53 @@ function decodeFull(value: string) {
   if (separator !== 8) return null;
   const digits = code.slice(0, separator) + code.slice(separator + 1);
   if (digits.length < 2 || digits.length > 11) return null;
-
   const pairDigits = Math.min(digits.length, 10);
   if (pairDigits % 2 !== 0) return null;
-
-  let lat = -90;
-  let lon = -180;
-  let latResolution = 20;
-  let lonResolution = 20;
+  let lat = -90, lon = -180, latResolution = 20, lonResolution = 20;
   for (let i = 0; i < pairDigits; i += 2) {
-    const latIndex = CODE_ALPHABET.indexOf(digits[i]);
-    const lonIndex = CODE_ALPHABET.indexOf(digits[i + 1]);
+    const latIndex = CODE_ALPHABET.indexOf(digits[i]), lonIndex = CODE_ALPHABET.indexOf(digits[i + 1]);
     if (latIndex < 0 || lonIndex < 0) return null;
     const resolution = PAIR_RESOLUTIONS[i / 2];
     if (!resolution) return null;
-    lat += latIndex * resolution;
-    lon += lonIndex * resolution;
-    latResolution = resolution;
-    lonResolution = resolution;
+    lat += latIndex * resolution; lon += lonIndex * resolution;
+    latResolution = resolution; lonResolution = resolution;
   }
-
-  // 11th digit uses the Open Location Code 4x5 grid refinement.
   if (digits.length === 11) {
     const gridIndex = CODE_ALPHABET.indexOf(digits[10]);
     if (gridIndex < 0) return null;
-    const row = Math.floor(gridIndex / 4);
-    const col = gridIndex % 4;
-    lat += row * (latResolution / 5);
-    lon += col * (lonResolution / 4);
-    latResolution /= 5;
-    lonResolution /= 4;
+    const row = Math.floor(gridIndex / 4), col = gridIndex % 4;
+    lat += row * (latResolution / 5); lon += col * (lonResolution / 4);
+    latResolution /= 5; lonResolution /= 4;
   }
-
   return { lat: lat + latResolution / 2, lon: lon + lonResolution / 2, source: "plus-code" as const };
 }
 
 function recoverShortCode(shortCode: string, referenceLat: number, referenceLon: number) {
   const code = cleanCode(shortCode);
   const separator = code.indexOf(SEPARATOR);
-  if (separator < 2 || separator >= 8) return null;
+  if (separator < 2 || separator >= 8 || (8 - separator) % 2 !== 0) return null;
+  const significant = code.replace(SEPARATOR, "");
   const paddingLength = 8 - separator;
-  if (paddingLength % 2 !== 0) return null;
-  const referenceCode = encodeFull(referenceLat, referenceLon, 10).replace(SEPARATOR, "");
-  const candidateDigits = referenceCode.slice(0, paddingLength) + code.replace(SEPARATOR, "");
+  const referenceDigits = encodeFull(referenceLat, referenceLon, 10).replace(SEPARATOR, "");
+  const candidateDigits = referenceDigits.slice(0, paddingLength) + significant;
   const candidate = candidateDigits.slice(0, 8) + SEPARATOR + candidateDigits.slice(8);
-  const area = decodeFull(candidate);
-  if (!area) return null;
-  const resolution = 20 ** (2 - paddingLength / 2);
-  const half = resolution / 2;
-  let lat = area.lat;
-  let lon = area.lon;
-  if (referenceLat + half < lat && lat - resolution >= -90) lat -= resolution;
-  else if (referenceLat - half > lat && lat + resolution <= 90) lat += resolution;
-  if (referenceLon + half < lon) lon -= resolution;
-  else if (referenceLon - half > lon) lon += resolution;
+  const center = decodeFull(candidate);
+  if (!center) return null;
+
+  // The recovered area must be the one nearest to the reference location.
+  const resolution = PAIR_RESOLUTIONS[paddingLength / 2 - 1] ?? 20;
+  let lat = center.lat, lon = center.lon;
+  const latDelta = lat - referenceLat, lonDelta = lon - referenceLon;
+  if (latDelta > resolution / 2) lat -= resolution;
+  else if (latDelta < -resolution / 2) lat += resolution;
+  if (lonDelta > resolution / 2) lon -= resolution;
+  else if (lonDelta < -resolution / 2) lon += resolution;
   return { lat, lon, source: "plus-code-recovered" as const };
 }
 
 async function geocodeLocality(locality: string) {
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&q=${encodeURIComponent(locality)}`, {
-      headers: { "User-Agent": "Crossings/1.0 (meineschranke.com)" },
-      cache: "no-store",
-    });
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&q=${encodeURIComponent(locality)}`, { headers: { "User-Agent": "Crossings/1.0 (meineschranke.com)" }, cache: "no-store" });
     if (!response.ok) return null;
     const data = await response.json();
     if (!data?.[0]) return null;
@@ -121,37 +102,27 @@ async function geocodeLocality(locality: string) {
   } catch { return null; }
 }
 
-type Station = {
-  type?: string;
-  id?: string;
-  ril100?: string;
-  nr?: number;
-  name?: string;
-  weight?: number;
-  location?: { latitude?: number; longitude?: number };
-  address?: { city?: string; zipcode?: string; street?: string };
-};
-
+type Station = { id?: string; ril100?: string; nr?: number; name?: string; location?: { latitude?: number; longitude?: number }; address?: { city?: string; zipcode?: string } };
 let stationCatalogPromise: Promise<Station[]> | null = null;
 async function loadStationCatalog() {
   if (!stationCatalogPromise) {
     stationCatalogPromise = (async () => {
       const stations: Station[] = [];
       for await (const station of readStations() as AsyncIterable<Station>) stations.push(station);
-      return stations.filter((station) => Number.isFinite(station.location?.latitude) && Number.isFinite(station.location?.longitude));
+      return stations.filter((s) => Number.isFinite(s.location?.latitude) && Number.isFinite(s.location?.longitude));
     })().catch((error) => { stationCatalogPromise = null; throw error; });
   }
   return stationCatalogPromise;
 }
 
 async function geocodeLocalityFromStations(locality: string) {
-  const normalized = locality.toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-  const stations = await loadStationCatalog();
-  const matches = stations.filter((station) => String(station.address?.city || "").toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() === normalized);
-  if (!matches.length) return null;
-  const lat = matches.reduce((sum, s) => sum + Number(s.location?.latitude), 0) / matches.length;
-  const lon = matches.reduce((sum, s) => sum + Number(s.location?.longitude), 0) / matches.length;
-  return { lat, lon };
+  try {
+    const normalized = locality.toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
+    const stations = await loadStationCatalog();
+    const matches = stations.filter((s) => String(s.address?.city || "").toLocaleLowerCase("de-DE").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim() === normalized);
+    if (!matches.length) return null;
+    return { lat: matches.reduce((sum, s) => sum + Number(s.location!.latitude), 0) / matches.length, lon: matches.reduce((sum, s) => sum + Number(s.location!.longitude), 0) / matches.length };
+  } catch { return null; }
 }
 
 async function resolvePlusCode(value: string) {
@@ -167,7 +138,9 @@ async function resolvePlusCode(value: string) {
   if (before.length < 2 || before.length > 7) return null;
   const locality = after.split(/\s+/).slice(1).join(" ").trim();
   if (!locality) return null;
-  const reference = await geocodeLocalityFromStations(locality) || await geocodeLocality(locality);
+  // Nominatim is the primary locality resolver. db-stations is only a fallback,
+  // so a failure to load the station catalogue can never break Plus Code parsing.
+  const reference = await geocodeLocality(locality) || await geocodeLocalityFromStations(locality);
   if (!reference) return null;
   return recoverShortCode(codePart, reference.lat, reference.lon);
 }
@@ -176,15 +149,10 @@ async function resolveLocation(value: string) { return parseCoordinates(value) |
 
 async function discoverStations(lat: number, lon: number) {
   const stations = await loadStationCatalog();
-  return stations
-    .map((station) => {
-      const stationLat = Number(station.location?.latitude);
-      const stationLon = Number(station.location?.longitude);
-      return { eva: String(station.id || ""), stationName: String(station.name || station.id || ""), ril100: String(station.ril100 || ""), nr: station.nr ?? null, lat: stationLat, lon: stationLon, city: String(station.address?.city || ""), zipcode: String(station.address?.zipcode || ""), distanceKm: distanceKm(lat, lon, stationLat, stationLon) };
-    })
-    .filter((station) => station.eva && station.distanceKm <= 25)
-    .sort((a, b) => a.distanceKm - b.distanceKm)
-    .slice(0, 12);
+  return stations.map((s) => {
+    const stationLat = Number(s.location!.latitude), stationLon = Number(s.location!.longitude);
+    return { eva: String(s.id || ""), stationName: String(s.name || s.id || ""), ril100: String(s.ril100 || ""), nr: s.nr ?? null, lat: stationLat, lon: stationLon, city: String(s.address?.city || ""), zipcode: String(s.address?.zipcode || ""), distanceKm: distanceKm(lat, lon, stationLat, stationLon) };
+  }).filter((s) => s.eva && s.distanceKm <= 25).sort((a, b) => a.distanceKm - b.distanceKm).slice(0, 12);
 }
 
 async function loadCrossings() {
@@ -215,8 +183,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const body = await request.json();
   const id = String(body.id || body.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const name = String(body.name || "").trim();
-  const eva = String(body.eva || "").trim();
+  const name = String(body.name || "").trim(), eva = String(body.eva || "").trim();
   const lat = Number(body.lat), lon = Number(body.lon);
   if (!id || !name || !eva || !Number.isFinite(lat) || !Number.isFinite(lon)) return Response.json({ error: "Name, EVA, Breite und Länge sind erforderlich." }, { status: 400 });
   const stations = Array.isArray(body.stations) ? body.stations : [];
@@ -226,7 +193,7 @@ export async function POST(request: Request) {
   const rules = Array.isArray(body.rules) ? body.rules : [];
   await db.execute({ sql: `INSERT INTO crossings (id,name,eva,observation_evas,required_route_stops,lat,lon,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,confidence,source,status) VALUES (?,?,?,?,?,?,?,?,?,?,'[]','[]','[]',?,'manual','active')`, args: [id,name,eva,JSON.stringify(observationEvas),JSON.stringify(routeStops),lat,lon,Number(body.closeOffsetSeconds ?? 80),Number(body.openOffsetSeconds ?? 20),JSON.stringify(rules),Number(body.confidence ?? 0.5)] });
   for (let i = 0; i < stations.length; i++) {
-    const station = stations[i]; const stationEva = String(station.eva || "").trim(); if (!stationEva) continue;
+    const station = stations[i], stationEva = String(station.eva || "").trim(); if (!stationEva) continue;
     await db.execute({ sql: `INSERT OR IGNORE INTO railway_stations (eva,name) VALUES (?,?)`, args: [stationEva,String(station.stationName || station.name || stationEva)] });
     await db.execute({ sql: `INSERT OR REPLACE INTO crossing_station_links (id,crossing_id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)`, args: [randomUUID(),id,stationEva,String(station.stationName || station.name || stationEva),station.role || (stationEva === eva ? "primary" : "observation"),JSON.stringify(station.categories || []),station.direction || "unknown",Number(station.fallbackOffsetSeconds || 0),Number(station.trackDistanceMeters || 0),i] });
   }
