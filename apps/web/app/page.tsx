@@ -36,7 +36,7 @@ export default function LandingPage() {
       </header>
 
       <section className={hero.heroWide}>
-        <div className={hero.heroVisualWide} aria-hidden="true"><div className={hero.photoWide}><Image src="/images/meineschranke-hero-bg.webp" alt="" fill priority sizes="100vw" /></div></div>
+        <div className={hero.heroVisualWide} aria-hidden="true"><div className={hero.photoWide}><Image src="/images/FB554548-8AF6-482A-9CA4-0C38684C3951.webp" alt="" fill priority sizes="100vw" /></div></div>
         <div className={hero.heroCopyWide}><p className={`${styles.eyebrow} ${hero.eyebrowWide}`}>BAHNÜBERGÄNGE NEU GEDACHT</p><h1 className={hero.heroTitleWide}>Schranke im Blick.<br /><em>Zeit im Griff.</em></h1><p className={hero.leadWide}>meineschranke zeigt dir für den Bahnübergang Kirchlengern, wann die Schranke voraussichtlich schließt und wann sie wieder öffnet.</p><div className={hero.heroActionsWide}><Link href="/app" className={hero.heroPrimaryWide}>Web-App öffnen <span>→</span></Link><a href="/meineschranke.url" download="meineschranke.url" className={`${hero.desktopShortcutWide} ${hero.desktopOnlyWide}`}>↧ <span>Desktop-Verknüpfung herunterladen</span></a></div><div className={hero.trustWide}><span>✓ Kostenlos starten</span><span>✓ Persönliche Schranke</span><span>✓ Live-Prognosen</span></div></div>
       </section>
 
