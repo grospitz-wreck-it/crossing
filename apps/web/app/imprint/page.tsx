@@ -1,4 +1,5 @@
 import Link from "next/link";
+import "../legal.css";
 
 export const metadata = {
   title: "Impressum | MeineSchranke",
@@ -11,37 +12,29 @@ export default function ImprintPage() {
         <Link href="/" className="legalBack">← Zurück zu MeineSchranke</Link>
         <p className="legalEyebrow">RECHTLICHES</p>
         <h1>Impressum</h1>
-        <p className="legalLead">Angaben gemäß den gesetzlichen Informationspflichten.</p>
+        <p className="legalLead">Angaben zum Anbieter von MeineSchranke.</p>
 
         <section className="legalSection">
           <h2>Anbieter</h2>
-          <p>
-            pxxl productions UG (haftungsbeschränkt)<br />
-            Deutschland
-          </p>
-        </section>
-
-        <section className="legalSection">
-          <h2>Vertreten durch</h2>
-          <p>Geschäftsführung der pxxl productions UG (haftungsbeschränkt)</p>
+          <p>pxxl productions UG (haftungsbeschränkt)</p>
+          <p>MeineSchranke ist ein Produkt bzw. Angebot dieser Gesellschaft.</p>
         </section>
 
         <section className="legalSection">
           <h2>Kontakt</h2>
-          <p>
-            E-Mail: <a href="mailto:info@meineschranke.de">info@meineschranke.de</a>
-          </p>
+          <p>E-Mail: <a href="mailto:info@meineschranke.de">info@meineschranke.de</a></p>
         </section>
 
         <section className="legalSection">
-          <h2>Unternehmensangaben</h2>
+          <h2>Vertretungsberechtigung und Registerangaben</h2>
           <p>
-            Bitte entnehmen Sie die vollständigen Unternehmens- und Registerangaben
-            dem zentralen Impressum der pxxl productions UG.
+            Die vollständigen Angaben zu Geschäftsführung, Anschrift, Registergericht,
+            Registernummer und gegebenenfalls Umsatzsteuer-Identifikationsnummer sind
+            im zentralen Impressum der pxxl productions UG aufgeführt.
           </p>
           <p>
             <a href="https://www.pxxl.com/imprint" target="_blank" rel="noreferrer">
-              Vollständiges Unternehmens-Impressum bei pxxl productions →
+              Zum vollständigen Unternehmens-Impressum von pxxl productions →
             </a>
           </p>
         </section>
@@ -50,22 +43,24 @@ export default function ImprintPage() {
           <h2>Verantwortlichkeit für Inhalte</h2>
           <p>
             Die Inhalte von MeineSchranke werden mit größtmöglicher Sorgfalt erstellt.
-            Für die Richtigkeit, Vollständigkeit und Aktualität können wir jedoch keine
-            Gewähr übernehmen, soweit gesetzlich zulässig.
+            Für die Richtigkeit, Vollständigkeit und Aktualität der bereitgestellten
+            Informationen wird im Rahmen der gesetzlichen Vorschriften keine Gewähr übernommen.
           </p>
         </section>
 
         <section className="legalSection">
-          <h2>Haftung für Links</h2>
+          <h2>Externe Links</h2>
           <p>
-            Diese Website kann Links zu externen Angeboten enthalten. Für deren Inhalte
-            ist jeweils der Betreiber des verlinkten Angebots verantwortlich.
+            Diese Website kann Links zu externen Angeboten enthalten. Auf deren Inhalte
+            besteht kein Einfluss. Für die Inhalte der verlinkten Seiten ist jeweils der
+            dortige Betreiber verantwortlich.
           </p>
         </section>
 
         <div className="legalNote">
-          Diese Seite gehört zum Angebot der pxxl productions UG (haftungsbeschränkt).
-          MeineSchranke ist ein Produkt dieser Gesellschaft.
+          Die vollständigen Unternehmensangaben findest du im zentralen Impressum von
+          pxxl productions. Dieses Impressum ist auf MeineSchranke als Produktangebot
+          der pxxl productions UG zugeschnitten.
         </div>
       </div>
     </main>
