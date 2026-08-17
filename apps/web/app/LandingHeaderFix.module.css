@@ -1,12 +1,3 @@
-:global(html) {
-  overscroll-behavior-y: none;
-}
-
-:global(body) {
-  overscroll-behavior-y: none;
-  overflow-x: clip;
-}
-
 .page {
   margin: 0;
   padding-bottom: 0;
