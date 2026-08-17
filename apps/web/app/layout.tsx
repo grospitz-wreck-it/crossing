@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import "./globals.css";
+import PredictionFeedback from "./components/PredictionFeedback";
 
 export default function RootLayout({
   children,
@@ -8,7 +9,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="de">
-      <body>{children}</body>
+      <body>
+        {children}
+        <PredictionFeedback />
+      </body>
     </html>
   );
 }
