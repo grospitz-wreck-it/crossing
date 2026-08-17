@@ -3,6 +3,7 @@ import Link from "next/link";
 import styles from "./LandingPage.module.css";
 import headerFix from "./LandingHeaderFix.module.css";
 import hero from "./LandingHero.module.css";
+import marketing from "./MarketingSignals.module.css";
 import faq from "./FAQ.module.css";
 import media from "./MediaPress.module.css";
 
@@ -39,7 +40,7 @@ export default function LandingPage() {
         <div className={hero.heroCopyWide}><p className={`${styles.eyebrow} ${hero.eyebrowWide}`}>BAHNÜBERGÄNGE NEU GEDACHT</p><h1 className={hero.heroTitleWide}>Schranke im Blick.<br /><em>Zeit im Griff.</em></h1><p className={hero.leadWide}>meineschranke zeigt dir für den Bahnübergang Kirchlengern, wann die Schranke voraussichtlich schließt und wann sie wieder öffnet.</p><div className={hero.heroActionsWide}><Link href="/app" className={hero.heroPrimaryWide}>Web-App öffnen <span>→</span></Link><a href="/meineschranke.url" download="meineschranke.url" className={`${hero.desktopShortcutWide} ${hero.desktopOnlyWide}`}>↧ <span>Desktop-Verknüpfung herunterladen</span></a></div><div className={hero.trustWide}><span>✓ Kostenlos starten</span><span>✓ Persönliche Schranke</span><span>✓ Live-Prognosen</span></div></div>
       </section>
 
-      <section className="landingFacts"><div className="landingFact"><strong>Bis zu 7 Stunden</strong><span>täglich kann die Schranke geschlossen sein.</span></div><div className="landingFact"><strong>ca. 11.000 Autos</strong><span>passieren den Bahnübergang jeden Tag.</span></div><div className="landingFact"><strong>Prognosen, die lernen</strong><span>Nutzer können die Vorhersagen bewerten und so helfen, das System weiter zu verbessern.</span></div></section>
+      <section className={marketing.landingFacts}><div className={marketing.landingFact}><strong>Bis zu 7 Stunden</strong><span>täglich kann die Schranke geschlossen sein.</span></div><div className={marketing.landingFact}><strong>ca. 11.000 Autos</strong><span>passieren den Bahnübergang jeden Tag.</span></div><div className={marketing.landingFact}><strong>Prognosen, die lernen</strong><span>Nutzer können die Vorhersagen bewerten und so helfen, das System weiter zu verbessern.</span></div></section>
 
       <section id="funktionen" className={styles.featureStrip}>{features.map((feature) => <article key={feature.number}><div className={styles.featureIcon}>{feature.icon}</div><div><small>{feature.number}</small><h2>{feature.title}</h2><p>{feature.text}</p></div></article>)}</section>
       <section id="so-funktionierts" className={styles.section}><div className={styles.sectionIntro}><p className={styles.eyebrow}>SO FUNKTIONIERT&apos;S</p><h2>Du willst wissen,<br /><em>wann du weiterfahren kannst?</em></h2><p>meineschranke macht aus Fahrplan- und verfügbaren Echtzeitinformationen eine verständliche Prognose für den Bahnübergang Kirchlengern.</p></div><div className={styles.steps}><article><span>01</span><div className={styles.stepIcon}>⌖</div><h3>Schranke wählen</h3><p>Wähle den Bahnübergang Kirchlengern.</p></article><article><span>02</span><div className={styles.stepIcon}>◷</div><h3>Prognose ansehen</h3><p>Sieh auf einen Blick, wann die nächste Schließung erwartet wird.</p></article><article><span>03</span><div className={styles.stepIcon}>✓</div><h3>Weiterfahren</h3><p>Plane deine Fahrt besser und vermeide unnötige Wartezeit.</p></article></div></section>
