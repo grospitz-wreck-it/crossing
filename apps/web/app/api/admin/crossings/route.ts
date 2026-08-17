@@ -49,23 +49,39 @@ function decodeFull(value: string) {
   const separator = code.indexOf(SEPARATOR);
   if (separator !== 8) return null;
   const digits = code.slice(0, separator) + code.slice(separator + 1);
-  if (digits.length < 2 || digits.length > 10 || digits.length % 2 !== 0) return null;
+  if (digits.length < 2 || digits.length > 11) return null;
+
+  const pairDigits = Math.min(digits.length, 10);
+  if (pairDigits % 2 !== 0) return null;
+
   let lat = -90;
   let lon = -180;
   let latResolution = 20;
   let lonResolution = 20;
-  for (let i = 0; i < digits.length; i += 2) {
+  for (let i = 0; i < pairDigits; i += 2) {
     const latIndex = CODE_ALPHABET.indexOf(digits[i]);
     const lonIndex = CODE_ALPHABET.indexOf(digits[i + 1]);
     if (latIndex < 0 || lonIndex < 0) return null;
-    const pairIndex = i / 2;
-    const resolution = PAIR_RESOLUTIONS[pairIndex];
+    const resolution = PAIR_RESOLUTIONS[i / 2];
     if (!resolution) return null;
     lat += latIndex * resolution;
     lon += lonIndex * resolution;
     latResolution = resolution;
     lonResolution = resolution;
   }
+
+  // 11th digit uses the Open Location Code 4x5 grid refinement.
+  if (digits.length === 11) {
+    const gridIndex = CODE_ALPHABET.indexOf(digits[10]);
+    if (gridIndex < 0) return null;
+    const row = Math.floor(gridIndex / 4);
+    const col = gridIndex % 4;
+    lat += row * (latResolution / 5);
+    lon += col * (lonResolution / 4);
+    latResolution /= 5;
+    lonResolution /= 4;
+  }
+
   return { lat: lat + latResolution / 2, lon: lon + lonResolution / 2, source: "plus-code" as const };
 }
 
@@ -76,8 +92,9 @@ function recoverShortCode(shortCode: string, referenceLat: number, referenceLon:
   const paddingLength = 8 - separator;
   if (paddingLength % 2 !== 0) return null;
   const referenceCode = encodeFull(referenceLat, referenceLon, 10).replace(SEPARATOR, "");
-  const candidate = referenceCode.slice(0, paddingLength) + code;
-  const area = decodeFull(candidate.slice(0, 8) + SEPARATOR + candidate.slice(8));
+  const candidateDigits = referenceCode.slice(0, paddingLength) + code.replace(SEPARATOR, "");
+  const candidate = candidateDigits.slice(0, 8) + SEPARATOR + candidateDigits.slice(8);
+  const area = decodeFull(candidate);
   if (!area) return null;
   const resolution = 20 ** (2 - paddingLength / 2);
   const half = resolution / 2;
