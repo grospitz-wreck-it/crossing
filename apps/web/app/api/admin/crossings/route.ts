@@ -2,9 +2,8 @@ import { randomUUID } from "crypto";
 import { db } from "../../../lib/db";
 import { OpenLocationCode } from "open-location-code";
 
-const olc = new OpenLocationCode();
 type Station = { eva:string; stationName:string; ril100?:string; ibnr?:string; lat?:number; lon?:number; city?:string; zipcode?:string; distanceKm?:number };
-
+const olc = new OpenLocationCode() as any;
 function distanceKm(lat1:number,lon1:number,lat2:number,lon2:number){const r=6371,dLat=((lat2-lat1)*Math.PI)/180,dLon=((lon2-lon1)*Math.PI)/180,a=Math.sin(dLat/2)**2+Math.cos((lat1*Math.PI)/180)*Math.cos((lat2*Math.PI)/180)*Math.sin(dLon/2)**2;return r*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));}
 function parseCoordinates(value:string){const m=value.trim().replace(/,/g," ").match(/(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/);if(!m)return null;const lat=Number(m[1]),lon=Number(m[2]);if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)return null;return{lat,lon,source:"coordinates" as const};}
 function splitPlusCodeInput(value:string){const input=value.trim().replace(/\s+/g," "),plusIndex=input.indexOf("+");if(plusIndex<0)return null;const left=input.slice(0,plusIndex).trim().toUpperCase(),rest=input.slice(plusIndex+1).trim(),parts=rest.split(/\s+/),right=parts.shift();if(!right)return null;return{code:`${left}+${right.toUpperCase()}`,locality:parts.join(" ").trim()};}
