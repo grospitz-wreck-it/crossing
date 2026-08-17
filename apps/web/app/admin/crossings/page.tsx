@@ -8,6 +8,7 @@ type Crossing = { id: string; name: string; eva: string; lat: number; lon: numbe
 type NearbyStation = { eva: string; stationName: string; ril100?: string; lat: number; lon: number; city?: string; zipcode?: string; distanceKm: number };
 type Point = { lat: number; lon: number };
 type RailwayCandidate = { kind: string; routeType: string; ref: string; name: string; from: string; to: string; distanceMeters: number; wayId: number; relationId?: number | null; source: string; waysCount: number; segments: Point[][] };
+type RailwayInfrastructure = { status: string; candidates: RailwayCandidate[]; error?: string };
 
 const emptyStation = (): Station => ({ eva: "", stationName: "", role: "observation", categories: ["RB", "RE", "IC", "ICE"], direction: "unknown", fallbackOffsetSeconds: 0, trackDistanceMeters: 0 });
 
@@ -20,12 +21,11 @@ export default function CrossingsAdmin() {
   const [location, setLocation] = useState<any>(null);
   const [lookupError, setLookupError] = useState("");
   const [nearbyStations, setNearbyStations] = useState<NearbyStation[]>([]);
-  const [railwayInfrastructure, setRailwayInfrastructure] = useState<{ status: string; candidates: RailwayCandidate[] }>({ status: "NOT_RUN", candidates: [] });
+  const [railwayInfrastructure, setRailwayInfrastructure] = useState<RailwayInfrastructure>({ status: "NOT_RUN", candidates: [] });
   const [selectedRouteKey, setSelectedRouteKey] = useState("");
   const [stationLoading, setStationLoading] = useState(false);
   const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lookupRequest = useRef(0);
-
   const [form, setForm] = useState({ id: "", name: "", eva: "", lat: "", lon: "", closeOffsetSeconds: "80", openOffsetSeconds: "20", confidence: "0.5", requiredRouteStops: "", stations: [] as Station[] });
 
   async function load() { const res = await fetch("/api/admin/crossings", { cache: "no-store" }); if (res.ok) setCrossings(await res.json()); }
@@ -94,7 +94,6 @@ export default function CrossingsAdmin() {
 }
 
 function routeKey(candidate: RailwayCandidate) { return `${candidate.routeType}:${candidate.relationId || candidate.ref || candidate.wayId}`; }
-
 function mercator(lat: number, lon: number, zoom: number) { const n = 2 ** zoom; const x = ((lon + 180) / 360) * n; const rad = (lat * Math.PI) / 180; const y = ((1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2) * n; return { x, y }; }
 
 function RouteMap({ lat, lon, candidates, selectedKey, onSelect }: { lat: number; lon: number; candidates: RailwayCandidate[]; selectedKey: string; onSelect: (key: string) => void }) {
@@ -102,7 +101,7 @@ function RouteMap({ lat, lon, candidates, selectedKey, onSelect }: { lat: number
   const colors = ["#c1121f", "#0f172a", "#2563eb", "#7c3aed", "#059669", "#ea580c", "#0891b2", "#be185d"];
   const project = (point: Point) => { const p = mercator(point.lat, point.lon, zoom); return { x: p.x * 256 - originX, y: p.y * 256 - originY }; };
   const marker = project({ lat, lon });
-  return <div className={styles.routeMap}><div className={styles.mapTiles}>{[-1, 0, 1, 2].flatMap((dx) => [-1, 0, 1, 2].map((dy) => { const x = tileX + dx; const y = tileY + dy; return <img key={`${x}-${y}`} src={`https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`} alt="" draggable={false} style={{ left: `${x * 256 - originX}px`, top: `${y * 256 - originY}px` }} />; }))}</div><svg className={styles.routeOverlay} viewBox={`0 0 ${width} ${height}`} aria-label="Bahnstrecken-Auswahlkarte">{candidates.map((candidate, index) => { const key = routeKey(candidate); const selected = key === selectedKey; const color = colors[index % colors.length]; return <g key={key} onClick={() => onSelect(key)} className={styles.routeHitArea}>{candidate.segments.map((segment, segmentIndex) => { const points = segment.map(project).map((p) => `${p.x},${p.y}`).join(" "); return <polyline key={`${key}-${segmentIndex}`} points={points} fill="none" stroke={selected ? "#ffffff" : "#ffffff"} strokeWidth={selected ? 9 : 7} strokeLinecap="round" strokeLinejoin="round" opacity={selected ? .95 : .9}/>; }).concat(candidate.segments.map((segment, segmentIndex) => { const points = segment.map(project).map((p) => `${p.x},${p.y}`).join(" "); return <polyline key={`${key}-color-${segmentIndex}`} points={points} fill="none" stroke={color} strokeWidth={selected ? 6 : 4} strokeLinecap="round" strokeLinejoin="round" opacity={selected ? 1 : .78}/>; }))}</g>; })}<circle cx={marker.x} cy={marker.y} r="9" fill="#c1121f" stroke="#fff" strokeWidth="4"/><circle cx={marker.x} cy={marker.y} r="3" fill="#fff"/></svg><div className={styles.mapLegend}><span>📍 Übergang</span>{candidates.slice(0, 4).map((c, i) => <button type="button" key={routeKey(c)} onClick={() => onSelect(routeKey(c))}><i style={{ background: colors[i % colors.length] }} />{c.ref ? `Strecke ${c.ref}` : "Gleis"}</button>)}</div></div>;
+  return <div className={styles.routeMap}><div className={styles.mapTiles}>{[-1, 0, 1, 2].flatMap((dx) => [-1, 0, 1, 2].map((dy) => { const x = tileX + dx; const y = tileY + dy; return <img key={`${x}-${y}`} src={`https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`} alt="" draggable={false} style={{ left: `${x * 256 - originX}px`, top: `${y * 256 - originY}px` }} />; }))}</div><svg className={styles.routeOverlay} viewBox={`0 0 ${width} ${height}`} aria-label="Bahnstrecken-Auswahlkarte">{candidates.map((candidate, index) => { const key = routeKey(candidate); const selected = key === selectedKey; const color = colors[index % colors.length]; return <g key={key} onClick={() => onSelect(key)} className={styles.routeHitArea}>{candidate.segments.map((segment, segmentIndex) => { const points = segment.map(project).map((p) => `${p.x},${p.y}`).join(" "); return <polyline key={`${key}-halo-${segmentIndex}`} points={points} fill="none" stroke="#ffffff" strokeWidth={selected ? 10 : 8} strokeLinecap="round" strokeLinejoin="round" opacity={.95}/>; }).concat(candidate.segments.map((segment, segmentIndex) => { const points = segment.map(project).map((p) => `${p.x},${p.y}`).join(" "); return <polyline key={`${key}-line-${segmentIndex}`} points={points} fill="none" stroke={color} strokeWidth={selected ? 6 : 4} strokeLinecap="round" strokeLinejoin="round" opacity={selected ? 1 : .8}/>; }))}</g>; })}<circle cx={marker.x} cy={marker.y} r="9" fill="#c1121f" stroke="#fff" strokeWidth="4"/><circle cx={marker.x} cy={marker.y} r="3" fill="#fff"/></svg><div className={styles.mapLegend}><span>📍 Übergang</span>{candidates.slice(0, 4).map((c, i) => <button type="button" key={routeKey(c)} onClick={() => onSelect(routeKey(c))}><i style={{ background: colors[i % colors.length] }} />{c.ref ? `Strecke ${c.ref}` : "Gleis"}</button>)}</div></div>;
 }
 
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) { return <label className={styles.field}><span>{label}</span><input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}/></label>; }
