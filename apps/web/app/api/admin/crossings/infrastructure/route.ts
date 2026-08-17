@@ -6,23 +6,57 @@ function geometryDistanceMeters(lat:number,lon:number,geometry:any[]){let best=I
 export async function GET(request:Request){
   const {searchParams}=new URL(request.url);const lat=Number(searchParams.get("lat")),lon=Number(searchParams.get("lon"));
   if(!Number.isFinite(lat)||!Number.isFinite(lon)||Math.abs(lat)>90||Math.abs(lon)>180)return NextResponse.json({status:"INVALID_COORDINATES",candidates:[]},{status:400});
-  const query=`[out:json][timeout:20];way(around:150,${lat},${lon})[railway=rail];out geom;rel(bw);out tags;`;
+
+  // First find the actual railway geometry. We deliberately keep this query
+  // small and only ask for ways in the local radius. Relations are fetched
+  // from the same way-set afterwards and MUST include members; `out tags`
+  // alone does not return relation members.
+  const query=`[out:json][timeout:15];way(around:200,${lat},${lon})[railway=rail];out tags geom;rel(bw);out tags members;`;
   const endpoints=["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter","https://overpass.private.coffee/api/interpreter"];
   let lastError="";
+
   for(const endpoint of endpoints){
     try{
       const response=await fetch(`${endpoint}?${new URLSearchParams({data:query}).toString()}`,{cache:"no-store",headers:{accept:"application/json"}});
-      if(!response.ok){lastError=`HTTP_${response.status}`;continue;}
-      const data=await response.json();const elements=Array.isArray(data?.elements)?data.elements:[];
-      const ways=elements.filter((e:any)=>e.type==="way"&&Array.isArray(e.geometry));const relations=elements.filter((e:any)=>e.type==="relation");
+      const text=await response.text();
+      if(!response.ok){lastError=`${endpoint}: HTTP_${response.status} ${text.slice(0,180)}`;continue;}
+      let data:any;try{data=JSON.parse(text);}catch{lastError=`${endpoint}: INVALID_JSON ${text.slice(0,180)}`;continue;}
+      const elements=Array.isArray(data?.elements)?data.elements:[];
+      const ways=elements.filter((e:any)=>e.type==="way"&&Array.isArray(e.geometry));
+      const relations=elements.filter((e:any)=>e.type==="relation");
       const relationByWay=new Map<number,any[]>();
-      for(const rel of relations){const route=String(rel.tags?.route||"");if(rel.tags?.type!=="route"||(route!=="tracks"&&route!=="railway"))continue;for(const member of rel.members||[]){if(member.type!=="way")continue;const list=relationByWay.get(Number(member.ref))||[];list.push({routeType:route,ref:String(rel.tags?.ref||""),name:String(rel.tags?.name||""),from:String(rel.tags?.from||""),to:String(rel.tags?.to||""),relationId:Number(rel.id)});relationByWay.set(Number(member.ref),list);}}
+      for(const rel of relations){
+        const route=String(rel.tags?.route||"");
+        if(rel.tags?.type!=="route"||(route!=="tracks"&&route!=="railway"))continue;
+        for(const member of rel.members||[]){
+          if(member.type!=="way")continue;
+          const list=relationByWay.get(Number(member.ref))||[];
+          list.push({routeType:route,ref:String(rel.tags?.ref||""),name:String(rel.tags?.name||""),from:String(rel.tags?.from||""),to:String(rel.tags?.to||""),relationId:Number(rel.id)});
+          relationByWay.set(Number(member.ref),list);
+        }
+      }
+
       const candidates:any[]=[];
-      for(const way of ways){const distanceMeters=geometryDistanceMeters(lat,lon,way.geometry);if(!Number.isFinite(distanceMeters)||distanceMeters>150)continue;const rels=relationByWay.get(Number(way.id))||[];if(rels.length){for(const rel of rels)candidates.push({kind:"route",routeType:rel.routeType,ref:rel.ref||String(way.tags?.ref||""),name:rel.name||String(way.tags?.name||""),from:rel.from,to:rel.to,distanceMeters:Math.round(distanceMeters),wayId:Number(way.id),relationId:rel.relationId,source:"openstreetmap"});}else candidates.push({kind:"track",routeType:"track",ref:String(way.tags?.ref||""),name:String(way.tags?.name||""),from:"",to:"",distanceMeters:Math.round(distanceMeters),wayId:Number(way.id),relationId:null,source:"openstreetmap"});}
-      const dedup=new Map<string,any>();for(const candidate of candidates){const key=`${candidate.routeType}:${candidate.ref||"way"}:${candidate.relationId||candidate.wayId}`;if(!dedup.has(key)||candidate.distanceMeters<dedup.get(key).distanceMeters)dedup.set(key,candidate);}
+      for(const way of ways){
+        const distanceMeters=geometryDistanceMeters(lat,lon,way.geometry);
+        if(!Number.isFinite(distanceMeters)||distanceMeters>200)continue;
+        const rels=relationByWay.get(Number(way.id))||[];
+        if(rels.length){
+          for(const rel of rels)candidates.push({kind:"route",routeType:rel.routeType,ref:rel.ref||String(way.tags?.ref||""),name:rel.name||String(way.tags?.name||""),from:rel.from,to:rel.to,distanceMeters:Math.round(distanceMeters),wayId:Number(way.id),relationId:rel.relationId,source:"openstreetmap"});
+        }else{
+          candidates.push({kind:"track",routeType:"track",ref:String(way.tags?.ref||""),name:String(way.tags?.name||""),from:"",to:"",distanceMeters:Math.round(distanceMeters),wayId:Number(way.id),relationId:null,source:"openstreetmap"});
+        }
+      }
+
+      const dedup=new Map<string,any>();
+      for(const candidate of candidates){
+        const key=`${candidate.routeType}:${candidate.ref||"way"}:${candidate.relationId||candidate.wayId}`;
+        if(!dedup.has(key)||candidate.distanceMeters<dedup.get(key).distanceMeters)dedup.set(key,candidate);
+      }
       const sorted=[...dedup.values()].sort((a,b)=>a.distanceMeters-b.distanceMeters).slice(0,12);
-      return NextResponse.json({status:"OK",candidates:sorted,endpoint});
-    }catch(error){lastError=error instanceof Error?error.message:String(error);}
+      return NextResponse.json({status:"OK",candidates:sorted,wayCount:ways.length,relationCount:relations.length,endpoint,radiusMeters:200});
+    }catch(error){lastError=`${endpoint}: ${error instanceof Error?error.message:String(error)}`;}
   }
-  return NextResponse.json({status:"OVERPASS_ERROR",error:lastError,candidates:[]});
+
+  return NextResponse.json({status:"OVERPASS_ERROR",error:lastError,candidates:[],radiusMeters:200});
 }
