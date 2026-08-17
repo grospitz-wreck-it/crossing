@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import styles from "./LandingPage.module.css";
+import headerFix from "./LandingHeaderFix.module.css";
 import faq from "./FAQ.module.css";
 import media from "./MediaPress.module.css";
 
@@ -27,9 +28,9 @@ const mediaLinks = [
 export default function LandingPage() {
   return (
     <main className={styles.page}>
-      <header className={styles.header}>
-        <Link href="/" className={styles.logoLink} aria-label="meineschranke Startseite"><Image src="/images/meineschranke_logo.webp" alt="meineschranke" width={236} height={64} priority className={styles.logo} style={{ width: "clamp(235px, 24vw, 330px)" }} /></Link>
-        <nav className={styles.nav} aria-label="Hauptnavigation"><a href="#funktionen">Funktionen</a><a href="#so-funktionierts">So funktioniert&apos;s</a><a href="#medien">In den Medien</a><a href="#faq">FAQ</a></nav>
+      <header className={`${styles.header} ${headerFix.header}`}>
+        <Link href="/" className={`${styles.logoLink} ${headerFix.logoLink}`} aria-label="meineschranke Startseite"><Image src="/images/meineschranke_logo.webp" alt="meineschranke" width={236} height={64} priority className={`${styles.logo} ${headerFix.logo}`} /></Link>
+        <nav className={`${styles.nav} ${headerFix.nav}`} aria-label="Hauptnavigation"><a href="#funktionen">Funktionen</a><a href="#so-funktionierts">So funktioniert&apos;s</a><a href="#medien">In den Medien</a><a href="#faq">FAQ</a></nav>
       </header>
 
       <section className={styles.hero}>
