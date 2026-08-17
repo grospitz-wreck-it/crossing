@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import styles from "./LandingPage.module.css";
 import headerFix from "./LandingHeaderFix.module.css";
+import hero from "./LandingHero.module.css";
 import faq from "./FAQ.module.css";
 import media from "./MediaPress.module.css";
 
@@ -33,9 +34,9 @@ export default function LandingPage() {
         <nav className={`${styles.nav} ${headerFix.nav}`} aria-label="Hauptnavigation"><a href="#funktionen">Funktionen</a><a href="#so-funktionierts">So funktioniert&apos;s</a><a href="#medien">In den Medien</a><a href="#faq">FAQ</a></nav>
       </header>
 
-      <section className={styles.hero}>
-        <div className={styles.heroCopy}><p className={styles.eyebrow}>BAHNÜBERGÄNGE NEU GEDACHT</p><h1>Weniger warten.<br /><em>Mehr wissen.</em></h1><p className={styles.lead}>meineschranke zeigt dir, wann der Bahnübergang Kirchlengern voraussichtlich schließt und wann er wieder öffnet.</p><div className={styles.heroActions}><Link href="/app" className={styles.primaryButton}>Web-App öffnen <span>→</span></Link><a href="#ios" className={styles.secondaryButton}> iPhone App</a></div><div className={styles.trustRow}><span>✓ Kostenlos starten</span><span>✓ Persönliche Schranke</span><span>✓ Live-Prognosen</span></div></div>
-        <div className={styles.heroVisual} aria-label="meineschranke App Vorschau"><div className={styles.photo}><Image src="/images/barrier-open.webp" alt="Bahnübergang Kirchlengern" fill priority sizes="(max-width: 900px) 100vw, 58vw" /></div><div className={styles.phone}><div className={styles.dynamicIsland} /><div className={styles.phoneScreen}><div className={styles.phoneTop}><Image src="/images/meineschranke_logo.webp" alt="" width={116} height={31} /><span>♧</span></div><div className={styles.location}>Kirchlengern</div><div className={styles.statusPill}><i /> SCHRANKE OFFEN</div><div className={styles.timer}>02:41</div><div className={styles.timerLabel}>bis Schranke schließt</div><div className={styles.miniStats}><span><b>23:11</b><small>Schließzeit</small></span><span><b>23:13</b><small>frei</small></span><span><b>2m</b><small>Dauer</small></span></div><div className={styles.trainCard}><p>NÄCHSTER ZUG</p><strong>RB71 <small>+4</small></strong><span>Brake (b Bielefeld) → Rahden</span><b>Verspätung ca. 4 Minuten</b><div className={styles.timeline}><i /><i /><i /></div><div className={styles.times}><span>23:11</span><span>23:13</span><span>23:13</span></div></div><div className={styles.phoneNav}><span>⌂<small>Übersicht</small></span><span>♧<small>Züge</small></span><span className={styles.navActive}>↗</span><span>▥<small>Statistiken</small></span><span>⚙<small>Einstellungen</small></span></div></div></div></div>
+      <section className={hero.heroWide}>
+        <div className={hero.heroVisualWide} aria-hidden="true"><div className={hero.photoWide}><Image src="/images/barrier-open.webp" alt="" fill priority sizes="100vw" /></div></div>
+        <div className={hero.heroCopyWide}><p className={`${styles.eyebrow} ${hero.eyebrowWide}`}>BAHNÜBERGÄNGE NEU GEDACHT</p><h1 className={hero.heroTitleWide}>Weniger warten.<br /><em>Mehr wissen.</em></h1><p className={hero.leadWide}>meineschranke zeigt dir, wann der Bahnübergang Kirchlengern voraussichtlich schließt und wann er wieder öffnet.</p><div className={hero.heroActionsWide}><Link href="/app" className={hero.heroPrimaryWide}>Web-App öffnen <span>→</span></Link><a href="/meineschranke.url" download="meineschranke.url" className={`${hero.desktopShortcutWide} ${hero.desktopOnlyWide}`}>↧ <span>Desktop-Verknüpfung herunterladen</span></a></div><div className={hero.trustWide}><span>✓ Kostenlos starten</span><span>✓ Persönliche Schranke</span><span>✓ Live-Prognosen</span></div></div>
       </section>
 
       <section id="funktionen" className={styles.featureStrip}>{features.map((feature) => <article key={feature.number}><div className={styles.featureIcon}>{feature.icon}</div><div><small>{feature.number}</small><h2>{feature.title}</h2><p>{feature.text}</p></div></article>)}</section>
