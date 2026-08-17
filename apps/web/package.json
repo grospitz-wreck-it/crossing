@@ -15,11 +15,13 @@
     "fast-xml-parser": "^5.10.1",
     "next": "^15.0.0",
     "next-auth": "^5.0.0-beta.32",
+    "open-location-code": "^1.0.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@types/node": "20.17.6",
+    "@types/open-location-code": "^1.0.1",
     "@types/react": "19.2.17",
     "typescript": "5.8.2"
   }
