@@ -22,28 +22,37 @@ function parseCoordinates(value: string) {
   return { lat, lon, source: "coordinates" as const };
 }
 
-function cleanPlusCode(value: string) { return value.toUpperCase().replace(/\s+/g, ""); }
+function cleanCode(value: string) { return value.toUpperCase().trim(); }
 
 function decodeFullPlusCode(value: string) {
-  const code = cleanPlusCode(value);
+  const code = cleanCode(value).replace(/\s+/g, "");
   const separator = code.indexOf(SEPARATOR);
   if (separator < 0) return null;
   const digits = code.slice(0, separator).replace(/0/g, "");
   if (digits.length < 8 || digits.length % 2 !== 0) return null;
-  let lat = -90, lon = -180, latPlace = 400, lonPlace = 400;
+
+  let lat = -90;
+  let lon = -180;
+  let latPlace = 400;
+  let lonPlace = 400;
   for (let i = 0; i < Math.min(digits.length, 10); i += 2) {
     const latIndex = CODE_ALPHABET.indexOf(digits[i]);
     const lonIndex = CODE_ALPHABET.indexOf(digits[i + 1]);
     if (latIndex < 0 || lonIndex < 0) return null;
-    latPlace /= 20; lonPlace /= 20;
-    lat += latIndex * latPlace; lon += lonIndex * lonPlace;
+    latPlace /= 20;
+    lonPlace /= 20;
+    lat += latIndex * latPlace;
+    lon += lonIndex * lonPlace;
   }
   return { lat: lat + latPlace / 2, lon: lon + lonPlace / 2, source: "plus-code" as const };
 }
 
 async function geocodeLocality(locality: string) {
   try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=${encodeURIComponent(locality)}`, { headers: { "User-Agent": "Crossings/1.0 (meineschranke)" }, cache: "no-store" });
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=de&q=${encodeURIComponent(locality)}`, {
+      headers: { "User-Agent": "Crossings/1.0 (meineschranke)" },
+      cache: "no-store",
+    });
     if (!response.ok) return null;
     const data = await response.json();
     if (!data?.[0]) return null;
@@ -51,39 +60,56 @@ async function geocodeLocality(locality: string) {
   } catch { return null; }
 }
 
-function recoverShortCode(shortCode: string, referenceLat: number, referenceLon: number) {
-  const compact = cleanPlusCode(shortCode);
-  const separator = compact.indexOf(SEPARATOR);
-  if (separator < 0) return null;
-  const code = compact.slice(0, separator);
-  if (code.length >= 8) return decodeFullPlusCode(compact);
-  const missingPairs = (8 - code.length) / 2;
-  let prefix = "";
-  let lat = referenceLat;
-  let lon = referenceLon;
-  for (let i = 0; i < missingPairs; i++) {
-    const place = 400 / Math.pow(20, i + 1);
-    const latIndex = Math.floor((lat + 90) / place);
-    const lonIndex = Math.floor((lon + 180) / place);
-    prefix += CODE_ALPHABET[Math.max(0, Math.min(19, latIndex))];
-    prefix += CODE_ALPHABET[Math.max(0, Math.min(19, lonIndex))];
+function encodeReferencePrefix(referenceLat: number, referenceLon: number, digitCount: number) {
+  let lat = Math.max(-90, Math.min(90, referenceLat)) + 90;
+  let lon = ((referenceLon + 180) % 360 + 360) % 360;
+  let result = "";
+  const pairCount = Math.floor(digitCount / 2);
+  let latPlace = 400;
+  let lonPlace = 400;
+  for (let i = 0; i < pairCount; i++) {
+    latPlace /= 20;
+    lonPlace /= 20;
+    const latIndex = Math.max(0, Math.min(19, Math.floor(lat / latPlace)));
+    const lonIndex = Math.max(0, Math.min(19, Math.floor(lon / lonPlace)));
+    result += CODE_ALPHABET[latIndex] + CODE_ALPHABET[lonIndex];
+    lat -= latIndex * latPlace;
+    lon -= lonIndex * lonPlace;
   }
-  return decodeFullPlusCode(prefix + code + SEPARATOR);
+  return result;
+}
+
+function recoverShortCode(shortCode: string, referenceLat: number, referenceLon: number) {
+  const compact = cleanCode(shortCode).replace(/\s+/g, "");
+  const separator = compact.indexOf(SEPARATOR);
+  if (separator < 4 || separator >= 8) return null;
+  const shortDigits = compact.slice(0, separator);
+  const suffix = compact.slice(separator + 1);
+  if (shortDigits.length > 7 || suffix.length < 1) return null;
+  const prefixLength = 8 - shortDigits.length;
+  if (prefixLength < 1 || prefixLength % 2 !== 0) return null;
+  const prefix = encodeReferencePrefix(referenceLat, referenceLon, prefixLength);
+  return decodeFullPlusCode(prefix + shortDigits + SEPARATOR + suffix);
 }
 
 async function resolvePlusCode(value: string) {
   const input = value.trim();
-  const compact = cleanPlusCode(input);
-  const separator = compact.indexOf(SEPARATOR);
-  if (separator < 0) return null;
-  const codePart = compact.slice(0, separator);
-  const locality = input.slice(input.indexOf("+") + 1).trim();
-  const full = decodeFullPlusCode(compact);
+  const plusIndex = input.indexOf(SEPARATOR);
+  if (plusIndex < 0) return null;
+
+  const before = input.slice(0, plusIndex).trim();
+  const after = input.slice(plusIndex + 1).trim();
+  const codePart = `${before}+${after.split(/\s+/)[0]}`;
+  const full = decodeFullPlusCode(codePart);
   if (full) return full;
-  if (codePart.length < 4 || !locality) return null;
+
+  if (before.length < 4 || before.length > 7) return null;
+  const locality = after.split(/\s+/).slice(1).join(" ").trim();
+  if (!locality) return null;
+
   const reference = await geocodeLocality(locality);
   if (!reference) return null;
-  const recovered = recoverShortCode(codePart + SEPARATOR + compact.slice(separator + 1), reference.lat, reference.lon);
+  const recovered = recoverShortCode(codePart, reference.lat, reference.lon);
   return recovered ? { ...recovered, source: "plus-code-recovered" as const, locality } : null;
 }
 
@@ -100,19 +126,14 @@ async function discoverStations(lat: number, lon: number) {
     const response = await fetch(url, { headers: { Accept: "application/json" }, next: { revalidate: 3600 } });
     if (!response.ok) return [];
     const data = await response.json();
-    const raw = Array.isArray(data) ? data : [];
-    return raw.filter((item: any) => item?.type === "stop" || item?.type === "station").map((item: any) => {
-      const location = item.location || {};
-      return {
-        eva: String(item.id || ""),
-        stationName: String(item.name || item.id || ""),
-        lat: Number(location.latitude),
-        lon: Number(location.longitude),
-        distanceKm: distanceKm(lat, lon, Number(location.latitude), Number(location.longitude)),
-        lines: uniqueLines(item),
-        products: item.products || {},
-      };
-    }).filter((item: any) => item.eva && Number.isFinite(item.lat) && Number.isFinite(item.lon)).sort((a: any, b: any) => a.distanceKm - b.distanceKm);
+    return (Array.isArray(data) ? data : [])
+      .filter((item: any) => item?.type === "stop" || item?.type === "station")
+      .map((item: any) => {
+        const location = item.location || {};
+        return { eva: String(item.id || ""), stationName: String(item.name || item.id || ""), lat: Number(location.latitude), lon: Number(location.longitude), distanceKm: distanceKm(lat, lon, Number(location.latitude), Number(location.longitude)), lines: uniqueLines(item), products: item.products || {} };
+      })
+      .filter((item: any) => item.eva && Number.isFinite(item.lat) && Number.isFinite(item.lon))
+      .sort((a: any, b: any) => a.distanceKm - b.distanceKm);
   } catch (error) {
     console.error("DB station discovery failed", error);
     return [];
