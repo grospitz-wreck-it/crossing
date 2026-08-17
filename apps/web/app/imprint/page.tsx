@@ -2,22 +2,22 @@ import Link from "next/link";
 import "../legal.css";
 
 export const metadata = {
-  title: "Impressum | MeineSchranke",
+  title: "Impressum | meineschranke",
 };
 
 export default function ImprintPage() {
   return (
     <main className="legalPage">
       <div className="legalPageInner">
-        <Link href="/" className="legalBack">← Zurück zu MeineSchranke</Link>
+        <Link href="/" className="legalBack">← Zurück zu meineschranke</Link>
         <p className="legalEyebrow">RECHTLICHES</p>
         <h1>Impressum</h1>
-        <p className="legalLead">Angaben zum Anbieter von MeineSchranke.</p>
+        <p className="legalLead">Angaben zum Anbieter von meineschranke.</p>
 
         <section className="legalSection">
           <h2>Anbieter</h2>
           <p>pxxl productions UG (haftungsbeschränkt)</p>
-          <p>MeineSchranke ist ein Produkt bzw. Angebot dieser Gesellschaft.</p>
+          <p>meineschranke ist ein Produkt bzw. Angebot dieser Gesellschaft.</p>
         </section>
 
         <section className="legalSection">
@@ -42,7 +42,7 @@ export default function ImprintPage() {
         <section className="legalSection">
           <h2>Verantwortlichkeit für Inhalte</h2>
           <p>
-            Die Inhalte von MeineSchranke werden mit größtmöglicher Sorgfalt erstellt.
+            Die Inhalte von meineschranke werden mit größtmöglicher Sorgfalt erstellt.
             Für die Richtigkeit, Vollständigkeit und Aktualität der bereitgestellten
             Informationen wird im Rahmen der gesetzlichen Vorschriften keine Gewähr übernommen.
           </p>
@@ -59,7 +59,7 @@ export default function ImprintPage() {
 
         <div className="legalNote">
           Die vollständigen Unternehmensangaben findest du im zentralen Impressum von
-          pxxl productions. Dieses Impressum ist auf MeineSchranke als Produktangebot
+          pxxl productions. Dieses Impressum ist auf meineschranke als Produktangebot
           der pxxl productions UG zugeschnitten.
         </div>
       </div>
