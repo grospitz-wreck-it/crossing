@@ -25,7 +25,14 @@ export default function ForecastOverlay() {
   useEffect(() => {
     const onClick = async (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
-      const row = target?.closest("div[class*='row']") as HTMLElement | null;
+      if (!target) return;
+
+      // Action controls inside a crossing row (especially the delete button)
+      // must keep their own click behavior. This listener runs in the capture
+      // phase, so React's stopPropagation() is too late to protect them.
+      if (target.closest("button, a, input, select, textarea, [role='button']")) return;
+
+      const row = target.closest("div[class*='row']") as HTMLElement | null;
       if (!row) return;
       const small = row.querySelector("small");
       const id = small?.textContent?.trim();
