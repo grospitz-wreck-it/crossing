@@ -52,7 +52,11 @@ function bboxQuery(bbox) {
 }
 
 function crossingQuery(lat, lon) {
-  return `[out:json][timeout:60];\nnode[railway=level_crossing](around:100,${lat},${lon})->.crossings;\nway(bn.crossings)[railway=rail];\nout body geom;`;
+  return `[out:json][timeout:60];node[railway=level_crossing](around:100,${lat},${lon})->.crossings;way(bn.crossings)[railway=rail];out body geom;`;
+}
+
+function osmIdQuery(osmId) {
+  return `[out:json][timeout:60];node(${osmId});way(bn(${osmId}))[railway=rail];out body geom;`;
 }
 
 async function fetchOverpass(query) {
@@ -181,6 +185,20 @@ async function importSingleCrossing(crossingId) {
   const result = await db.execute({ sql: `SELECT id, name, lat, lon FROM crossings WHERE id = ?`, args: [crossingId] });
   const crossing = result.rows[0];
   if (!crossing) throw new Error(`Crossing not found: ${crossingId}`);
+
+  const existingLink = await db.execute({ sql: `SELECT osm_crossing_id FROM crossing_osm_links WHERE crossing_id = ?`, args: [crossingId] });
+  const linkedOsmId = existingLink.rows[0]?.osm_crossing_id;
+
+  if (linkedOsmId) {
+    console.log(`Using existing OSM link for ${crossing.name}: ${linkedOsmId}`);
+    const detail = await fetchOverpass(osmIdQuery(Number(linkedOsmId)));
+    const osmCrossing = (detail.elements ?? []).find((e) => e.type === "node" && Number(e.id) === Number(linkedOsmId));
+    if (!osmCrossing) throw new Error(`OSM node ${linkedOsmId} was not returned by Overpass`);
+    await importCrossingWays(osmCrossing, detail.elements ?? []);
+    console.log(`OSM candidate for ${crossing.name}: ${linkedOsmId}`);
+    return;
+  }
+
   const detail = await fetchOverpass(crossingQuery(crossing.lat, crossing.lon));
   const osmCrossings = (detail.elements ?? []).filter((e) => e.type === "node" && e.tags?.railway === "level_crossing");
   if (!osmCrossings.length) throw new Error(`No OSM level crossing found near ${crossing.name}`);
