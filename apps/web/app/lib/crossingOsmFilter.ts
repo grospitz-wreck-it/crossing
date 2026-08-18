@@ -1,7 +1,7 @@
 import { db } from "./db";
-import { trainUsesCrossing } from "../../../../packages/prediction-engine/src/trainUsesCrossing";
 import type { CrossingOSMMapping } from "../../../../packages/crossing-model/src/osm";
 import type { OSMRailWayGeometry, RouteStation } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
+import { matchRouteToOsmWays } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
 
 export type CrossingOsmFilterResult = {
   status: "matched" | "rejected" | "unknown";
@@ -10,9 +10,6 @@ export type CrossingOsmFilterResult = {
   ref?: string;
 };
 
-type OSMContext = { mapping: CrossingOSMMapping; ways: OSMRailWayGeometry[] };
-
-const contextCache = new Map<string, { expiresAt: number; value: OSMContext | null }>();
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 
 function normalizeStationName(value: string) {
@@ -24,69 +21,6 @@ function normalizeStationName(value: string) {
     .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
     .replace(/[^a-z0-9]+/g, "")
     .trim();
-}
-
-async function loadOsmContext(crossingId: string): Promise<OSMContext | null> {
-  const cached = contextCache.get(crossingId);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-
-  try {
-    const link = await db.execute({
-      sql: `SELECT osm_crossing_id, confidence FROM crossing_osm_links WHERE crossing_id = ? LIMIT 1`,
-      args: [crossingId],
-    });
-    const row: any = link.rows[0];
-    if (!row) {
-      contextCache.set(crossingId, { expiresAt: Date.now() + 300_000, value: null });
-      return null;
-    }
-
-    const crossingOsmId = Number(row.osm_crossing_id);
-    const tracksResult = await db.execute({
-      sql: `SELECT railway_way_id, way_direction FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
-      args: [crossingOsmId],
-    });
-    const trackRows = tracksResult.rows as any[];
-    const wayIds = trackRows.map((track) => Number(track.railway_way_id)).filter(Number.isFinite);
-    if (!wayIds.length) return null;
-
-    const placeholders = wayIds.map(() => "?").join(",");
-    const waysResult = await db.execute({
-      sql: `SELECT osm_id, tags_json, geometry_json FROM osm_rail_ways WHERE osm_id IN (${placeholders})`,
-      args: wayIds,
-    });
-
-    const ways: OSMRailWayGeometry[] = (waysResult.rows as any[]).map((way) => {
-      let tags: Record<string, string> = {};
-      let geometry: Array<{ lat: number; lon: number }> = [];
-      try { tags = JSON.parse(String(way.tags_json || "{}")); } catch {}
-      try { geometry = JSON.parse(String(way.geometry_json || "[]")); } catch {}
-      return {
-        osmId: String(way.osm_id),
-        ref: tags.ref,
-        geometry: Array.isArray(geometry) ? geometry : [],
-      };
-    }).filter((way) => way.geometry.length >= 2);
-
-    const mapping: CrossingOSMMapping = {
-      crossingId,
-      osmNodeId: String(crossingOsmId),
-      source: "openstreetmap",
-      confidence: Number(row.confidence ?? 0),
-      tracks: trackRows.map((track) => ({
-        railwayWayId: String(track.railway_way_id),
-        direction: track.way_direction === "forward" || track.way_direction === "backward" ? track.way_direction : "unknown",
-      })),
-    };
-
-    const value = { mapping, ways };
-    contextCache.set(crossingId, { expiresAt: Date.now() + 300_000, value });
-    return value;
-  } catch (error) {
-    console.error("Failed to load OSM crossing context:", error);
-    contextCache.set(crossingId, { expiresAt: Date.now() + 30_000, value: null });
-    return null;
-  }
 }
 
 async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
@@ -107,10 +41,7 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
       byName.set(normalized, { name, lat: Number(row.lat), lon: Number(row.lon) });
     }
 
-    const value = route.map((name) => {
-      const exact = byName.get(normalizeStationName(name));
-      return exact || { name };
-    });
+    const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
     stationCache.set(key, { expiresAt: Date.now() + 300_000, value });
     return value;
   } catch (error) {
@@ -119,29 +50,122 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
   }
 }
 
+/**
+ * Infrastructure filter. A route is evaluated against ALL trusted crossing
+ * mappings, not only the requested crossing. This is essential where two
+ * crossings sit on different OSM railway ways but share the same observation
+ * station.
+ */
 export async function filterTrainByCrossingOsm(
   crossingId: string,
   route: string[] | undefined,
 ): Promise<CrossingOsmFilterResult> {
   if (!route?.length) return { status: "unknown" };
 
-  const context = await loadOsmContext(crossingId);
-  // No trusted OSM mapping means legacy rules remain authoritative.
-  if (!context || context.mapping.confidence < 0.8 || !context.ways.length) {
+  const coordinateRoute = await routeToCoordinates(route);
+  if (coordinateRoute.filter((s) => s.lat != null && s.lon != null).length < 2) {
     return { status: "unknown" };
   }
 
-  const coordinateRoute = await routeToCoordinates(route);
-  const usableStations = coordinateRoute.filter((station) => station.lat != null && station.lon != null);
-  if (usableStations.length < 2) return { status: "unknown" };
+  try {
+    const links = await db.execute({
+      sql: `SELECT crossing_id, osm_crossing_id, confidence FROM crossing_osm_links WHERE confidence >= 0.8`,
+      args: [],
+    });
 
-  const result = trainUsesCrossing(coordinateRoute, crossingId, [context.mapping], context.ways, 0.65);
-  if (!result.usesCrossing || !result.match) return { status: "rejected", score: result.candidates[0]?.score };
+    const mappings: CrossingOSMMapping[] = [];
+    const ways: OSMRailWayGeometry[] = [];
 
-  return {
-    status: "matched",
-    score: result.match.score,
-    railwayWayId: result.match.railwayWayId,
-    ref: result.match.ref,
-  };
+    for (const link of links.rows as any[]) {
+      const crossingOsmId = Number(link.osm_crossing_id);
+      const tracksResult = await db.execute({
+        sql: `SELECT railway_way_id, way_direction FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
+        args: [crossingOsmId],
+      });
+      const tracks = tracksResult.rows as any[];
+      if (!tracks.length) continue;
+
+      const wayIds = tracks.map((t) => Number(t.railway_way_id)).filter(Number.isFinite);
+      if (!wayIds.length) continue;
+
+      const placeholders = wayIds.map(() => "?").join(",");
+      const wayResult = await db.execute({
+        sql: `SELECT osm_id, tags_json, geometry_json FROM osm_rail_ways WHERE osm_id IN (${placeholders})`,
+        args: wayIds,
+      });
+
+      for (const way of wayResult.rows as any[]) {
+        let tags: Record<string, string> = {};
+        let geometry: Array<{ lat: number; lon: number }> = [];
+        try { tags = JSON.parse(String(way.tags_json || "{}")); } catch {}
+        try { geometry = JSON.parse(String(way.geometry_json || "[]")); } catch {}
+        if (geometry.length >= 2) {
+          ways.push({ osmId: String(way.osm_id), ref: tags.ref, geometry });
+        }
+      }
+
+      mappings.push({
+        crossingId: String(link.crossing_id),
+        osmNodeId: String(crossingOsmId),
+        source: "openstreetmap",
+        confidence: Number(link.confidence ?? 0),
+        tracks: tracks.map((t) => ({
+          railwayWayId: String(t.railway_way_id),
+          direction: t.way_direction === "forward" || t.way_direction === "backward" ? t.way_direction : "unknown",
+        })),
+      });
+    }
+
+    if (!mappings.length || !ways.length) return { status: "unknown" };
+
+    const routeMatches = matchRouteToOsmWays(coordinateRoute, ways);
+    if (!routeMatches.length) return { status: "unknown" };
+
+    const bestByCrossing = new Map<string, { score: number; railwayWayId: string; ref?: string }>();
+    for (const mapping of mappings) {
+      for (const track of mapping.tracks) {
+        const match = routeMatches.find((candidate) => String(candidate.railwayWayId) === String(track.railwayWayId));
+        if (!match || match.score <= 0) continue;
+        const score = match.score * mapping.confidence;
+        const previous = bestByCrossing.get(mapping.crossingId);
+        if (!previous || score > previous.score) {
+          bestByCrossing.set(mapping.crossingId, {
+            score,
+            railwayWayId: String(track.railwayWayId),
+            ref: match.ref,
+          });
+        }
+      }
+    }
+
+    const own = bestByCrossing.get(crossingId);
+    if (!own) return { status: "rejected" };
+
+    const ranked = [...bestByCrossing.entries()].sort((a, b) => b[1].score - a[1].score);
+    const rank = ranked.findIndex(([id]) => id === crossingId);
+    const runnerUp = ranked.find(([id]) => id !== crossingId)?.[1];
+
+    // Station-only routes are necessarily approximate. Do not demand the old
+    // 0.65 score, but require this BÜ's railway way to beat competing mapped
+    // crossings by a meaningful margin. This prevents the two Parkstraße BÜs
+    // from both receiving the same train merely because Bünde is shared.
+    const minimumScore = 0.35;
+    const minimumMargin = 0.06;
+    if (own.score < minimumScore) {
+      return { status: "rejected", score: own.score, railwayWayId: own.railwayWayId, ref: own.ref };
+    }
+
+    if (rank > 0 && runnerUp && runnerUp.score - own.score >= minimumMargin) {
+      return { status: "rejected", score: own.score, railwayWayId: own.railwayWayId, ref: own.ref };
+    }
+
+    if (rank === 0 && runnerUp && own.score - runnerUp.score < minimumMargin) {
+      return { status: "unknown", score: own.score, railwayWayId: own.railwayWayId, ref: own.ref };
+    }
+
+    return { status: "matched", score: own.score, railwayWayId: own.railwayWayId, ref: own.ref };
+  } catch (error) {
+    console.error("Failed to match train against OSM crossings:", error);
+    return { status: "unknown" };
+  }
 }
