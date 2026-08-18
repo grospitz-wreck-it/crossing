@@ -25,6 +25,11 @@ export function middleware(request: NextRequest) {
     url.pathname = "/api/admin/crossings/save";
     return NextResponse.rewrite(url);
   }
+  if (request.method === "DELETE" && request.nextUrl.pathname === "/api/admin/crossings") {
+    const url = request.nextUrl.clone();
+    url.pathname = "/api/admin/crossings/delete";
+    return NextResponse.rewrite(url);
+  }
   return NextResponse.next();
 }
 
