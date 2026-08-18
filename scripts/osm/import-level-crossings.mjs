@@ -156,11 +156,6 @@ async function importNetworkPayload(payload) {
   return { crossings: crossings.length, ways: ways.length };
 }
 
-async function importCrossingWays(crossing, elements) {
-  const ways = elements.filter((e) => e.type === "way" && e.tags?.railway === "rail");
-  await linkCrossingWays(crossing, ways.filter((way) => way.nodes?.includes(crossing.id)));
-}
-
 function distance2(aLat, aLon, bLat, bLon) {
   const latScale = 111320;
   const lonScale = 111320 * Math.cos((aLat * Math.PI) / 180);
@@ -256,7 +251,8 @@ async function importSingleCrossing(crossingId) {
     const detail = await fetchOverpass(osmIdQuery(Number(linkedOsmId)));
     const osmCrossing = (detail.elements ?? []).find((e) => e.type === "node" && Number(e.id) === Number(linkedOsmId));
     if (!osmCrossing) throw new Error(`OSM node ${linkedOsmId} was not returned by Overpass`);
-    await importCrossingWays(osmCrossing, detail.elements ?? []);
+    const ways = (detail.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
+    await linkCrossingWays(osmCrossing, ways);
     console.log(`OSM candidate for ${crossing.name}: ${linkedOsmId}`);
     return;
   }
@@ -267,7 +263,8 @@ async function importSingleCrossing(crossingId) {
 
   osmCrossings.sort((a, b) => Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(a.lat), Number(a.lon))) - Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(b.lat), Number(b.lon))));
   const osmCrossing = osmCrossings[0];
-  await importCrossingWays(osmCrossing, detail.elements ?? []);
+  const ways = (detail.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
+  await linkCrossingWays(osmCrossing, ways);
   console.log(`OSM candidate for ${crossing.name}: ${osmCrossing.id}`);
 }
 
