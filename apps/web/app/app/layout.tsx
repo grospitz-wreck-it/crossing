@@ -3,6 +3,7 @@ import { auth } from "../../auth";
 
 import { CrossingsProvider } from "../context/CrossingsContext";
 import Header from "../components/Header";
+import styles from "./AppLayout.module.css";
 
 export default async function AppLayout({
   children,
@@ -16,9 +17,11 @@ export default async function AppLayout({
   }
 
   return (
-    <CrossingsProvider>
-      <Header />
-      {children}
-    </CrossingsProvider>
+    <div className={styles.app}>
+      <CrossingsProvider>
+        <Header />
+        {children}
+      </CrossingsProvider>
+    </div>
   );
 }
