@@ -51,6 +51,11 @@ function bboxQuery(bbox) {
   return `[out:json][timeout:60];node[railway=level_crossing]${scope};out body;`;
 }
 
+function railwayWaysQuery(bbox) {
+  const scope = bbox ? `(${bbox.join(",")})` : "(51.9,8.2,52.5,9.1)";
+  return `[out:json][timeout:180];way[railway=rail]${scope};out body geom;`;
+}
+
 function crossingQuery(lat, lon) {
   return `[out:json][timeout:60];node[railway=level_crossing](around:100,${lat},${lon})->.crossings;way(bn.crossings)[railway=rail];out body geom;`;
 }
@@ -82,6 +87,26 @@ async function fetchOverpass(query) {
   throw lastError ?? new Error("All Overpass endpoints failed");
 }
 
+async function upsertRailWay(way) {
+  if (!Array.isArray(way.nodes) || way.nodes.length < 2 || !Array.isArray(way.geometry) || way.geometry.length < 2) return;
+  await db.execute({
+    sql: `INSERT INTO osm_rail_ways (osm_id, tags_json, node_ids_json, geometry_json, osm_version, osm_timestamp, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(osm_id) DO UPDATE SET tags_json=excluded.tags_json,
+      node_ids_json=excluded.node_ids_json, geometry_json=excluded.geometry_json,
+      osm_version=excluded.osm_version, osm_timestamp=excluded.osm_timestamp,
+      updated_at=datetime('now')`,
+    args: [way.id, JSON.stringify(way.tags ?? {}), JSON.stringify(way.nodes), JSON.stringify(way.geometry), way.version ?? null, way.timestamp ?? null],
+  });
+}
+
+async function importRailwayNetwork(bbox) {
+  const payload = await fetchOverpass(railwayWaysQuery(bbox));
+  const ways = (payload.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
+  console.log(`OSM railway network: ${ways.length} ways`);
+  for (const way of ways) await upsertRailWay(way);
+}
+
 async function upsertCrossing(crossing) {
   await db.execute({
     sql: `INSERT INTO osm_crossings (osm_id, lat, lon, tags_json, osm_version, osm_timestamp, updated_at)
@@ -101,15 +126,7 @@ async function importCrossingWays(crossing, elements) {
   for (const way of ways) {
     if (!Array.isArray(way.nodes) || !way.nodes.includes(crossing.id)) continue;
     const index = way.nodes.indexOf(crossing.id);
-    await db.execute({
-      sql: `INSERT INTO osm_rail_ways (osm_id, tags_json, node_ids_json, geometry_json, osm_version, osm_timestamp, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(osm_id) DO UPDATE SET tags_json=excluded.tags_json,
-        node_ids_json=excluded.node_ids_json, geometry_json=excluded.geometry_json,
-        osm_version=excluded.osm_version, osm_timestamp=excluded.osm_timestamp,
-        updated_at=datetime('now')`,
-      args: [way.id, JSON.stringify(way.tags ?? {}), JSON.stringify(way.nodes ?? []), JSON.stringify(way.geometry ?? []), way.version ?? null, way.timestamp ?? null],
-    });
+    await upsertRailWay(way);
     await db.execute({
       sql: `INSERT INTO osm_crossing_rail_ways
         (crossing_osm_id, railway_way_id, crossing_node_index, way_direction, updated_at)
@@ -172,6 +189,7 @@ async function matchExistingCrossings() {
 }
 
 async function importByBbox(bbox) {
+  await importRailwayNetwork(bbox);
   const payload = await fetchOverpass(bboxQuery(bbox));
   const crossings = (payload.elements ?? []).filter((e) => e.type === "node" && e.tags?.railway === "level_crossing");
   console.log(`OSM: ${crossings.length} level crossings`);
