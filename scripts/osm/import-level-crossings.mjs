@@ -3,8 +3,9 @@
 import { createClient } from "@libsql/client";
 
 const OVERPASS_URLS = [
-  process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter",
+  process.env.OVERPASS_URL || "https://overpass.private.coffee/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
+  "https://overpass-api.de/api/interpreter",
 ];
 const DATABASE_URL = process.env.TURSO_DATABASE_URL;
 const AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN;
@@ -117,7 +118,7 @@ async function fetchOverpass(query) {
         method: "GET",
         headers: {
           accept: "application/json",
-          "user-agent": "Crossings/1.0 (OSM railway crossing importer)",
+          "user-agent": "Crossings/1.0 (https://crossings.app; OSM importer)",
         },
       });
 
