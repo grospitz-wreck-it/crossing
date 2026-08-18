@@ -11,6 +11,17 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
   const crossing: any = result.rows[0];
   if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
+
+  const stationLinks = await db.execute({
+    sql: `SELECT eva,station_name,role,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`,
+    args: [id],
+  }).catch(() => ({ rows: [] as any[] }));
+  const stationNameByEva = new Map<string, string>();
+  for (const row of stationLinks.rows as any[]) {
+    const eva = String(row.eva || "").trim();
+    if (eva) stationNameByEva.set(eva, String(row.station_name || eva));
+  }
+
   const allObservationEvas = jsonArray(crossing.observation_evas).map((value) => String(value || "").trim()).filter(Boolean);
   if (crossing.eva && !allObservationEvas.includes(String(crossing.eva))) allObservationEvas.unshift(String(crossing.eva));
   const contextEvas = jsonArray(crossing.context_evas).map((value) => String(value || "").trim()).filter(Boolean);
@@ -21,27 +32,57 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const now = Date.now();
   const trainsByKey = new Map<string, any>();
   const stationResults: any[] = [];
+  const stationEventCounts = new Map<string, number>();
 
   for (const eva of observationEvas) {
     try {
       const events = await getStationTimetable(eva, 4);
-      stationResults.push({ eva, stationName: eva, role: "observation", count: events.length, ok: true });
+      stationEventCounts.set(eva, events.length);
+      stationResults.push({ eva, stationName: stationNameByEva.get(eva) || eva, role: "observation", count: events.length, ok: true });
       for (const train of events) {
         if (train.cancelled || train.actualTime.getTime() <= now - 60_000) continue;
         const crossingTime = train.actualTime;
         const key = `${train.category}-${train.journeyNumber}`;
-        const candidate = { id: `${key}-${eva}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, delayMinutes: train.delayMinutes, observationStation: eva, observationEva: eva, crossingTime: crossingTime.toISOString(), closeAt: new Date(crossingTime.getTime() - Number(crossing.close_offset_seconds || 80) * 1000).toISOString(), openAt: new Date(crossingTime.getTime() + Number(crossing.open_offset_seconds || 20) * 1000).toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - now) / 1000), direction: "unknown", route: train.route, source: "observation" };
+        const candidate = { id: `${key}-${eva}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, delayMinutes: train.delayMinutes, observationStation: stationNameByEva.get(eva) || eva, observationEva: eva, crossingTime: crossingTime.toISOString(), closeAt: new Date(crossingTime.getTime() - Number(crossing.close_offset_seconds || 80) * 1000).toISOString(), openAt: new Date(crossingTime.getTime() + Number(crossing.open_offset_seconds || 20) * 1000).toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - now) / 1000), direction: "unknown", route: train.route, source: "observation" };
         const existing = trainsByKey.get(key);
         if (!existing || candidate.etaSeconds < existing.etaSeconds) trainsByKey.set(key, candidate);
       }
-    } catch (error) { stationResults.push({ eva, stationName: eva, role: "observation", count: 0, ok: false, error: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) {
+      stationResults.push({ eva, stationName: stationNameByEva.get(eva) || eva, role: "observation", count: 0, ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   if (throughRules.length) {
     try {
       const predictionCrossing = { id: String(crossing.id), name: String(crossing.name), eva: String(crossing.eva || ""), observationEvas, requiredRouteStops, lat: Number(crossing.lat), lon: Number(crossing.lon), closeOffsetSeconds: Number(crossing.close_offset_seconds || 80), openOffsetSeconds: Number(crossing.open_offset_seconds || 20), rules: [], throughRules, diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules), confidence: Number(crossing.confidence || 0.5) };
       const throughTrains = await getThroughTrains(predictionCrossing as any);
-      for (const station of new Map(throughRules.map((rule: any) => [String(rule.observationEva), rule])).values()) stationResults.push({ eva: String((station as any).observationEva), stationName: String((station as any).observationStation || (station as any).observationEva), role: "rule", rule: true, ok: true });
+
+      const uniqueRuleStations = new Map<string, any>();
+      for (const rule of throughRules) {
+        const eva = String(rule.observationEva || "").trim();
+        if (eva && !uniqueRuleStations.has(eva)) uniqueRuleStations.set(eva, rule);
+      }
+      for (const [eva, rule] of uniqueRuleStations) {
+        let count = stationEventCounts.get(eva);
+        if (count === undefined) {
+          try {
+            const events = await getStationTimetable(eva, 4);
+            count = events.length;
+            stationEventCounts.set(eva, count);
+          } catch {
+            count = 0;
+          }
+        }
+        stationResults.push({
+          eva,
+          stationName: stationNameByEva.get(eva) || String(rule.observationStation || eva),
+          role: "rule",
+          rule: true,
+          ok: true,
+          count,
+        });
+      }
+
       for (const train of throughTrains) {
         const crossingTime = new Date(train.crossingTime), etaSeconds = Math.floor((crossingTime.getTime() - now) / 1000);
         if (etaSeconds <= 0) continue;
@@ -50,11 +91,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         const existing = trainsByKey.get(key);
         if (!existing || candidate.etaSeconds < existing.etaSeconds) trainsByKey.set(key, candidate);
       }
-    } catch (error) { stationResults.push({ role: "rule", ok: false, count: 0, error: error instanceof Error ? error.message : String(error) }); }
+    } catch (error) {
+      stationResults.push({ role: "rule", ok: false, count: 0, error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   const knownRuleEvas = new Set(throughRules.map((rule: any) => String(rule.observationEva)));
-  for (const eva of contextEvas.slice(0, 2)) if (!knownRuleEvas.has(eva)) stationResults.push({ eva, stationName: eva, role: "context", rule: false, ok: true });
+  for (const eva of contextEvas.slice(0, 2)) if (!knownRuleEvas.has(eva)) stationResults.push({ eva, stationName: stationNameByEva.get(eva) || eva, role: "context", rule: false, ok: true });
 
   const trains = [...trainsByKey.values()].filter((train) => train.etaSeconds > 0).sort((a, b) => a.etaSeconds - b.etaSeconds);
   const closures: any[] = [];
