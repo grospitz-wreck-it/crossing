@@ -19,18 +19,18 @@
   padding: 0;
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.28);
+  background: #8b8b8b;
   cursor: pointer;
-  transition: transform 160ms ease, background 160ms ease;
+  transition: width 160ms ease, height 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
 .dot.active {
   width: 9px;
   height: 9px;
-  background: rgba(255, 255, 255, 0.92);
+  background: #e30613;
 }
 
 .dot:focus-visible {
-  outline: 2px solid rgba(255, 255, 255, 0.8);
+  outline: 2px solid #e30613;
   outline-offset: 3px;
 }
