@@ -1,5 +1,5 @@
 import { db } from "../../lib/db";
-import { crossings as staticCrossings } from "../../../../packages/crossing-model/src/crossings";
+import { crossings as staticCrossings } from "../../../../../packages/crossing-model/src/crossings";
 
 export async function GET() {
   try {
