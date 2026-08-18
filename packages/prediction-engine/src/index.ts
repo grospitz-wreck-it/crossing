@@ -41,3 +41,6 @@ export function createPrediction(
     confidence: 0.85,
   };
 }
+
+export { trainUsesCrossing } from "./trainUsesCrossing";
+export type { TrainUsesCrossingResult } from "./trainUsesCrossing";
