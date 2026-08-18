@@ -13,8 +13,11 @@ export type CrossingOsmCandidate = {
 
 /**
  * Scores a train route against one or more OSM-mapped crossings.
- * This is diagnostic infrastructure matching only; callers decide whether to
- * use it as a hard filter for predictions.
+ *
+ * Each crossing can have multiple railway ways/tracks. We therefore first
+ * choose the strongest matching track for each crossing and only then compare
+ * different crossings. Otherwise two tracks belonging to the same crossing
+ * could incorrectly cancel out the uniqueness margin.
  */
 export function matchRouteToCrossings(
   route: RouteStation[],
@@ -27,25 +30,31 @@ export function matchRouteToCrossings(
   const wayMatches = matchRouteToOsmWays(route, ways);
   const byWay = new Map(wayMatches.map((match) => [match.railwayWayId, match]));
 
-  return usableMappings
-    .flatMap((mapping) =>
-      mapping.tracks.map((track) => {
-        const match = byWay.get(String(track.railwayWayId));
-        if (!match || match.score <= 0) return null;
+  const bestByCrossing = new Map<string, CrossingOsmCandidate>();
 
-        return {
-          crossingId: mapping.crossingId,
-          osmNodeId: mapping.osmNodeId,
-          railwayWayId: String(track.railwayWayId),
-          ref: match.ref,
-          routeScore: match.score,
-          crossingConfidence: mapping.confidence,
-          score: match.score * mapping.confidence,
-        } satisfies CrossingOsmCandidate;
-      }),
-    )
-    .filter((candidate): candidate is CrossingOsmCandidate => candidate !== null)
-    .sort((a, b) => b.score - a.score);
+  for (const mapping of usableMappings) {
+    for (const track of mapping.tracks) {
+      const match = byWay.get(String(track.railwayWayId));
+      if (!match || match.score <= 0) continue;
+
+      const candidate = {
+        crossingId: mapping.crossingId,
+        osmNodeId: mapping.osmNodeId,
+        railwayWayId: String(track.railwayWayId),
+        ref: match.ref,
+        routeScore: match.score,
+        crossingConfidence: mapping.confidence,
+        score: match.score * mapping.confidence,
+      } satisfies CrossingOsmCandidate;
+
+      const previous = bestByCrossing.get(mapping.crossingId);
+      if (!previous || candidate.score > previous.score) {
+        bestByCrossing.set(mapping.crossingId, candidate);
+      }
+    }
+  }
+
+  return [...bestByCrossing.values()].sort((a, b) => b.score - a.score);
 }
 
 export function getUniqueCrossingOsmMatch(
