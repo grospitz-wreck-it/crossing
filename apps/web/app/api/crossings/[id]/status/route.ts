@@ -13,10 +13,10 @@ function jsonArray(value: unknown): any[] {
 }
 
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
-  const observationEvas = jsonArray(row.observation_evas).map(String).filter(Boolean);
+  const observationEvas: string[] = jsonArray(row.observation_evas).map((value: unknown) => String(value)).filter(Boolean);
   if (row.eva && !observationEvas.includes(String(row.eva))) observationEvas.unshift(String(row.eva));
-  const contextEvas = jsonArray(row.context_evas).map(String).filter(Boolean);
-  const requiredRouteStops = jsonArray(row.required_route_stops).map(String).filter(Boolean);
+  const contextEvas: string[] = jsonArray(row.context_evas).map((value: unknown) => String(value)).filter(Boolean);
+  const requiredRouteStops: string[] = jsonArray(row.required_route_stops).map((value: unknown) => String(value)).filter(Boolean);
   const throughRules = jsonArray(row.through_rules);
   const diversionRules = jsonArray(row.diversion_rules);
   const rerouteWatchRules = jsonArray(row.reroute_watch_rules);
@@ -75,7 +75,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // die automatisch ermittelten Beobachtungsstationen direkt abgefragt werden,
   // genau wie im Admin-Forecast. Die Through-Rules sind eine zusätzliche
   // Filter-/ETA-Schicht und kein Ersatz für diese Beobachtung.
-  const observationEvas = Array.from(new Set((crossing.observationEvas || []).map(String).filter(Boolean))).slice(0, 6);
+  const observationEvas: string[] = Array.from(
+    new Set<string>(
+      (Array.isArray(crossing.observationEvas) ? crossing.observationEvas : [])
+        .map((value: unknown) => String(value).trim())
+        .filter((value: string) => Boolean(value))
+    )
+  ).slice(0, 6);
+
   for (const observationEva of observationEvas) {
     try {
       const events = await withMemoryCache(`status-station-${observationEva}`, 5000, () => getStationTimetable(observationEva, 4));
@@ -104,8 +111,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           observationStation: train.stationName || observationEva,
           estimatedFrom: { observationEva, observationActualTime: crossingTime.toISOString(), source: "observation-station" },
         };
-        // Näher am BÜ liegende Beobachtungen sollen ältere/weiter entfernte
-        // Schätzungen ersetzen. Die späteste kommende Beobachtung gewinnt.
         const existingIndex = trains.findIndex((item) => `${item.category}-${item.journeyNumber}` === key);
         if (existingIndex < 0) trains.push(candidate);
         else if (candidate.etaSeconds < trains[existingIndex].etaSeconds) trains[existingIndex] = candidate;
@@ -116,10 +121,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
   }
 
-  // --- Züge, die am Übergang selbst halten ---
   if (crossing.eva && !observationEvas.includes(String(crossing.eva))) {
     try {
-      const localEvents = await getStationTimetable(crossing.eva, 4);
+      const localEvents = await getStationTimetable(String(crossing.eva), 4);
       for (const train of localEvents) {
         if (train.cancelled) continue;
         const crossingTime = train.actualTime;
@@ -133,7 +137,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
   }
 
-  // --- Durchfahrten / Umleitungen anhand der gespeicherten Regeln ---
   try {
     const throughTrains = await withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing));
     for (const train of throughTrains) {
