@@ -105,39 +105,40 @@ function distance2(aLat, aLon, bLat, bLon) {
 async function matchExistingCrossings() {
   const result = await db.execute({ sql: `SELECT id, name, lat, lon FROM crossings WHERE status = 'active'`, args: [] });
   const osm = await db.execute({ sql: `SELECT osm_id, lat, lon, tags_json FROM osm_crossings`, args: [] });
-  const candidates = osm.rows.map((row) => ({ ...row, distanceMeters: distance2(Number(row.lat), Number(row.lon), Number(row.lat), Number(row.lon)) }));
+  const MAX_DISTANCE_METERS = 80;
 
-  const assignments = new Map();
-  const usedOsmIds = new Set();
-
+  const pairs = [];
   for (const crossing of result.rows) {
-    const ranked = osm.rows
-      .map((row) => ({ row, distanceMeters: Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(row.lat), Number(row.lon))) }))
-      .sort((a, b) => a.distanceMeters - b.distanceMeters);
-
-    const best = ranked[0];
-    const second = ranked[1];
-    if (!best) continue;
-
-    const MAX_DISTANCE_METERS = 80;
-    const AMBIGUITY_MARGIN_METERS = 15;
-    const ambiguous = second && second.distanceMeters - best.distanceMeters < AMBIGUITY_MARGIN_METERS;
-    if (best.distanceMeters > MAX_DISTANCE_METERS || ambiguous || usedOsmIds.has(Number(best.row.osm_id))) {
-      console.log(`REVIEW ${crossing.name} -> nearest OSM ${best.row.osm_id} (${best.distanceMeters.toFixed(1)}m)`);
-      continue;
+    for (const row of osm.rows) {
+      const distanceMeters = Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(row.lat), Number(row.lon)));
+      if (distanceMeters <= MAX_DISTANCE_METERS) pairs.push({ crossing, row, distanceMeters });
     }
+  }
 
-    assignments.set(crossing.id, best.row.osm_id);
-    usedOsmIds.add(Number(best.row.osm_id));
+  // Globally assign the shortest available crossing↔OSM pairs. This is important
+  // when two real crossings are only a few metres apart (e.g. Parkstraße Nord/Süd).
+  pairs.sort((a, b) => a.distanceMeters - b.distanceMeters);
+  const assignedCrossings = new Set();
+  const assignedOsmIds = new Set();
+  const assignments = [];
+
+  for (const pair of pairs) {
+    if (assignedCrossings.has(pair.crossing.id) || assignedOsmIds.has(Number(pair.row.osm_id))) continue;
+    assignedCrossings.add(pair.crossing.id);
+    assignedOsmIds.add(Number(pair.row.osm_id));
+    assignments.push(pair);
   }
 
   for (const crossing of result.rows) {
-    const osmId = assignments.get(crossing.id);
-    if (osmId == null) continue;
-    const row = osm.rows.find((candidate) => Number(candidate.osm_id) === Number(osmId));
-    const distanceMeters = Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(row.lat), Number(row.lon)));
-    await db.execute({ sql: `INSERT INTO crossing_osm_links (crossing_id, osm_crossing_id, match_method, confidence, updated_at) VALUES (?, ?, 'nearest_unique', ?, datetime('now')) ON CONFLICT(crossing_id) DO UPDATE SET osm_crossing_id=excluded.osm_crossing_id, match_method=excluded.match_method, confidence=excluded.confidence, updated_at=datetime('now')`, args: [crossing.id, osmId, distanceMeters <= 20 ? 0.99 : 0.9] });
-    console.log(`MATCH ${crossing.name} -> OSM ${osmId} distance=${distanceMeters.toFixed(1)}m confidence=${distanceMeters <= 20 ? 0.99 : 0.9}`);
+    const assignment = assignments.find((pair) => pair.crossing.id === crossing.id);
+    if (!assignment) {
+      console.log(`REVIEW ${crossing.name} -> no unique OSM crossing within ${MAX_DISTANCE_METERS}m`);
+      continue;
+    }
+
+    const confidence = assignment.distanceMeters <= 20 ? 0.99 : 0.9;
+    await db.execute({ sql: `INSERT INTO crossing_osm_links (crossing_id, osm_crossing_id, match_method, confidence, updated_at) VALUES (?, ?, 'nearest_unique_global', ?, datetime('now')) ON CONFLICT(crossing_id) DO UPDATE SET osm_crossing_id=excluded.osm_crossing_id, match_method=excluded.match_method, confidence=excluded.confidence, updated_at=excluded.updated_at`, args: [crossing.id, assignment.row.osm_id, confidence] });
+    console.log(`MATCH ${crossing.name} -> OSM ${assignment.row.osm_id} distance=${assignment.distanceMeters.toFixed(1)}m confidence=${confidence}`);
   }
 }
 
