@@ -2,7 +2,10 @@
 
 import { createClient } from "@libsql/client";
 
-const OVERPASS_URL = process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter";
+const OVERPASS_URLS = [
+  process.env.OVERPASS_URL || "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
 const DATABASE_URL = process.env.TURSO_DATABASE_URL;
 const AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN;
 
@@ -104,16 +107,34 @@ out body geom;
 }
 
 async function fetchOverpass(query) {
-  const response = await fetch(OVERPASS_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded; charset=UTF-8" },
-    body: `data=${encodeURIComponent(query)}`,
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Overpass ${response.status}: ${text.slice(0, 500)}`);
+  const encoded = encodeURIComponent(query);
+  let lastError = null;
+
+  for (const baseUrl of OVERPASS_URLS) {
+    try {
+      const url = `${baseUrl}?data=${encoded}`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          "user-agent": "Crossings/1.0 (OSM railway crossing importer)",
+        },
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`Overpass ${response.status}: ${text.slice(0, 500)}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      lastError = error;
+      console.warn(`Overpass endpoint failed: ${baseUrl}`);
+      console.warn(error instanceof Error ? error.message : error);
+    }
   }
-  return response.json();
+
+  throw lastError ?? new Error("All Overpass endpoints failed");
 }
 
 function indexCrossingNodes(elements) {
@@ -154,20 +175,10 @@ async function importData(elements) {
           osm_version=excluded.osm_version,
           osm_timestamp=excluded.osm_timestamp,
           updated_at=datetime('now')`,
-      args: [
-        crossing.id,
-        crossing.lat,
-        crossing.lon,
-        escapeSqlJson(crossing.tags),
-        crossing.version ?? null,
-        crossing.timestamp ?? null,
-      ],
+      args: [crossing.id, crossing.lat, crossing.lon, escapeSqlJson(crossing.tags), crossing.version ?? null, crossing.timestamp ?? null],
     });
 
-    await db.execute({
-      sql: `DELETE FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
-      args: [crossing.id],
-    });
+    await db.execute({ sql: `DELETE FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`, args: [crossing.id] });
 
     for (const way of linkedWays(crossing.id, ways)) {
       const index = way.nodes.indexOf(crossing.id);
@@ -182,14 +193,7 @@ async function importData(elements) {
             osm_version=excluded.osm_version,
             osm_timestamp=excluded.osm_timestamp,
             updated_at=datetime('now')`,
-        args: [
-          way.id,
-          escapeSqlJson(way.tags),
-          JSON.stringify(way.nodes ?? []),
-          JSON.stringify(way.geometry ?? []),
-          way.version ?? null,
-          way.timestamp ?? null,
-        ],
+        args: [way.id, escapeSqlJson(way.tags), JSON.stringify(way.nodes ?? []), JSON.stringify(way.geometry ?? []), way.version ?? null, way.timestamp ?? null],
       });
 
       await db.execute({
@@ -203,10 +207,7 @@ async function importData(elements) {
 }
 
 async function matchExistingCrossings() {
-  const result = await db.execute({
-    sql: `SELECT id, name, lat, lon FROM crossings WHERE status = 'active'`,
-    args: [],
-  });
+  const result = await db.execute({ sql: `SELECT id, name, lat, lon FROM crossings WHERE status = 'active'`, args: [] });
 
   for (const crossing of result.rows) {
     const candidates = await db.execute({
@@ -247,10 +248,7 @@ async function main() {
   await importData(payload.elements ?? []);
 
   if (crossingId) {
-    const result = await db.execute({
-      sql: `SELECT * FROM crossing_osm_links WHERE crossing_id = ?`,
-      args: [crossingId],
-    });
+    const result = await db.execute({ sql: `SELECT * FROM crossing_osm_links WHERE crossing_id = ?`, args: [crossingId] });
     console.log(JSON.stringify(result.rows, null, 2));
   } else {
     await matchExistingCrossings();
