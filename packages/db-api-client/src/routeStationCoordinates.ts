@@ -1,5 +1,10 @@
 import type { OfficialTrainEvent } from "./parseOfficialTimetable";
-import type { RouteStation } from "../../prediction-engine/src/routeOsmMatcher";
+
+export type RouteStationWithCoordinates = {
+  name: string;
+  lat?: number | null;
+  lon?: number | null;
+};
 
 export type StationCatalogEntry = {
   eva?: string;
@@ -28,7 +33,7 @@ function normalizeStationName(value: string) {
 export function officialTrainEventToRouteStations(
   event: Pick<OfficialTrainEvent, "route">,
   catalog: StationCatalogEntry[],
-): RouteStation[] {
+): RouteStationWithCoordinates[] {
   const byName = new Map<string, StationCatalogEntry>();
 
   for (const entry of catalog) {
