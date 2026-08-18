@@ -6,6 +6,7 @@ import { getReroutedTrains } from "../../../../../../../packages/db-api-client/s
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { withMemoryCache } from "../../../../../../../packages/db-api-client/src/memoryCache";
+import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 
 function jsonArray(value: unknown): any[] {
   if (Array.isArray(value)) return value;
@@ -70,6 +71,29 @@ async function loadCrossing(id: string): Promise<any | null> {
   }
 }
 
+/**
+ * OSM is authoritative only when the crossing has a trusted mapping.
+ * Without one, preserve the existing timetable/through-rule behaviour.
+ */
+async function allowTrainForCrossing(crossingId: string, train: any): Promise<boolean> {
+  const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
+  if (!route.length) return true;
+
+  const result = await filterTrainByCrossingOsm(crossingId, route);
+  if (result.status === "rejected") {
+    console.info("OSM rejected train for crossing", {
+      crossingId,
+      journeyNumber: train.journeyNumber,
+      line: train.line,
+      score: result.score,
+      railwayWayId: result.railwayWayId,
+      ref: result.ref,
+    });
+    return false;
+  }
+  return true;
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const crossing = (await loadCrossing(id)) || staticCrossings.find((c) => c.id === id);
@@ -77,13 +101,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const trains: any[] = [];
 
-  // Ein BÜ mit eigener EVA wird direkt über diese EVA beobachtet.
-  // Kirchlengern bleibt damit unverändert.
   if (crossing.eva) {
     try {
       const localEvents = await getStationTimetable(crossing.eva, 4);
       for (const train of localEvents) {
         if (train.cancelled) continue;
+        if (!(await allowTrainForCrossing(crossing.id, train))) continue;
         const isStoppingTrain = train.platform === "1" || train.platform === "2";
         const crossingTime = train.actualTime;
         const etaSeconds = Math.floor((crossingTime.getTime() - Date.now()) / 1000);
@@ -100,10 +123,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     } catch (error) { console.error("Failed to load local timetable:", error); }
   }
 
-  // Automatisch angelegte BÜs ohne eigene EVA werden wie die Admin-Prognose
-  // über ihre Beobachtungsstationen versorgt. Das ist absichtlich an !eva
-  // gebunden: BÜs wie Kirchlengern mit eigener EVA und expliziten Through-Rules
-  // werden dadurch nicht mit fremden Stationsfahrten aufgefüllt.
   if (!crossing.eva && crossing.observationEvas?.length) {
     const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
     for (const observationEva of crossing.observationEvas) {
@@ -111,6 +130,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         const events = await getStationTimetable(observationEva, 4);
         for (const train of events) {
           if (train.cancelled || train.actualTime.getTime() <= Date.now() - 60_000) continue;
+          if (!(await allowTrainForCrossing(crossing.id, train))) continue;
           const crossingTime = train.actualTime;
           const key = `${train.category}-${train.journeyNumber}`;
           if (existingKeys.has(key)) continue;
@@ -135,6 +155,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const throughTrains = await withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing));
     const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
     for (const train of throughTrains) {
+      if (!(await allowTrainForCrossing(crossing.id, train))) continue;
       const key = `${train.category}-${train.journeyNumber}`;
       if (existingKeys.has(key)) continue;
       const crossingTime = new Date(train.crossingTime);
@@ -158,6 +179,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const reroutedTrains = await withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing));
     const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
     for (const train of reroutedTrains) {
+      if (!(await allowTrainForCrossing(crossing.id, train))) continue;
       const key = `${train.category}-${train.journeyNumber}`;
       if (existingKeys.has(key)) continue;
       const crossingTime = new Date(train.crossingTime);
