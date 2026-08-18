@@ -1,5 +1,6 @@
 import { db } from "./db";
-import type { OSMRailWayGeometry, RouteStation } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
+import { buildRailGraph, distanceMeters, nearestNode, shortestRailPath, type RailWayRow } from "./railGraph";
+import type { RouteStation } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
 
 export type CrossingOsmFilterResult = {
   status: "matched" | "rejected" | "unknown";
@@ -14,10 +15,12 @@ type Mapping = {
   confidence: number;
   crossingLat: number;
   crossingLon: number;
+  crossingNodeIds: Set<string>;
   railwayWayIds: string[];
 };
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
+const graphCache = new Map<string, { expiresAt: number; value: ReturnType<typeof buildRailGraph> }>();
 
 function normalizeStationName(value: string) {
   return String(value || "")
@@ -28,45 +31,6 @@ function normalizeStationName(value: string) {
     .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
     .replace(/[^a-z0-9]+/g, "")
     .trim();
-}
-
-function distanceMeters(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
-  const latScale = Math.cos((a.lat * Math.PI) / 180);
-  const dx = (a.lon - b.lon) * 111320 * latScale;
-  const dy = (a.lat - b.lat) * 111320;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-function pointToSegmentDistanceMeters(
-  p: { lat: number; lon: number },
-  a: { lat: number; lon: number },
-  b: { lat: number; lon: number },
-) {
-  const latScale = Math.cos((p.lat * Math.PI) / 180);
-  const xy = (v: { lat: number; lon: number }) => ({
-    x: v.lon * 111320 * latScale,
-    y: v.lat * 111320,
-  });
-  const pp = xy(p);
-  const aa = xy(a);
-  const bb = xy(b);
-  const dx = bb.x - aa.x;
-  const dy = bb.y - aa.y;
-  if (dx === 0 && dy === 0) return Math.hypot(pp.x - aa.x, pp.y - aa.y);
-  const t = Math.max(0, Math.min(1, ((pp.x - aa.x) * dx + (pp.y - aa.y) * dy) / (dx * dx + dy * dy)));
-  return Math.hypot(pp.x - (aa.x + t * dx), pp.y - (aa.y + t * dy));
-}
-
-function minDistanceToWay(point: { lat: number; lon: number }, way: OSMRailWayGeometry) {
-  let best = Infinity;
-  for (let i = 1; i < way.geometry.length; i += 1) {
-    best = Math.min(best, pointToSegmentDistanceMeters(point, way.geometry[i - 1], way.geometry[i]));
-  }
-  return best;
-}
-
-function segmentMidpoint(a: RouteStation & { lat: number; lon: number }, b: RouteStation & { lat: number; lon: number }) {
-  return { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 };
 }
 
 async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
@@ -95,10 +59,87 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
   }
 }
 
+async function loadGraph() {
+  const cached = graphCache.get("rail");
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const result = await db.execute({
+    sql: `SELECT osm_id, node_ids_json, geometry_json, tags_json FROM osm_rail_ways`,
+    args: [],
+  });
+  const rows: RailWayRow[] = [];
+  for (const row of result.rows as any[]) {
+    try {
+      const nodeIds = JSON.parse(String(row.node_ids_json || "[]")).map(String);
+      const geometry = JSON.parse(String(row.geometry_json || "[]"));
+      let tags: Record<string, string> = {};
+      try { tags = JSON.parse(String(row.tags_json || "{}")); } catch {}
+      if (nodeIds.length >= 2 && geometry.length >= 2) {
+        rows.push({ osmId: String(row.osm_id), nodeIds, geometry, ref: tags.ref });
+      }
+    } catch {}
+  }
+  const graph = buildRailGraph(rows);
+  graphCache.set("rail", { expiresAt: Date.now() + 300_000, value: graph });
+  return graph;
+}
+
+async function loadMappings(): Promise<Mapping[]> {
+  const links = await db.execute({
+    sql: `SELECT crossing_id, osm_crossing_id, confidence FROM crossing_osm_links WHERE confidence >= 0.8`,
+    args: [],
+  });
+  const mappings: Mapping[] = [];
+
+  for (const link of links.rows as any[]) {
+    const osmCrossingId = Number(link.osm_crossing_id);
+    const crossingResult = await db.execute({
+      sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
+      args: [osmCrossingId],
+    });
+    const crossingRow: any = crossingResult.rows[0];
+    if (!crossingRow) continue;
+
+    const tracksResult = await db.execute({
+      sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
+      args: [osmCrossingId],
+    });
+    const railwayWayIds = (tracksResult.rows as any[]).map((row) => String(row.railway_way_id)).filter(Boolean);
+    if (!railwayWayIds.length) continue;
+
+    const crossingNodeIds = new Set<string>();
+    for (const track of tracksResult.rows as any[]) {
+      const wayResult = await db.execute({
+        sql: `SELECT node_ids_json FROM osm_rail_ways WHERE osm_id = ? LIMIT 1`,
+        args: [String(track.railway_way_id)],
+      });
+      const wayRow: any = wayResult.rows[0];
+      if (!wayRow) continue;
+      try {
+        const nodes = JSON.parse(String(wayRow.node_ids_json || "[]")).map(String);
+        const index = Number(track.crossing_node_index);
+        if (Number.isInteger(index) && nodes[index]) crossingNodeIds.add(nodes[index]);
+      } catch {}
+    }
+
+    mappings.push({
+      crossingId: String(link.crossing_id),
+      osmCrossingId,
+      confidence: Number(link.confidence ?? 0),
+      crossingLat: Number(crossingRow.lat),
+      crossingLon: Number(crossingRow.lon),
+      crossingNodeIds,
+      railwayWayIds,
+    });
+  }
+  return mappings;
+}
+
 /**
- * Match the train to the railway segment at the crossing, not to the entire
- * railway way. A DB route is a list of stations; the relevant evidence is the
- * adjacent station-to-station segment that actually passes this crossing.
+ * Authoritative OSM decision based on railway topology, not global geometry.
+ * Shared track before a switch is intentionally allowed. A train is assigned
+ * to a crossing only when the graph path between consecutive timetable
+ * stations actually traverses that crossing's OSM node.
  */
 export async function filterTrainByCrossingOsm(
   crossingId: string,
@@ -106,129 +147,82 @@ export async function filterTrainByCrossingOsm(
 ): Promise<CrossingOsmFilterResult> {
   if (!route?.length) return { status: "unknown" };
 
-  const coordinateRoute = await routeToCoordinates(route);
-  const stations = coordinateRoute.filter(
-    (s): s is RouteStation & { lat: number; lon: number } => s.lat != null && s.lon != null,
-  );
-  if (stations.length < 2) return { status: "unknown" };
-
   try {
-    const links = await db.execute({
-      sql: `SELECT crossing_id, osm_crossing_id, confidence FROM crossing_osm_links WHERE confidence >= 0.8`,
-      args: [],
-    });
+    const coordinateRoute = await routeToCoordinates(route);
+    const stations = coordinateRoute.filter(
+      (s): s is RouteStation & { lat: number; lon: number } => s.lat != null && s.lon != null,
+    );
+    if (stations.length < 2) return { status: "unknown" };
 
-    const mappings: Mapping[] = [];
-    const waysById = new Map<string, OSMRailWayGeometry>();
+    const [graph, mappings] = await Promise.all([loadGraph(), loadMappings()]);
+    const requested = mappings.find((m) => m.crossingId === crossingId);
+    if (!requested || requested.crossingNodeIds.size === 0) return { status: "unknown" };
 
-    for (const link of links.rows as any[]) {
-      const osmCrossingId = Number(link.osm_crossing_id);
-      const crossingResult = await db.execute({
-        sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
-        args: [osmCrossingId],
+    const candidateHits = new Map<string, { wayId?: string; ref?: string; distance: number }>();
+
+    for (let i = 1; i < stations.length; i += 1) {
+      const from = stations[i - 1];
+      const to = stations[i];
+      const start = nearestNode(graph, from, 5000);
+      const target = nearestNode(graph, to, 5000);
+      if (!start || !target) continue;
+
+      // Only solve graph paths for station segments whose straight corridor
+      // comes reasonably close to one of our known BÜs. This keeps the work
+      // bounded while retaining the exact node-level topology decision.
+      const nearbyMappings = mappings.filter((mapping) => {
+        const d = Math.min(
+          distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, from),
+          distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, to),
+        );
+        return d <= 12000;
       });
-      const crossingRow: any = crossingResult.rows[0];
-      if (!crossingRow) continue;
+      if (!nearbyMappings.length) continue;
 
-      const tracksResult = await db.execute({
-        sql: `SELECT railway_way_id FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
-        args: [osmCrossingId],
-      });
-      const railwayWayIds = (tracksResult.rows as any[])
-        .map((row) => String(row.railway_way_id))
-        .filter(Boolean);
-      if (!railwayWayIds.length) continue;
+      const path = shortestRailPath(graph, start.nodeId, target.nodeId);
+      if (!path) continue;
 
-      const placeholders = railwayWayIds.map(() => "?").join(",");
-      const wayResult = await db.execute({
-        sql: `SELECT osm_id, tags_json, geometry_json FROM osm_rail_ways WHERE osm_id IN (${placeholders})`,
-        args: railwayWayIds,
-      });
-
-      for (const way of wayResult.rows as any[]) {
-        let tags: Record<string, string> = {};
-        let geometry: Array<{ lat: number; lon: number }> = [];
-        try { tags = JSON.parse(String(way.tags_json || "{}")); } catch {}
-        try { geometry = JSON.parse(String(way.geometry_json || "[]")); } catch {}
-        if (geometry.length >= 2) {
-          waysById.set(String(way.osm_id), { osmId: String(way.osm_id), ref: tags.ref, geometry });
-        }
+      const pathNodes = new Set(path.nodes);
+      for (const mapping of nearbyMappings) {
+        const hitNode = [...mapping.crossingNodeIds].find((nodeId) => pathNodes.has(nodeId));
+        if (!hitNode) continue;
+        const hitIndex = path.nodes.indexOf(hitNode);
+        const pathWayId = hitIndex > 0
+          ? [...(graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [])].find((edge) => edge.to === hitNode)?.wayId
+          : undefined;
+        const distanceToCrossing = distanceMeters(
+          { lat: mapping.crossingLat, lon: mapping.crossingLon },
+          graph.nodePoints.get(hitNode) ?? { lat: mapping.crossingLat, lon: mapping.crossingLon },
+        );
+        candidateHits.set(mapping.crossingId, {
+          wayId: pathWayId || mapping.railwayWayIds[0],
+          ref: undefined,
+          distance: distanceToCrossing,
+        });
       }
-
-      mappings.push({
-        crossingId: String(link.crossing_id),
-        osmCrossingId,
-        confidence: Number(link.confidence ?? 0),
-        crossingLat: Number(crossingRow.lat),
-        crossingLon: Number(crossingRow.lon),
-        railwayWayIds,
-      });
     }
 
-    const requested = mappings.find((mapping) => mapping.crossingId === crossingId);
-    if (!requested) return { status: "unknown" };
-
-    const candidateScores = new Map<string, { score: number; railwayWayId: string; ref?: string }>();
-
-    for (const mapping of mappings) {
-      let best: { score: number; railwayWayId: string; ref?: string } | null = null;
-
-      for (const railwayWayId of mapping.railwayWayIds) {
-        const way = waysById.get(railwayWayId);
-        if (!way) continue;
-
-        for (let i = 1; i < stations.length; i += 1) {
-          const from = stations[i - 1];
-          const to = stations[i];
-          const midpoint = segmentMidpoint(from, to);
-
-          // The segment must actually pass close to the BÜ. This is what
-          // separates Parkstraße Nord from Süd even though both share Bünde.
-          const crossingDistance = pointToSegmentDistanceMeters(
-            { lat: mapping.crossingLat, lon: mapping.crossingLon },
-            from,
-            to,
-          );
-          if (crossingDistance > 2500) continue;
-
-          const midpointDistance = minDistanceToWay(midpoint, way);
-          const fromDistance = minDistanceToWay(from, way);
-          const toDistance = minDistanceToWay(to, way);
-          const wayDistance = Math.min(midpointDistance, (fromDistance + toDistance) / 2);
-
-          const crossingProximity = Math.max(0, 1 - crossingDistance / 2500);
-          const wayProximity = Math.max(0, 1 - wayDistance / 5000);
-          const score = crossingProximity * 0.7 + wayProximity * 0.3;
-
-          if (!best || score > best.score) {
-            best = { score, railwayWayId, ref: way.ref };
-          }
-        }
-      }
-
-      if (best) candidateScores.set(mapping.crossingId, best);
+    const own = candidateHits.get(crossingId);
+    if (own) {
+      return {
+        status: "matched",
+        score: Math.max(0, 1 - own.distance / 100),
+        railwayWayId: own.wayId,
+        ref: own.ref,
+      };
     }
 
-    const own = candidateScores.get(crossingId);
-    if (!own) return { status: "rejected" };
-
-    const ranked = [...candidateScores.entries()].sort((a, b) => b[1].score - a[1].score);
-    const rank = ranked.findIndex(([id]) => id === crossingId);
-    const runnerUp = ranked.find(([id]) => id !== crossingId)?.[1];
-
-    // A clear infrastructure winner is authoritative. If the route cannot
-    // distinguish the branches, do not invent a crossing assignment.
-    if (own.score < 0.55) return { status: "unknown", score: own.score, railwayWayId: own.railwayWayId, ref: own.ref };
-    if (rank > 0 && runnerUp && runnerUp.score - own.score >= 0.05) {
-      return { status: "rejected", score: own.score, railwayWayId: own.railwayWayId, ref: own.ref };
-    }
-    if (rank === 0 && runnerUp && own.score - runnerUp.score < 0.05) {
-      return { status: "unknown", score: own.score, railwayWayId: own.railwayWayId, ref: own.ref };
+    // If the timetable route reaches another mapped BÜ but not this one, the
+    // topology gives us a deterministic rejection. If it reaches neither,
+    // preserve legacy behaviour instead of inventing a route decision.
+    if (candidateHits.size > 0) {
+      const other = [...candidateHits.entries()].find(([id]) => id !== crossingId);
+      if (other) return { status: "rejected", railwayWayId: other[1].wayId, ref: other[1].ref };
     }
 
-    return { status: "matched", score: own.score, railwayWayId: own.railwayWayId, ref: own.ref };
+    return { status: "unknown" };
   } catch (error) {
-    console.error("Failed to match train against OSM crossings:", error);
+    console.error("Failed to match train against OSM railway topology:", error);
     return { status: "unknown" };
   }
 }
