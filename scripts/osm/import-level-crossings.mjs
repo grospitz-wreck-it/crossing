@@ -46,9 +46,13 @@ async function ensureSchema() {
   ]);
 }
 
-function buildQuery(bbox) {
+function bboxQuery(bbox) {
   const scope = bbox ? `(${bbox.join(",")})` : "(51.9,8.2,52.5,9.1)";
-  return `[out:json][timeout:180];\nnode[railway=level_crossing]${scope}->.crossings;\n(\n  .crossings;\n  way(bn.crossings)[railway=rail];\n);\nout body geom;`;
+  return `[out:json][timeout:60];node[railway=level_crossing]${scope};out body;`;
+}
+
+function crossingQuery(lat, lon) {
+  return `[out:json][timeout:60];\nnode[railway=level_crossing](around:100,${lat},${lon})->.crossings;\nway(bn.crossings)[railway=rail];\nout body geom;`;
 }
 
 async function fetchOverpass(query) {
@@ -56,7 +60,13 @@ async function fetchOverpass(query) {
   let lastError = null;
   for (const baseUrl of OVERPASS_URLS) {
     try {
-      const response = await fetch(`${baseUrl}?data=${encoded}`, { method: "GET", headers: { accept: "application/json", "user-agent": "Crossings/1.0 (https://crossings.app; OSM importer)" } });
+      const response = await fetch(`${baseUrl}?data=${encoded}`, {
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          "user-agent": "Crossings/1.0 (https://crossings.app; OSM importer)",
+        },
+      });
       if (!response.ok) throw new Error(`Overpass ${response.status}: ${(await response.text()).slice(0, 500)}`);
       return response.json();
     } catch (error) {
@@ -68,30 +78,43 @@ async function fetchOverpass(query) {
   throw lastError ?? new Error("All Overpass endpoints failed");
 }
 
-function indexCrossingNodes(elements) {
-  return new Map(elements.filter((e) => e.type === "node").map((e) => [e.id, e]));
-}
-function indexRailWays(elements) {
-  return new Map(elements.filter((e) => e.type === "way" && e.tags?.railway === "rail").map((e) => [e.id, e]));
-}
-function linkedWays(crossingId, ways) {
-  return [...ways.values()].filter((way) => Array.isArray(way.nodes) && way.nodes.includes(crossingId));
+async function upsertCrossing(crossing) {
+  await db.execute({
+    sql: `INSERT INTO osm_crossings (osm_id, lat, lon, tags_json, osm_version, osm_timestamp, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(osm_id) DO UPDATE SET lat=excluded.lat, lon=excluded.lon,
+      tags_json=excluded.tags_json, osm_version=excluded.osm_version,
+      osm_timestamp=excluded.osm_timestamp, updated_at=datetime('now')`,
+    args: [crossing.id, crossing.lat, crossing.lon, JSON.stringify(crossing.tags ?? {}), crossing.version ?? null, crossing.timestamp ?? null],
+  });
 }
 
-async function importData(elements) {
-  const crossings = indexCrossingNodes(elements);
-  const ways = indexRailWays(elements);
-  console.log(`OSM: ${crossings.size} level crossings, ${ways.size} railway ways`);
+async function importCrossingWays(crossing, elements) {
+  const ways = elements.filter((e) => e.type === "way" && e.tags?.railway === "rail");
+  await upsertCrossing(crossing);
+  await db.execute({ sql: `DELETE FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`, args: [crossing.id] });
 
-  for (const crossing of crossings.values()) {
-    await db.execute({ sql: `INSERT INTO osm_crossings (osm_id, lat, lon, tags_json, osm_version, osm_timestamp, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now')) ON CONFLICT(osm_id) DO UPDATE SET lat=excluded.lat, lon=excluded.lon, tags_json=excluded.tags_json, osm_version=excluded.osm_version, osm_timestamp=excluded.osm_timestamp, updated_at=datetime('now')`, args: [crossing.id, crossing.lat, crossing.lon, JSON.stringify(crossing.tags ?? {}), crossing.version ?? null, crossing.timestamp ?? null] });
-    await db.execute({ sql: `DELETE FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`, args: [crossing.id] });
-    for (const way of linkedWays(crossing.id, ways)) {
-      const index = way.nodes.indexOf(crossing.id);
-      await db.execute({ sql: `INSERT INTO osm_rail_ways (osm_id, tags_json, node_ids_json, geometry_json, osm_version, osm_timestamp, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now')) ON CONFLICT(osm_id) DO UPDATE SET tags_json=excluded.tags_json, node_ids_json=excluded.node_ids_json, geometry_json=excluded.geometry_json, osm_version=excluded.osm_version, osm_timestamp=excluded.osm_timestamp, updated_at=datetime('now')`, args: [way.id, JSON.stringify(way.tags ?? {}), JSON.stringify(way.nodes ?? []), JSON.stringify(way.geometry ?? []), way.version ?? null, way.timestamp ?? null] });
-      await db.execute({ sql: `INSERT INTO osm_crossing_rail_ways (crossing_osm_id, railway_way_id, crossing_node_index, way_direction, updated_at) VALUES (?, ?, ?, ?, datetime('now'))`, args: [crossing.id, way.id, index, index === 0 ? "forward" : index === way.nodes.length - 1 ? "backward" : "both"] });
-    }
+  for (const way of ways) {
+    if (!Array.isArray(way.nodes) || !way.nodes.includes(crossing.id)) continue;
+    const index = way.nodes.indexOf(crossing.id);
+    await db.execute({
+      sql: `INSERT INTO osm_rail_ways (osm_id, tags_json, node_ids_json, geometry_json, osm_version, osm_timestamp, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(osm_id) DO UPDATE SET tags_json=excluded.tags_json,
+        node_ids_json=excluded.node_ids_json, geometry_json=excluded.geometry_json,
+        osm_version=excluded.osm_version, osm_timestamp=excluded.osm_timestamp,
+        updated_at=datetime('now')`,
+      args: [way.id, JSON.stringify(way.tags ?? {}), JSON.stringify(way.nodes ?? []), JSON.stringify(way.geometry ?? []), way.version ?? null, way.timestamp ?? null],
+    });
+    await db.execute({
+      sql: `INSERT INTO osm_crossing_rail_ways
+        (crossing_osm_id, railway_way_id, crossing_node_index, way_direction, updated_at)
+        VALUES (?, ?, ?, ?, datetime('now'))`,
+      args: [crossing.id, way.id, index, index === 0 ? "forward" : index === way.nodes.length - 1 ? "backward" : "both"],
+    });
   }
+
+  console.log(`OSM ${crossing.id}: ${ways.filter((way) => way.nodes?.includes(crossing.id)).length} railway ways`);
 }
 
 function distance2(aLat, aLon, bLat, bLon) {
@@ -104,10 +127,10 @@ function distance2(aLat, aLon, bLat, bLon) {
 
 async function matchExistingCrossings() {
   const result = await db.execute({ sql: `SELECT id, name, lat, lon FROM crossings WHERE status = 'active'`, args: [] });
-  const osm = await db.execute({ sql: `SELECT osm_id, lat, lon, tags_json FROM osm_crossings`, args: [] });
+  const osm = await db.execute({ sql: `SELECT osm_id, lat, lon FROM osm_crossings`, args: [] });
   const MAX_DISTANCE_METERS = 80;
-
   const pairs = [];
+
   for (const crossing of result.rows) {
     for (const row of osm.rows) {
       const distanceMeters = Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(row.lat), Number(row.lon)));
@@ -115,13 +138,10 @@ async function matchExistingCrossings() {
     }
   }
 
-  // Globally assign the shortest available crossing↔OSM pairs. This is important
-  // when two real crossings are only a few metres apart (e.g. Parkstraße Nord/Süd).
   pairs.sort((a, b) => a.distanceMeters - b.distanceMeters);
   const assignedCrossings = new Set();
   const assignedOsmIds = new Set();
   const assignments = [];
-
   for (const pair of pairs) {
     if (assignedCrossings.has(pair.crossing.id) || assignedOsmIds.has(Number(pair.row.osm_id))) continue;
     assignedCrossings.add(pair.crossing.id);
@@ -135,22 +155,49 @@ async function matchExistingCrossings() {
       console.log(`REVIEW ${crossing.name} -> no unique OSM crossing within ${MAX_DISTANCE_METERS}m`);
       continue;
     }
-
     const confidence = assignment.distanceMeters <= 20 ? 0.99 : 0.9;
-    await db.execute({ sql: `INSERT INTO crossing_osm_links (crossing_id, osm_crossing_id, match_method, confidence, updated_at) VALUES (?, ?, 'nearest_unique_global', ?, datetime('now')) ON CONFLICT(crossing_id) DO UPDATE SET osm_crossing_id=excluded.osm_crossing_id, match_method=excluded.match_method, confidence=excluded.confidence, updated_at=excluded.updated_at`, args: [crossing.id, assignment.row.osm_id, confidence] });
+    await db.execute({
+      sql: `INSERT INTO crossing_osm_links (crossing_id, osm_crossing_id, match_method, confidence, updated_at)
+        VALUES (?, ?, 'nearest_unique_global', ?, datetime('now'))
+        ON CONFLICT(crossing_id) DO UPDATE SET osm_crossing_id=excluded.osm_crossing_id,
+        match_method=excluded.match_method, confidence=excluded.confidence, updated_at=excluded.updated_at`,
+      args: [crossing.id, assignment.row.osm_id, confidence],
+    });
     console.log(`MATCH ${crossing.name} -> OSM ${assignment.row.osm_id} distance=${assignment.distanceMeters.toFixed(1)}m confidence=${confidence}`);
   }
+}
+
+async function importByBbox(bbox) {
+  const payload = await fetchOverpass(bboxQuery(bbox));
+  const crossings = (payload.elements ?? []).filter((e) => e.type === "node" && e.tags?.railway === "level_crossing");
+  console.log(`OSM: ${crossings.length} level crossings`);
+  for (const crossing of crossings) {
+    const detail = await fetchOverpass(crossingQuery(crossing.lat, crossing.lon));
+    await importCrossingWays(crossing, detail.elements ?? []);
+  }
+}
+
+async function importSingleCrossing(crossingId) {
+  const result = await db.execute({ sql: `SELECT id, name, lat, lon FROM crossings WHERE id = ?`, args: [crossingId] });
+  const crossing = result.rows[0];
+  if (!crossing) throw new Error(`Crossing not found: ${crossingId}`);
+  const detail = await fetchOverpass(crossingQuery(crossing.lat, crossing.lon));
+  const osmCrossings = (detail.elements ?? []).filter((e) => e.type === "node" && e.tags?.railway === "level_crossing");
+  if (!osmCrossings.length) throw new Error(`No OSM level crossing found near ${crossing.name}`);
+
+  osmCrossings.sort((a, b) => Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(a.lat), Number(a.lon))) - Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(b.lat), Number(b.lon))));
+  const osmCrossing = osmCrossings[0];
+  await importCrossingWays(osmCrossing, detail.elements ?? []);
+  console.log(`OSM candidate for ${crossing.name}: ${osmCrossing.id}`);
 }
 
 async function main() {
   const { bbox, crossingId } = parseArgs();
   await ensureSchema();
-  const payload = await fetchOverpass(buildQuery(parseBbox(bbox)));
-  await importData(payload.elements ?? []);
   if (crossingId) {
-    const result = await db.execute({ sql: `SELECT * FROM crossing_osm_links WHERE crossing_id = ?`, args: [crossingId] });
-    console.log(JSON.stringify(result.rows, null, 2));
+    await importSingleCrossing(crossingId);
   } else {
+    await importByBbox(parseBbox(bbox));
     await matchExistingCrossings();
   }
   console.log("OSM import complete.");
