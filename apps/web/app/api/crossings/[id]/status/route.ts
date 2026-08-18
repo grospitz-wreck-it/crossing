@@ -13,8 +13,15 @@ function jsonArray(value: unknown): any[] {
 }
 
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
-  const observationEvas = jsonArray(row.observation_evas).map(String).filter(Boolean);
+  let observationEvas = jsonArray(row.observation_evas).map(String).filter(Boolean);
+  if (!observationEvas.length) {
+    observationEvas = stationRows
+      .filter((station) => !station.role || station.role === "observation" || station.role === "automatic")
+      .map((station) => String(station.eva || "").trim())
+      .filter(Boolean);
+  }
   if (row.eva && !observationEvas.includes(String(row.eva))) observationEvas.unshift(String(row.eva));
+
   const contextEvas = jsonArray(row.context_evas).map(String).filter(Boolean);
   const requiredRouteStops = jsonArray(row.required_route_stops).map(String).filter(Boolean);
   const throughRules = jsonArray(row.through_rules);
@@ -70,7 +77,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const trains: any[] = [];
 
-  // Echten BÜ-EVA weiterhin direkt verwenden. Das gilt auch für Kirchlengern.
+  // Ein BÜ mit eigener EVA wird direkt über diese EVA beobachtet.
+  // Kirchlengern bleibt damit unverändert.
   if (crossing.eva) {
     try {
       const localEvents = await getStationTimetable(crossing.eva, 4);
@@ -92,18 +100,17 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     } catch (error) { console.error("Failed to load local timetable:", error); }
   }
 
-  // Automatisch angelegte BÜs ohne eigene EVA haben keine Through-Rules.
-  // Für diese BÜs sind die automatisch ermittelten Beobachtungsstationen die
-  // Datenquelle. Wir übernehmen sie hier wie im Admin, aber NUR wenn keine
-  // expliziten Through-Rules existieren. Dadurch bleibt Kirchlengern mit seinen
-  // restriktiven Through-Rules unverändert.
-  if (!crossing.eva && !crossing.throughRules?.length && crossing.observationEvas?.length) {
+  // Automatisch angelegte BÜs ohne eigene EVA werden wie die Admin-Prognose
+  // über ihre Beobachtungsstationen versorgt. Das ist absichtlich an !eva
+  // gebunden: BÜs wie Kirchlengern mit eigener EVA und expliziten Through-Rules
+  // werden dadurch nicht mit fremden Stationsfahrten aufgefüllt.
+  if (!crossing.eva && crossing.observationEvas?.length) {
     const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
     for (const observationEva of crossing.observationEvas) {
       try {
         const events = await getStationTimetable(observationEva, 4);
         for (const train of events) {
-          if (train.cancelled) continue;
+          if (train.cancelled || train.actualTime.getTime() <= Date.now() - 60_000) continue;
           const crossingTime = train.actualTime;
           const key = `${train.category}-${train.journeyNumber}`;
           if (existingKeys.has(key)) continue;
