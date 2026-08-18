@@ -56,7 +56,7 @@ function crossingQuery(lat, lon) {
 }
 
 function osmIdQuery(osmId) {
-  return `[out:json][timeout:60];node(${osmId});way(bn(${osmId}))[railway=rail];out body geom;`;
+  return `[out:json][timeout:60];node(${osmId})->.crossing;(.crossing;way(bn.crossing)[railway=rail];);out body geom;`;
 }
 
 async function fetchOverpass(query) {
