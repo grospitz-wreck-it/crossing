@@ -23,7 +23,7 @@ export function buildLevelCrossingOverpassQuery(
   radiusMeters = 500,
 ) {
   const safeRadius = Math.max(50, Math.min(radiusMeters, 5000));
-  return `[out:json][timeout:25];\n(\n  node(around:${safeRadius},${lat},${lon})[railway=level_crossing];\n  node(around:${safeRadius},${lat},${lon})[railway=crossing];\n);\nout body;\n>;\nout skel qt;`;
+  return `[out:json][timeout:25];\nnode(around:${safeRadius},${lat},${lon})[railway=level_crossing];\nout body;`;
 }
 
 export function buildRailwayWaysQuery(lat: number, lon: number, radiusMeters = 150) {
