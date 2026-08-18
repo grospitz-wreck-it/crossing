@@ -16,11 +16,14 @@ export type RouteOsmMatch = {
   score: number;
   matchedStations: number;
   totalStations: number;
+  matchedSegments: number;
+  totalSegments: number;
   meanDistanceMeters: number;
   routeDistanceMeters: number;
 };
 
 const DEG_TO_M = 111_320;
+const DEFAULT_SEGMENT_TOLERANCE_METERS = 900;
 
 function distanceMeters(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
   const latScale = Math.cos((a.lat * Math.PI) / 180);
@@ -74,86 +77,87 @@ function getCoordinateStations(route: RouteStation[]) {
   );
 }
 
-/**
- * Builds a coarse geometric corridor from the ordered DB station route.
- * This is deliberately independent of the train's stopping pattern: an ICE
- * that skips the observation station still contributes its surrounding route
- * geometry through the stations before and after the crossing.
- */
-function getRoutePolyline(route: RouteStation[]) {
-  return getCoordinateStations(route).map((station) => ({
-    lat: station.lat,
-    lon: station.lon,
-  }));
+function segmentMidpoint(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
+  return { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 };
 }
 
 /**
- * Scores a DB station route against OSM railway ways.
+ * Match a DB route to OSM railway ways using the ordered route geometry.
  *
- * The old implementation only asked whether individual stations happened to
- * be close to a railway way. That can confuse parallel/branching lines at a
- * shared station. The primary signal is now the geometry of the complete,
- * ordered station route: how close the OSM way is to the route corridor.
- *
- * Station coverage remains a secondary signal and helps reject ways that only
- * happen to touch one isolated station.
+ * A single shared station is deliberately not enough. The important signal is
+ * whether the railway way follows one or more COMPLETE consecutive route
+ * segments. This prevents two branches that meet at the same station from
+ * both being accepted merely because both are close to that station.
  */
 export function matchRouteToOsmWays(
   route: RouteStation[],
   ways: OSMRailWayGeometry[],
-  maxRouteDistanceMeters = 1200,
+  segmentToleranceMeters = DEFAULT_SEGMENT_TOLERANCE_METERS,
 ): RouteOsmMatch[] {
   const stations = getCoordinateStations(route);
-  const routePolyline = getRoutePolyline(route);
-  if (!stations.length || !ways.length || routePolyline.length < 2) return [];
+  if (stations.length < 2 || !ways.length) return [];
+
+  const routeSegments = stations.slice(1).map((to, index) => ({
+    from: stations[index],
+    to,
+    midpoint: segmentMidpoint(stations[index], to),
+  }));
 
   return ways
     .map((way) => {
-      if (!way.geometry.length) {
+      if (way.geometry.length < 2) {
         return {
           railwayWayId: String(way.osmId),
           ref: way.ref,
           score: 0,
           matchedStations: 0,
           totalStations: stations.length,
+          matchedSegments: 0,
+          totalSegments: routeSegments.length,
           meanDistanceMeters: Infinity,
           routeDistanceMeters: Infinity,
         };
       }
 
-      const wayDistancesToRoute = way.geometry.map((point) =>
-        minDistanceToPolyline(point, routePolyline),
-      );
-      const routeDistanceMeters =
-        wayDistancesToRoute.reduce((sum, value) => sum + value, 0) /
-        wayDistancesToRoute.length;
+      const segmentDistances = routeSegments.map((segment) => {
+        const fromDistance = minDistanceToPolyline(segment.from, way.geometry);
+        const toDistance = minDistanceToPolyline(segment.to, way.geometry);
+        const midpointDistance = minDistanceToPolyline(segment.midpoint, way.geometry);
+        return (fromDistance + toDistance + midpointDistance) / 3;
+      });
+
+      const matchedSegments = segmentDistances.filter((distance) => distance <= segmentToleranceMeters).length;
+      const matchedSegmentDistances = segmentDistances.filter((distance) => distance <= segmentToleranceMeters);
+      const routeDistanceMeters = segmentDistances.reduce((sum, value) => sum + value, 0) / segmentDistances.length;
 
       const matchedStations = stations.filter(
-        (station) => minDistanceToPolyline(station, way.geometry) <= maxRouteDistanceMeters,
+        (station) => minDistanceToPolyline(station, way.geometry) <= segmentToleranceMeters,
       );
 
-      if (routeDistanceMeters > maxRouteDistanceMeters && !matchedStations.length) {
+      if (!matchedSegments) {
         return {
           railwayWayId: String(way.osmId),
           ref: way.ref,
           score: 0,
           matchedStations: 0,
           totalStations: stations.length,
-          meanDistanceMeters: Infinity,
+          matchedSegments: 0,
+          totalSegments: routeSegments.length,
+          meanDistanceMeters: routeDistanceMeters,
           routeDistanceMeters,
         };
       }
 
-      const meanDistanceMeters = matchedStations.length
-        ? matchedStations.reduce(
-            (sum, station) => sum + minDistanceToPolyline(station, way.geometry),
-            0,
-          ) / matchedStations.length
-        : routeDistanceMeters;
+      const segmentCoverage = matchedSegments / routeSegments.length;
+      const proximity = Math.max(
+        0,
+        1 - (matchedSegmentDistances.reduce((sum, value) => sum + value, 0) / matchedSegmentDistances.length) / segmentToleranceMeters,
+      );
+      const stationCoverage = matchedStations.length / stations.length;
 
-      const routeProximity = Math.max(0, 1 - routeDistanceMeters / maxRouteDistanceMeters);
-      const coverage = matchedStations.length / stations.length;
-      const score = routeProximity * 0.8 + coverage * 0.2;
+      // Segment coverage dominates: a way touching one shared station should
+      // score far below a way that actually follows the ordered route.
+      const score = segmentCoverage * 0.65 + proximity * 0.25 + stationCoverage * 0.10;
 
       return {
         railwayWayId: String(way.osmId),
@@ -161,7 +165,9 @@ export function matchRouteToOsmWays(
         score,
         matchedStations: matchedStations.length,
         totalStations: stations.length,
-        meanDistanceMeters,
+        matchedSegments,
+        totalSegments: routeSegments.length,
+        meanDistanceMeters: matchedSegmentDistances.reduce((sum, value) => sum + value, 0) / matchedSegmentDistances.length,
         routeDistanceMeters,
       };
     })
