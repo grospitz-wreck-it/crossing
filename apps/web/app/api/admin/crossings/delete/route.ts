@@ -1,4 +1,4 @@
-import { db } from "../../../../../lib/db";
+import { db } from "../../../../lib/db";
 
 function quoteIdentifier(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
