@@ -4,6 +4,7 @@
   align-items: center;
   min-height: 28px;
   padding: 4px 16px 2px;
+  touch-action: pan-y;
 }
 
 .dots {
@@ -33,4 +34,59 @@
 .dot:focus-visible {
   outline: 2px solid #e30613;
   outline-offset: 3px;
+}
+
+.dragging {
+  transition: none !important;
+  transform: translateX(var(--crossing-swipe-x, 0px));
+  opacity: 0.94;
+  will-change: transform;
+}
+
+.slideNext,
+.slidePrevious {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+  will-change: transform, opacity;
+}
+
+.slideNext {
+  animation-name: crossingSlideNext;
+}
+
+.slidePrevious {
+  animation-name: crossingSlidePrevious;
+}
+
+@keyframes crossingSlideNext {
+  from {
+    transform: translateX(24px);
+    opacity: 0.72;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes crossingSlidePrevious {
+  from {
+    transform: translateX(-24px);
+    opacity: 0.72;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dragging,
+  .slideNext,
+  .slidePrevious {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
+  }
 }
