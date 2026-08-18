@@ -46,14 +46,9 @@ async function ensureSchema() {
   ]);
 }
 
-function bboxQuery(bbox) {
-  const scope = bbox ? `(${bbox.join(",")})` : "(51.9,8.2,52.5,9.1)";
-  return `[out:json][timeout:60];node[railway=level_crossing]${scope};out body;`;
-}
-
-function railwayWaysQuery(bbox) {
-  const scope = bbox ? `(${bbox.join(",")})` : "(51.9,8.2,52.5,9.1)";
-  return `[out:json][timeout:180];way[railway=rail]${scope};out body geom;`;
+function networkQuery(bbox) {
+  const [south, west, north, east] = bbox;
+  return `[out:json][timeout:90];(node[railway=level_crossing](${south},${west},${north},${east});way[railway=rail](${south},${west},${north},${east}););out body geom;`;
 }
 
 function crossingQuery(lat, lon) {
@@ -62,6 +57,11 @@ function crossingQuery(lat, lon) {
 
 function osmIdQuery(osmId) {
   return `[out:json][timeout:60];node(${osmId})->.crossing;(.crossing;way(bn.crossing)[railway=rail];);out body geom;`;
+}
+
+function isOverpassTimeout(error) {
+  const message = String(error?.message || error);
+  return /Overpass (429|502|503|504)/.test(message) || /timed out/i.test(message);
 }
 
 async function fetchOverpass(query) {
@@ -87,6 +87,17 @@ async function fetchOverpass(query) {
   throw lastError ?? new Error("All Overpass endpoints failed");
 }
 
+async function upsertCrossing(crossing) {
+  await db.execute({
+    sql: `INSERT INTO osm_crossings (osm_id, lat, lon, tags_json, osm_version, osm_timestamp, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+      ON CONFLICT(osm_id) DO UPDATE SET lat=excluded.lat, lon=excluded.lon,
+      tags_json=excluded.tags_json, osm_version=excluded.osm_version,
+      osm_timestamp=excluded.osm_timestamp, updated_at=datetime('now')`,
+    args: [crossing.id, crossing.lat, crossing.lon, JSON.stringify(crossing.tags ?? {}), crossing.version ?? null, crossing.timestamp ?? null],
+  });
+}
+
 async function upsertRailWay(way) {
   if (!Array.isArray(way.nodes) || way.nodes.length < 2 || !Array.isArray(way.geometry) || way.geometry.length < 2) return;
   await db.execute({
@@ -100,42 +111,54 @@ async function upsertRailWay(way) {
   });
 }
 
-async function importRailwayNetwork(bbox) {
-  const payload = await fetchOverpass(railwayWaysQuery(bbox));
-  const ways = (payload.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
-  console.log(`OSM railway network: ${ways.length} ways`);
-  for (const way of ways) await upsertRailWay(way);
-}
-
-async function upsertCrossing(crossing) {
-  await db.execute({
-    sql: `INSERT INTO osm_crossings (osm_id, lat, lon, tags_json, osm_version, osm_timestamp, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT(osm_id) DO UPDATE SET lat=excluded.lat, lon=excluded.lon,
-      tags_json=excluded.tags_json, osm_version=excluded.osm_version,
-      osm_timestamp=excluded.osm_timestamp, updated_at=datetime('now')`,
-    args: [crossing.id, crossing.lat, crossing.lon, JSON.stringify(crossing.tags ?? {}), crossing.version ?? null, crossing.timestamp ?? null],
-  });
-}
-
-async function importCrossingWays(crossing, elements) {
-  const ways = elements.filter((e) => e.type === "way" && e.tags?.railway === "rail");
+async function linkCrossingWays(crossing, crossingWays) {
   await upsertCrossing(crossing);
-  await db.execute({ sql: `DELETE FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`, args: [crossing.id] });
-
-  for (const way of ways) {
+  for (const way of crossingWays) {
     if (!Array.isArray(way.nodes) || !way.nodes.includes(crossing.id)) continue;
     const index = way.nodes.indexOf(crossing.id);
     await upsertRailWay(way);
     await db.execute({
       sql: `INSERT INTO osm_crossing_rail_ways
         (crossing_osm_id, railway_way_id, crossing_node_index, way_direction, updated_at)
-        VALUES (?, ?, ?, ?, datetime('now'))`,
+        VALUES (?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(crossing_osm_id, railway_way_id) DO UPDATE SET
+          crossing_node_index=excluded.crossing_node_index,
+          way_direction=excluded.way_direction,
+          updated_at=excluded.updated_at`,
       args: [crossing.id, way.id, index, index === 0 ? "forward" : index === way.nodes.length - 1 ? "backward" : "both"],
     });
   }
+  console.log(`OSM ${crossing.id}: ${crossingWays.length} railway ways`);
+}
 
-  console.log(`OSM ${crossing.id}: ${ways.filter((way) => way.nodes?.includes(crossing.id)).length} railway ways`);
+async function importNetworkPayload(payload) {
+  const elements = payload.elements ?? [];
+  const crossings = elements.filter((e) => e.type === "node" && e.tags?.railway === "level_crossing");
+  const ways = elements.filter((e) => e.type === "way" && e.tags?.railway === "rail");
+
+  const waysByNode = new Map();
+  for (const way of ways) {
+    if (!Array.isArray(way.nodes) || way.nodes.length < 2) continue;
+    await upsertRailWay(way);
+    for (const nodeId of way.nodes) {
+      const key = String(nodeId);
+      const list = waysByNode.get(key) ?? [];
+      list.push(way);
+      waysByNode.set(key, list);
+    }
+  }
+
+  for (const crossing of crossings) {
+    const crossingWays = waysByNode.get(String(crossing.id)) ?? [];
+    await linkCrossingWays(crossing, crossingWays);
+  }
+
+  return { crossings: crossings.length, ways: ways.length };
+}
+
+async function importCrossingWays(crossing, elements) {
+  const ways = elements.filter((e) => e.type === "way" && e.tags?.railway === "rail");
+  await linkCrossingWays(crossing, ways.filter((way) => way.nodes?.includes(crossing.id)));
 }
 
 function distance2(aLat, aLon, bLat, bLon) {
@@ -188,14 +211,35 @@ async function matchExistingCrossings() {
   }
 }
 
-async function importByBbox(bbox) {
-  await importRailwayNetwork(bbox);
-  const payload = await fetchOverpass(bboxQuery(bbox));
-  const crossings = (payload.elements ?? []).filter((e) => e.type === "node" && e.tags?.railway === "level_crossing");
-  console.log(`OSM: ${crossings.length} level crossings`);
-  for (const crossing of crossings) {
-    const detail = await fetchOverpass(crossingQuery(crossing.lat, crossing.lon));
-    await importCrossingWays(crossing, detail.elements ?? []);
+async function importByBbox(bbox, depth = 0) {
+  const maxDepth = 2;
+  try {
+    const payload = await fetchOverpass(networkQuery(bbox));
+    const stats = await importNetworkPayload(payload);
+    console.log(`OSM network tile: ${stats.crossings} crossings, ${stats.ways} railway ways`);
+    return stats;
+  } catch (error) {
+    if (!isOverpassTimeout(error) || depth >= maxDepth) throw error;
+
+    const [south, west, north, east] = bbox;
+    const midLat = (south + north) / 2;
+    const midLon = (west + east) / 2;
+    const tiles = [
+      [south, west, midLat, midLon],
+      [south, midLon, midLat, east],
+      [midLat, west, north, midLon],
+      [midLat, midLon, north, east],
+    ];
+
+    console.warn(`Overpass timed out; splitting bbox into ${tiles.length} tiles (depth ${depth + 1}/${maxDepth})`);
+    let crossings = 0;
+    let ways = 0;
+    for (const tile of tiles) {
+      const stats = await importByBbox(tile, depth + 1);
+      crossings += stats.crossings;
+      ways += stats.ways;
+    }
+    return { crossings, ways };
   }
 }
 
@@ -233,7 +277,8 @@ async function main() {
   if (crossingId) {
     await importSingleCrossing(crossingId);
   } else {
-    await importByBbox(parseBbox(bbox));
+    const stats = await importByBbox(parseBbox(bbox));
+    console.log(`OSM import network complete: ${stats.crossings} crossings, ${stats.ways} railway ways`);
     await matchExistingCrossings();
   }
   console.log("OSM import complete.");
