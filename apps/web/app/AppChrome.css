@@ -1,0 +1,4 @@
+/* App UI: the crossing name is already shown in the header. */
+.container > .logo {
+  display: none !important;
+}
