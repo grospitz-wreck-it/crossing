@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import "./globals.css";
+import "./AppChrome.css";
 import AppFeedbackMount from "./components/AppFeedbackMount";
 
 export default function RootLayout({
