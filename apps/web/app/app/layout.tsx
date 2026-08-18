@@ -3,6 +3,7 @@ import { auth } from "../../auth";
 
 import { CrossingsProvider } from "../context/CrossingsContext";
 import Header from "../components/Header";
+import CrossingSwipeNav from "../components/CrossingSwipeNav";
 import styles from "./AppLayout.module.css";
 
 export default async function AppLayout({
@@ -20,6 +21,7 @@ export default async function AppLayout({
     <div className={styles.app}>
       <CrossingsProvider>
         <Header />
+        <CrossingSwipeNav />
         {children}
       </CrossingsProvider>
     </div>
