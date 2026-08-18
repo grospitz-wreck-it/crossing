@@ -32,11 +32,41 @@ function normalizeStationName(value: string) {
 
 function routeContainsStation(route: string[], requiredStop: string) {
   const target = normalizeStationName(requiredStop);
-  if (!target) return true;
+  if (!target) return false;
   return route.some((stop) => {
     const value = normalizeStationName(stop);
     return value === target || value.includes(target) || target.includes(value);
   });
+}
+
+/**
+ * OSM is used when the crossing is configured: the selected OSM railway
+ * relation supplies the corridor stations/anchors which are persisted as
+ * requiredRouteStops. A train does NOT have to stop at every anchor. This is
+ * important for ICE/IC services because they can traverse the selected
+ * infrastructure while skipping local stations.
+ *
+ * We therefore require two independent signals for a through-rule:
+ *  1. the train's actual route contains the observation station that was
+ *     selected on/near the OSM railway geometry; and
+ *  2. the route contains at least one additional OSM-derived corridor anchor.
+ *
+ * This prevents a train which merely visits a shared junction station from
+ * being treated as a train on the selected crossing route, while still
+ * allowing trains which pass the crossing without stopping there.
+ */
+function matchesOsmCorridor(trainRoute: string[], observationStation: string, requiredRouteStops: string[]) {
+  if (!routeContainsStation(trainRoute, observationStation)) return false;
+
+  const observationKey = normalizeStationName(observationStation);
+  const additionalAnchors = requiredRouteStops.filter((stop) => normalizeStationName(stop) !== observationKey);
+
+  // Older/static crossings may not have corridor anchors. Keep their former
+  // behaviour rather than rejecting them solely because the new OSM metadata
+  // is absent.
+  if (!additionalAnchors.length) return true;
+
+  return additionalAnchors.some((anchor) => routeContainsStation(trainRoute, anchor));
 }
 
 export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain[]> {
@@ -57,10 +87,12 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
       if (train.cancelled) return false;
       if (!rule.categories.includes(train.category)) return false;
 
-      const hasRequiredRoute = (crossing.requiredRouteStops || []).every((requiredStop) =>
-        routeContainsStation(train.route || [], requiredStop)
-      );
-      if (!hasRequiredRoute) return false;
+      // IMPORTANT: requiredRouteStops are corridor anchors derived from the
+      // selected OSM railway infrastructure. They are NOT required train
+      // stops. A train may pass the crossing without stopping at the crossing
+      // station, so matching is based on the observed station + another
+      // corridor anchor.
+      if (!matchesOsmCorridor(train.route || [], rule.observationStation, crossing.requiredRouteStops || [])) return false;
 
       if (rule.direction === "westbound" && train.destination !== "Amsterdam Centraal") return false;
       if (rule.direction === "eastbound" && train.destination !== "Berlin Südkreuz") return false;
