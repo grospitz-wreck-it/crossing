@@ -50,10 +50,10 @@ function matchesOsmCorridor(trainRoute: string[], observationStation: string, re
   return matchedAnchors.length >= 2;
 }
 
-// The crossing status view only forecasts the near term. Keep the same
-// two-hour window as the normal observation load so a through-rule reuses the
-// exact same shared timetable cache instead of creating another 4-hour batch.
-const THROUGH_TIMETABLE_HOURS = 2;
+// The crossing status view only forecasts the next 30 minutes. One hourly
+// /plan window plus the current /fchg feed is therefore sufficient and keeps
+// through-rule requests on the same shared timetable cache as observations.
+const THROUGH_TIMETABLE_HOURS = 1;
 
 export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain[]> {
   if (!crossing.throughRules?.length) return [];
