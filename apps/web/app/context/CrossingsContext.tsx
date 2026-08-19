@@ -25,22 +25,37 @@ function withDefaultCrossing(list: CrossingSummary[]) {
 export function CrossingsProvider({ children }: { children: React.ReactNode }) {
   const [saved, setSaved] = useState<CrossingSummary[]>([DEFAULT_CROSSING]);
   const [available, setAvailable] = useState<CrossingSummary[]>([]);
-  const [activeId, setActiveIdState] = useState<string | null>(null);
+  // Do not block the main app on the crossings/user list. The default crossing
+  // is already known and lets /app start loading its status immediately.
+  const [activeId, setActiveIdState] = useState<string | null>(DEFAULT_CROSSING.id);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function initialize() {
-      try {
-        const crossingsResponse = await fetch("/api/crossings", { cache: "no-store" });
-        const crossingsJson = crossingsResponse.ok ? await crossingsResponse.json() : [];
-        const availableList = Array.isArray(crossingsJson) ? crossingsJson : [];
-        if (!cancelled) setAvailable(availableList);
+      // Resolve the locally selected crossing immediately. This is intentionally
+      // independent from the DB-backed lists below.
+      const rawActive = localStorage.getItem(STORAGE_KEY_ACTIVE);
+      if (!cancelled && rawActive) {
+        setActiveIdState(rawActive);
+      }
 
-        const userResponse = await fetch("/api/user/crossings", { cache: "no-store" });
-        if (userResponse.ok) {
-          const userJson = await userResponse.json();
+      // These two requests are independent and must not form a request waterfall.
+      const [crossingsResult, userResult] = await Promise.allSettled([
+        fetch("/api/crossings", { cache: "no-store" }),
+        fetch("/api/user/crossings", { cache: "no-store" }),
+      ]);
+
+      try {
+        if (crossingsResult.status === "fulfilled" && crossingsResult.value.ok) {
+          const crossingsJson = await crossingsResult.value.json();
+          const availableList = Array.isArray(crossingsJson) ? crossingsJson : [];
+          if (!cancelled) setAvailable(availableList);
+        }
+
+        if (userResult.status === "fulfilled" && userResult.value.ok) {
+          const userJson = await userResult.value.json();
           const personalList = Array.isArray(userJson) ? userJson : [];
           const normalized = personalList
             .map((crossing: any) => ({
@@ -52,22 +67,24 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
           if (!cancelled) {
             const nextSaved = withDefaultCrossing(normalized);
             setSaved(nextSaved);
-            const rawActive = localStorage.getItem(STORAGE_KEY_ACTIVE);
-            const activeExists = nextSaved.some((crossing) => crossing.id === rawActive);
-            setActiveIdState(activeExists ? rawActive : nextSaved[0]?.id ?? DEFAULT_CROSSING.id);
+            const rawActiveNow = localStorage.getItem(STORAGE_KEY_ACTIVE);
+            const activeExists = nextSaved.some((crossing) => crossing.id === rawActiveNow);
+            // Only replace the active crossing with a DB-backed value when it is
+            // actually present in the user's saved list. Otherwise retain the
+            // already active/default crossing so the main status request never waits.
+            if (activeExists) {
+              setActiveIdState(rawActiveNow!);
+            } else if (!rawActiveNow) {
+              setActiveIdState(nextSaved[0]?.id ?? DEFAULT_CROSSING.id);
+            }
           }
-        } else {
-          const rawActive = localStorage.getItem(STORAGE_KEY_ACTIVE);
-          if (!cancelled) {
-            setSaved([DEFAULT_CROSSING]);
-            setActiveIdState(rawActive || DEFAULT_CROSSING.id);
-          }
+        } else if (!cancelled) {
+          setSaved([DEFAULT_CROSSING]);
         }
       } catch (error) {
         console.error("Failed to initialize crossings:", error);
         if (!cancelled) {
           setSaved([DEFAULT_CROSSING]);
-          setActiveIdState(DEFAULT_CROSSING.id);
         }
       } finally {
         if (!cancelled) setHydrated(true);
