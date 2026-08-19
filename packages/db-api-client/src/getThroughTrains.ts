@@ -1,6 +1,10 @@
 import type { Crossing } from "../../crossing-model/src/types";
 import { getStationTimetable } from "./getStationTimetable";
 import type { OfficialTrainEvent } from "./parseOfficialTimetable";
+import {
+  getMobilithekTrainRegistry,
+  type MobilithekTrainEvent,
+} from "./mobilithekTimetable";
 
 export type ThroughTrain = {
   type: "through";
@@ -41,53 +45,20 @@ function routeIndex(route: string[], station: string) {
   });
 }
 
-function routeContainsStation(route: string[], station: string) {
-  return routeIndex(route, station) >= 0;
-}
-
-/**
- * A crossing is a point on an OSM railway corridor, not necessarily a DB stop.
- * Therefore the train must NOT contain the crossing/observation station in its
- * route. The official timetable route is used to prove that the train actually
- * traverses the configured corridor between at least two of its route anchors.
- *
- * This is deliberately based on the CURRENT official route. If DB changes the
- * path because of an operational diversion, the changed route is what counts:
- * a diverted ICE/IC/RE/RB can therefore become a valid THROUGH candidate when
- * its actual route passes the crossing corridor.
- */
-function matchesOsmCorridor(
-  trainRoute: string[],
-  observationStation: string,
-  requiredRouteStops: string[]
-) {
+function matchesOsmCorridor(trainRoute: string[], observationStation: string, requiredRouteStops: string[]) {
   if (!trainRoute.length) return false;
 
   const anchors = requiredRouteStops
-    .map((stop, order) => ({
-      stop,
-      order,
-      index: routeIndex(trainRoute, stop),
-    }))
+    .map((stop, order) => ({ stop, order, index: routeIndex(trainRoute, stop) }))
     .filter((entry) => entry.index >= 0);
 
-  // A single station is not enough to prove that a train passes the crossing.
-  // We need two configured OSM corridor anchors on the actual DB route.
   if (anchors.length < 2) return false;
 
-  // The route must contain the anchors in the same order in which the
-  // crossing configuration defines the corridor. This rejects trains that
-  // merely happen to visit one matching station somewhere else in their run.
   const ordered = [...anchors].sort((a, b) => a.order - b.order);
   for (let i = 1; i < ordered.length; i += 1) {
-    if (ordered[i - 1].index >= ordered[i].index) {
-      return false;
-    }
+    if (ordered[i - 1].index >= ordered[i].index) return false;
   }
 
-  // If the observation station itself is present, it is a useful additional
-  // consistency check. It is NOT required: through trains normally do not
-  // stop at the crossing and may be observed at a different DB station.
   const observationIndex = routeIndex(trainRoute, observationStation);
   if (observationIndex >= 0) {
     const first = ordered[0].index;
@@ -98,15 +69,11 @@ function matchesOsmCorridor(
   return true;
 }
 
-function trainKey(train: OfficialTrainEvent) {
-  return `${train.category}-${train.journeyNumber}`;
+function trainKey(train: { category: string; journeyNumber: number; id?: string }) {
+  return `${train.category}-${train.journeyNumber}-${train.id || ""}`;
 }
 
-function directionForRoute(
-  route: string[],
-  observationStation: string,
-  requiredRouteStops: string[]
-): "eastbound" | "westbound" | "unknown" {
+function directionForRoute(route: string[], observationStation: string, requiredRouteStops: string[]): "eastbound" | "westbound" | "unknown" {
   if (!route.length) return "unknown";
 
   const observation = routeIndex(route, observationStation);
@@ -115,8 +82,6 @@ function directionForRoute(
     .filter((entry) => entry.index >= 0);
 
   if (observation < 0) {
-    // For a through train observed at a remote anchor station, derive the
-    // direction from the ordered corridor itself.
     if (anchors.length >= 2) {
       const first = anchors[0].stop;
       const last = anchors[anchors.length - 1].stop;
@@ -156,78 +121,114 @@ function interpolateCrossingTime(before: ThroughTrain, after: ThroughTrain): str
   return new Date(t1 + (t2 - t1) * ratio).toISOString();
 }
 
+function mobilithekCallForStation(train: MobilithekTrainEvent, station: string) {
+  const target = normalizeStationName(station);
+  return train.calls.find((call) => {
+    const value = normalizeStationName(call.name);
+    return value === target || value.includes(target) || target.includes(value);
+  });
+}
+
+function buildMobilithekCandidates(events: MobilithekTrainEvent[], crossing: Crossing): ThroughTrain[] {
+  const candidates: ThroughTrain[] = [];
+  const requiredRouteStops = crossing.requiredRouteStops || [];
+
+  for (const rule of crossing.throughRules || []) {
+    for (const train of events) {
+      if (!rule.categories.includes(train.category) && !rule.categories.some((category) => train.line.toUpperCase().includes(category.toUpperCase()))) continue;
+      if (!matchesOsmCorridor(train.route, rule.observationStation, requiredRouteStops)) continue;
+
+      const observationCall = mobilithekCallForStation(train, rule.observationStation);
+      if (!observationCall?.actual) continue;
+
+      const expectedDirection = directionForRoute(train.route, rule.observationStation, requiredRouteStops);
+      if (rule.direction !== "unknown" && expectedDirection !== "unknown" && rule.direction !== expectedDirection) continue;
+
+      const crossingTime = new Date(observationCall.actual.getTime() + rule.fallbackOffsetSeconds * 1000);
+      candidates.push({
+        type: "through",
+        line: train.line,
+        category: train.category,
+        journeyNumber: train.journeyNumber,
+        destination: train.destination,
+        origin: train.origin,
+        route: train.route,
+        delayMinutes: train.delayMinutes,
+        observationEva: rule.observationEva,
+        observationStation: rule.observationStation,
+        observationActualTime: observationCall.actual.toISOString(),
+        fallbackOffsetSeconds: rule.fallbackOffsetSeconds,
+        trackDistanceMeters: rule.trackDistanceMeters,
+        direction: rule.direction === "unknown" ? expectedDirection : rule.direction,
+        crossingTime: crossingTime.toISOString(),
+        detection: "official-route",
+      });
+    }
+  }
+
+  const byTrain = new Map<string, ThroughTrain[]>();
+  for (const candidate of candidates) {
+    const key = `${candidate.category}-${candidate.journeyNumber}`;
+    const list = byTrain.get(key) || [];
+    list.push(candidate);
+    byTrain.set(key, list);
+  }
+
+  for (const list of byTrain.values()) {
+    if (list.length < 2) continue;
+    const sorted = [...list].sort((a, b) => Date.parse(a.observationActualTime) - Date.parse(b.observationActualTime));
+    for (let i = 0; i < sorted.length - 1; i += 1) {
+      const interpolated = interpolateCrossingTime(sorted[i], sorted[i + 1]);
+      if (!interpolated) continue;
+      for (const candidate of list) {
+        candidate.crossingTime = interpolated;
+        candidate.detection = "official-route-time-anchored";
+      }
+      break;
+    }
+  }
+
+  return Array.from(new Map(candidates.map((train) => [`${train.category}-${train.journeyNumber}`, train])).values());
+}
+
 const THROUGH_TIMETABLE_HOURS = 1;
 
 export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain[]> {
   if (!crossing.throughRules?.length) return [];
 
-  const uniqueEvas = Array.from(
-    new Set(
-      crossing.throughRules
-        .map((rule) => String(rule.observationEva).trim())
-        .filter(Boolean)
-    )
-  );
+  // Primary source: one centrally cached official Mobilithek SIRI snapshot.
+  // This removes the per-crossing DB timetable calls for normal through trains.
+  try {
+    const registry = await getMobilithekTrainRegistry();
+    return buildMobilithekCandidates(registry, crossing);
+  } catch (error) {
+    console.warn("Mobilithek through-train registry unavailable; falling back to DB Timetables API", error);
+  }
+
+  // Fallback: keep the existing official DB Timetables implementation intact.
+  const uniqueEvas = Array.from(new Set(crossing.throughRules.map((rule) => String(rule.observationEva).trim()).filter(Boolean)));
   const timetableByEva = new Map<string, OfficialTrainEvent[]>();
 
-  await Promise.all(
-    uniqueEvas.map(async (eva) => {
-      try {
-        timetableByEva.set(
-          eva,
-          await getStationTimetable(eva, THROUGH_TIMETABLE_HOURS)
-        );
-      } catch (error) {
-        console.error(
-          `getThroughTrains: Timetable für ${eva} fehlgeschlagen`,
-          error
-        );
-      }
-    })
-  );
+  await Promise.all(uniqueEvas.map(async (eva) => {
+    try {
+      timetableByEva.set(eva, await getStationTimetable(eva, THROUGH_TIMETABLE_HOURS));
+    } catch (error) {
+      console.error(`getThroughTrains: Timetable für ${eva} fehlgeschlagen`, error);
+    }
+  }));
 
   const candidates: ThroughTrain[] = [];
-
   for (const rule of crossing.throughRules) {
-    const events =
-      timetableByEva.get(String(rule.observationEva).trim()) || [];
-
+    const events = timetableByEva.get(String(rule.observationEva).trim()) || [];
     for (const train of events) {
       if (train.cancelled || !rule.categories.includes(train.category)) continue;
-
       const route = train.route || [];
+      if (!matchesOsmCorridor(route, rule.observationStation, crossing.requiredRouteStops || [])) continue;
 
-      // The actual official DB route is the decisive signal. This means an
-      // operationally rerouted train is treated exactly like any other train
-      // if its current route traverses the OSM corridor of this crossing.
-      if (
-        !matchesOsmCorridor(
-          route,
-          rule.observationStation,
-          crossing.requiredRouteStops || []
-        )
-      ) {
-        continue;
-      }
+      const expectedDirection = directionForRoute(route, rule.observationStation, crossing.requiredRouteStops || []);
+      if (rule.direction !== "unknown" && expectedDirection !== "unknown" && rule.direction !== expectedDirection) continue;
 
-      const expectedDirection = directionForRoute(
-        route,
-        rule.observationStation,
-        crossing.requiredRouteStops || []
-      );
-
-      if (
-        rule.direction !== "unknown" &&
-        expectedDirection !== "unknown" &&
-        rule.direction !== expectedDirection
-      ) {
-        continue;
-      }
-
-      const crossingTime = new Date(
-        train.actualTime.getTime() + rule.fallbackOffsetSeconds * 1000
-      ).toISOString();
-
+      const crossingTime = new Date(train.actualTime.getTime() + rule.fallbackOffsetSeconds * 1000).toISOString();
       candidates.push({
         type: "through",
         line: train.line,
@@ -242,8 +243,7 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
         observationActualTime: train.actualTime.toISOString(),
         fallbackOffsetSeconds: rule.fallbackOffsetSeconds,
         trackDistanceMeters: rule.trackDistanceMeters,
-        direction:
-          rule.direction === "unknown" ? expectedDirection : rule.direction,
+        direction: rule.direction === "unknown" ? expectedDirection : rule.direction,
         crossingTime,
         detection: "official-route",
       });
@@ -252,28 +252,18 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
 
   const byTrain = new Map<string, ThroughTrain[]>();
   for (const candidate of candidates) {
-    const key = trainKey(candidate as unknown as OfficialTrainEvent);
+    const key = trainKey(candidate);
     const list = byTrain.get(key) || [];
     list.push(candidate);
     byTrain.set(key, list);
   }
 
-  // If the same train is observed at two configured DB stations, use the two
-  // actual DB times as anchors and interpolate the crossing time. This is the
-  // preferred method because it automatically follows delays and diversions.
   for (const list of byTrain.values()) {
     if (list.length < 2) continue;
-
-    const sorted = [...list].sort(
-      (a, b) =>
-        Date.parse(a.observationActualTime) -
-        Date.parse(b.observationActualTime)
-    );
-
+    const sorted = [...list].sort((a, b) => Date.parse(a.observationActualTime) - Date.parse(b.observationActualTime));
     for (let i = 0; i < sorted.length - 1; i += 1) {
       const interpolated = interpolateCrossingTime(sorted[i], sorted[i + 1]);
       if (!interpolated) continue;
-
       for (const candidate of list) {
         candidate.crossingTime = interpolated;
         candidate.detection = "official-route-time-anchored";
@@ -282,12 +272,5 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
     }
   }
 
-  return Array.from(
-    new Map(
-      candidates.map((train) => [
-        `${train.category}-${train.journeyNumber}`,
-        train,
-      ])
-    ).values()
-  );
+  return Array.from(new Map(candidates.map((train) => [`${train.category}-${train.journeyNumber}`, train])).values());
 }
