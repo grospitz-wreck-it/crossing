@@ -13,7 +13,8 @@ type LineRelation = {
 };
 type Candidate = {
   kind: "route" | "track";
-  routeType: "tracks" | "railway" | "track";
+  routeType: "tracks" | "railway" | "track" | "tram" | "light_rail";
+  infrastructureType: "rail" | "tram" | "light_rail";
   ref: string;
   name: string;
   from: string;
@@ -26,6 +27,9 @@ type Candidate = {
   waysCount: number;
   segments: Point[][];
 };
+
+const INFRASTRUCTURE_TYPES = new Set(["rail", "tram", "light_rail"]);
+const ROUTE_RELATION_TYPES = new Set(["train", "tram", "light_rail", "railway", "tracks"]);
 
 function pointSegmentDistanceMeters(lat: number, lon: number, a: Point, b: Point) {
   const scale = 111320;
@@ -48,9 +52,11 @@ function geometryDistanceMeters(lat: number, lon: number, geometry: Point[]) {
 function makeCandidate(lat: number, lon: number, geometry: Point[], tags: Record<string, string | undefined>, wayId: number, source: string): Candidate | null {
   const distanceMeters = geometryDistanceMeters(lat, lon, geometry);
   if (!Number.isFinite(distanceMeters) || distanceMeters > 200) return null;
+  const infrastructureType = tags.railway === "tram" ? "tram" : tags.railway === "light_rail" ? "light_rail" : "rail";
   return {
     kind: "track",
-    routeType: "track",
+    routeType: infrastructureType === "tram" ? "tram" : infrastructureType === "light_rail" ? "light_rail" : "track",
+    infrastructureType,
     ref: String(tags.ref || ""),
     name: String(tags.name || ""),
     from: String(tags.from || ""),
@@ -85,27 +91,16 @@ function mergeLineRelations(target: LineRelation[], incoming: LineRelation[]) {
 
 function groupCandidates(candidates: Candidate[]) {
   const grouped = new Map<string, Candidate>();
-
   for (const candidate of candidates) {
     const ref = normalizeRouteRef(candidate.ref);
     const name = normalizeRouteName(candidate.name);
-    // The physical OSM way/railway ref is the identity of the infrastructure.
-    // Passenger train relations are metadata attached to that physical track;
-    // they must never replace the physical ref (e.g. 2982/2992).
-    const key = ref
-      ? `ref:${ref}`
-      : name
-        ? `name:${candidate.routeType}:${name}`
-        : `way:${candidate.routeType}:${candidate.wayId}`;
-
+    const key = ref ? `ref:${candidate.infrastructureType}:${ref}` : name ? `name:${candidate.infrastructureType}:${name}` : `way:${candidate.infrastructureType}:${candidate.wayId}`;
     const existing = grouped.get(key);
     if (!existing) {
       grouped.set(key, { ...candidate, segments: [...candidate.segments], lineRelations: [...candidate.lineRelations] });
       continue;
     }
-
     existing.kind = existing.kind === "route" || candidate.kind === "route" ? "route" : "track";
-    existing.routeType = existing.routeType === "track" && candidate.routeType !== "track" ? candidate.routeType : existing.routeType;
     existing.ref = existing.ref || candidate.ref;
     existing.name = existing.name || candidate.name;
     existing.from = existing.from || candidate.from;
@@ -116,24 +111,16 @@ function groupCandidates(candidates: Candidate[]) {
     existing.segments.push(...candidate.segments);
     mergeLineRelations(existing.lineRelations, candidate.lineRelations);
   }
-
   const groupedCandidates = [...grouped.values()];
   const referencedCandidates = groupedCandidates.filter((candidate) => normalizeRouteRef(candidate.ref).length > 0);
   const visibleCandidates = referencedCandidates.length > 0 ? referencedCandidates : groupedCandidates;
-
-  return visibleCandidates
-    .sort((a, b) => a.distanceMeters - b.distanceMeters)
-    .slice(0, 8);
+  return visibleCandidates.sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 8);
 }
 
 async function tryOverpass(lat: number, lon: number) {
-  // Railway infrastructure and passenger-line relations are different OSM
-  // concepts. route=train is the important one for RB/RE/IC/ICE line mapping;
-  // route=railway/tracks remains useful for physical infrastructure.
-  const query = `[out:json][timeout:20];way(around:200,${lat},${lon})[railway=rail];out geom tags;rel(bw)[type=route][route~"^(train|light_rail|railway|tracks)$"];out tags;`;
+  const query = `[out:json][timeout:20];way(around:200,${lat},${lon})[railway~"^(rail|tram|light_rail)$"];out geom tags;rel(bw)[type=route][route~"^(train|tram|light_rail|railway|tracks)$"];out tags;`;
   const endpoints = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
   let lastError = "";
-
   for (const endpoint of endpoints) {
     try {
       const url = `${endpoint}?${new URLSearchParams({ data: query }).toString()}`;
@@ -148,17 +135,11 @@ async function tryOverpass(lat: number, lon: number) {
       const ways = elements.filter((element: any) => element?.type === "way" && Array.isArray(element?.geometry));
       const relations = elements.filter((element: any) => element?.type === "relation");
       const relationByWay = new Map<number, LineRelation[]>();
-
       for (const relation of relations) {
         const routeType = String(relation.tags?.route || "");
-        if (relation.tags?.type !== "route" || !["train", "light_rail", "railway", "tracks"].includes(routeType)) continue;
+        if (relation.tags?.type !== "route" || !ROUTE_RELATION_TYPES.has(routeType)) continue;
         const lineRelation: LineRelation = {
-          id: Number(relation.id),
-          routeType,
-          ref: String(relation.tags?.ref || ""),
-          name: String(relation.tags?.name || ""),
-          from: String(relation.tags?.from || ""),
-          to: String(relation.tags?.to || ""),
+          id: Number(relation.id), routeType, ref: String(relation.tags?.ref || ""), name: String(relation.tags?.name || ""), from: String(relation.tags?.from || ""), to: String(relation.tags?.to || ""),
           network: relation.tags?.network ? String(relation.tags.network) : undefined,
           operator: relation.tags?.operator ? String(relation.tags.operator) : undefined,
         };
@@ -169,27 +150,16 @@ async function tryOverpass(lat: number, lon: number) {
           relationByWay.set(Number(member.ref), list);
         }
       }
-
       const candidates: Candidate[] = [];
       for (const way of ways) {
         const geometry: Point[] = way.geometry.map((point: any) => ({ lat: Number(point.lat), lon: Number(point.lon) })).filter((point: Point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
-        if (geometry.length < 2) continue;
+        if (geometry.length < 2 || !INFRASTRUCTURE_TYPES.has(String(way.tags?.railway || ""))) continue;
         const local = makeCandidate(lat, lon, geometry, way.tags || {}, Number(way.id), "openstreetmap");
         if (!local) continue;
         const relationsForWay = relationByWay.get(Number(way.id)) || [];
         local.lineRelations = relationsForWay;
-        if (!relationsForWay.length) {
-          candidates.push(local);
-          continue;
-        }
-        // Keep the physical OSM candidate intact and attach every passenger
-        // line relation to it. This is what lets us distinguish two parallel
-        // tracks such as 2982 and 2992 even when different lines use them.
-        candidates.push({
-          ...local,
-          lineRelations: relationsForWay,
-          relationId: relationsForWay[0]?.id ?? null,
-        });
+        local.relationId = relationsForWay[0]?.id ?? null;
+        candidates.push(local);
       }
       return { status: "OK" as const, candidates: groupCandidates(candidates), endpoint, wayCount: ways.length, relationCount: relations.length };
     } catch (error) {
@@ -207,7 +177,7 @@ function parseOsmMap(xml: string, lat: number, lon: number) {
     const body = wayMatch[2];
     const tags: Record<string, string> = {};
     for (const tagMatch of body.matchAll(/<tag\b[^>]*\bk="([^"]+)"[^>]*\bv="([^"]*)"[^>]*\/>/g)) tags[tagMatch[1]] = tagMatch[2];
-    if (tags.railway !== "rail") continue;
+    if (!INFRASTRUCTURE_TYPES.has(tags.railway)) continue;
     const geometry: Point[] = [];
     for (const nodeMatch of body.matchAll(/<nd\b[^>]*\bref="(\d+)"[^>]*\/>/g)) {
       const point = nodes.get(nodeMatch[1]);
