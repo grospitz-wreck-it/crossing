@@ -94,6 +94,12 @@ async function allowTrainForCrossing(crossingId: string, train: any): Promise<bo
   return true;
 }
 
+// The UI only exposes the near-term forecast. Two hours of DB timetable data
+// are therefore enough for the status endpoint while preserving the current
+// plan + fchg merge and real-time delay information. Previously every EVA
+// caused four /plan requests plus one /fchg request.
+const STATUS_TIMETABLE_HOURS = 2;
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const crossing = (await loadCrossing(id)) || staticCrossings.find((c) => c.id === id);
@@ -103,7 +109,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   if (crossing.eva) {
     try {
-      const localEvents = await getStationTimetable(crossing.eva, 4);
+      const localEvents = await getStationTimetable(crossing.eva, STATUS_TIMETABLE_HOURS);
       for (const train of localEvents) {
         if (train.cancelled) continue;
         if (!(await allowTrainForCrossing(crossing.id, train))) continue;
@@ -127,7 +133,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
     for (const observationEva of crossing.observationEvas) {
       try {
-        const events = await getStationTimetable(observationEva, 4);
+        const events = await getStationTimetable(observationEva, STATUS_TIMETABLE_HOURS);
         for (const train of events) {
           if (train.cancelled || train.actualTime.getTime() <= Date.now() - 60_000) continue;
           if (!(await allowTrainForCrossing(crossing.id, train))) continue;
