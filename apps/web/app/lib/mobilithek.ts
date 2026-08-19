@@ -6,23 +6,32 @@ export type MobilithekConfig = {
   token?: string;
 };
 
-export function getMobilithekConfig(): MobilithekConfig | null {
-  const subscriptionId = process.env.MOBILITHEK_SUBSCRIPTION_ID?.trim();
-  if (!subscriptionId) return null;
+export function getMobilithekConfigs(): MobilithekConfig[] {
+  const ids = [
+    process.env.MOBILITHEK_SUBSCRIPTION_ID,
+    process.env.MOBILITHEK_SUBSCRIPTION_ID_2,
+    process.env.MOBILITHEK_SUBSCRIPTION_ID_3,
+    process.env.MOBILITHEK_SUBSCRIPTION_ID_4,
+    process.env.MOBILITHEK_SUBSCRIPTION_ID_5,
+  ]
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value));
 
-  return {
+  return [...new Set(ids)].map((subscriptionId) => ({
     subscriptionId,
     baseUrl: process.env.MOBILITHEK_SUBSCRIPTION_URL?.trim() || DEFAULT_BASE_URL,
     token: process.env.MOBILITHEK_TOKEN?.trim() || undefined,
-  };
+  }));
 }
 
-export async function fetchMobilithekSubscription(options: { signal?: AbortSignal } = {}) {
-  const config = getMobilithekConfig();
-  if (!config) {
-    throw new Error("MOBILITHEK_SUBSCRIPTION_ID is not configured");
-  }
+export function getMobilithekConfig(): MobilithekConfig | null {
+  return getMobilithekConfigs()[0] || null;
+}
 
+export async function fetchMobilithekSubscription(
+  config: MobilithekConfig,
+  options: { signal?: AbortSignal } = {},
+) {
   const url = new URL(config.baseUrl);
   url.searchParams.set("subscriptionID", config.subscriptionId);
 
@@ -58,8 +67,10 @@ export async function fetchMobilithekSubscription(options: { signal?: AbortSigna
 
 export function getMobilithekEnvTemplate() {
   return [
-    "# Mobilithek",
+    "# Mobilithek subscriptions",
     "MOBILITHEK_SUBSCRIPTION_ID=1024488922196914176",
+    "MOBILITHEK_SUBSCRIPTION_ID_2=1024488211727953920",
+    "MOBILITHEK_SUBSCRIPTION_ID_3=1024486200127131648",
     `MOBILITHEK_SUBSCRIPTION_URL=${DEFAULT_BASE_URL}`,
     "# Nur setzen, falls eure Subscription einen Bearer/API-Token verlangt:",
     "# MOBILITHEK_TOKEN=",
