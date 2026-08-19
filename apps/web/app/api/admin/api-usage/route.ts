@@ -1,4 +1,4 @@
-import { getDbApiUsage } from "../../../../../packages/db-api-client/src/apiRateLimiter";
+import { getDbApiUsage } from "../../../../../../packages/db-api-client/src/apiRateLimiter";
 
 export async function GET() {
   try {
