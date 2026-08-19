@@ -55,9 +55,9 @@ export default function ApiBudgetPanel() {
   return (
     <section
       style={{
-        width: "min(1400px, 100%)",
+        width: "min(1400px, calc(100% - 80px))",
         boxSizing: "border-box",
-        margin: "0 auto 28px",
+        margin: "40px auto 28px",
         padding: "28px 30px 22px",
         borderRadius: 20,
         color: "#f8fafc",
@@ -67,8 +67,8 @@ export default function ApiBudgetPanel() {
         overflow: "hidden",
       }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24 }}>
-        <div>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "flex-start", gap: 18 }}>
+        <div style={{ minWidth: 220 }}>
           <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: ".16em", color: "#94a3b8", marginBottom: 7 }}>
             DB TIMETABLES API
           </div>
@@ -93,14 +93,14 @@ export default function ApiBudgetPanel() {
         <div style={{ width: `${pct}%`, height: "100%", borderRadius: 999, background: tone, transition: "width .35s ease" }} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, marginTop: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: 10, marginTop: 18 }}>
         <Metric icon="◷" label="Frei jetzt" value={usage.remaining.toLocaleString("de-DE")} detail="Requests verfügbar" tone="#22c55e" />
         <Metric icon="◷" label="Letzte Stunde" value={usage.lastHour.toLocaleString("de-DE")} detail="Requests gesamt" tone="#60a5fa" />
         <Metric icon="▣" label="Heute" value={usage.today.toLocaleString("de-DE")} detail="Requests gesamt" tone="#a78bfa" />
         <Metric icon="ϟ" label="Cache-Hits heute" value={usage.cacheHitsToday.toLocaleString("de-DE")} detail="Treffer aus Cache" tone="#fbbf24" />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 235px", gap: 18, marginTop: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 18, marginTop: 18 }}>
         <div style={{ minWidth: 0, padding: 18, borderRadius: 15, background: "rgba(15,23,42,.42)", border: "1px solid rgba(148,163,184,.12)" }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: "#f8fafc", marginBottom: 14 }}>Top EVAs · letzte 24 Stunden</div>
           {usage.byEva.length ? (
@@ -140,7 +140,7 @@ export default function ApiBudgetPanel() {
         </div>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(148,163,184,.12)", color: "#94a3b8", fontSize: 10 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 10, marginTop: 18, paddingTop: 14, borderTop: "1px solid rgba(148,163,184,.12)", color: "#94a3b8", fontSize: 10 }}>
         <span>◷ Letzte Aktualisierung: {updatedLabel}</span>
         <span>● Daten werden alle 10 Sekunden aktualisiert</span>
       </div>
