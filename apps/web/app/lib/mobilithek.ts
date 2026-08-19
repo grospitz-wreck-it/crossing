@@ -1,4 +1,5 @@
 import https from "node:https";
+import { gunzipSync } from "node:zlib";
 
 const DEFAULT_BASE_URL = "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
 
@@ -36,12 +37,20 @@ function getP12Options() {
   return { pfx, passphrase: process.env.MOBILITHEK_P12_PASSWORD || undefined };
 }
 
+function decodeResponseBody(buffer: Buffer, contentEncoding: string) {
+  if (contentEncoding.toLowerCase().includes("gzip")) {
+    return gunzipSync(buffer).toString("utf8");
+  }
+  return buffer.toString("utf8");
+}
+
 export async function fetchMobilithekSubscription(config: MobilithekConfig, options: { signal?: AbortSignal } = {}) {
   const url = new URL(config.baseUrl);
   url.searchParams.set("subscriptionID", config.subscriptionId);
 
   const headers: Record<string, string> = {
-    accept: "application/json, application/xml, text/plain, */*",
+    accept: "application/xml, text/xml, */*",
+    "accept-encoding": "gzip",
     "user-agent": "Crossings/1.0 (meineschranke.com)",
   };
   if (config.token) headers.authorization = `Bearer ${config.token}`;
@@ -57,15 +66,24 @@ export async function fetchMobilithekSubscription(config: MobilithekConfig, opti
         timeout: 15000,
       }, (response) => {
         const chunks: Buffer[] = [];
-        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("data", (chunk: Buffer) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
         response.on("end", () => {
-          const body = Buffer.concat(chunks).toString("utf8");
+          const rawBody = Buffer.concat(chunks);
           const status = response.statusCode || 0;
           const contentType = String(response.headers["content-type"] || "");
+          const contentEncoding = String(response.headers["content-encoding"] || "");
           const safeHeaders: Record<string, string> = {};
           for (const [key, value] of Object.entries(response.headers)) {
             if (typeof value === "string") safeHeaders[key] = value;
             else if (Array.isArray(value)) safeHeaders[key] = value.join(", ");
+          }
+
+          let body: string;
+          try {
+            body = decodeResponseBody(rawBody, contentEncoding);
+          } catch (error) {
+            reject(new Error(`Mobilithek response could not be decompressed: ${error instanceof Error ? error.message : String(error)}`));
+            return;
           }
 
           if (status < 200 || status >= 300) {
