@@ -34,8 +34,9 @@ function findAll(node: any, key: string): any[] {
   const out: any[] = [];
   const visit = (value: any) => {
     if (!value || typeof value !== "object") return;
-    for (const [k, v] of Object.entries(value)) {
-      if (k === key) out.push(...asArray(v));
+    for (const [rawKey, v] of Object.entries(value)) {
+      const localKey = rawKey.includes(":") ? rawKey.slice(rawKey.lastIndexOf(":") + 1) : rawKey;
+      if (localKey === key) out.push(...asArray(v));
       if (v && typeof v === "object") visit(v);
     }
   };
