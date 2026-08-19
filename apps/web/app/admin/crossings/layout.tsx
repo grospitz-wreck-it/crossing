@@ -8,8 +8,7 @@ export default function CrossingsAdminLayout({ children }: { children: ReactNode
     <div className={styles.shell}>
       <aside className={styles.sidebar}>
         <div className={styles.brand}>
-          <span className={styles.brandMark}>↗</span>
-          <span><strong>meine</strong><b>schranke</b></span>
+          <img src="/images/meineschranke_logo.webp" alt="meineschranke" />
         </div>
         <nav className={styles.nav} aria-label="Admin Navigation">
           <div className={styles.navLabel}>ÜBERSICHT</div>
