@@ -38,9 +38,6 @@ export default function ApiBudgetPanel() {
 
   return (
     <section className={`${styles.card} ${tone}`} aria-label="DB API Rate-Limit">
-      <div className={styles.brand}>
-        <img src="/images/meineschranke_logo.webp" alt="meineschranke" />
-      </div>
       <div className={styles.eyebrow}>DB TIMETABLES API</div>
       <div className={styles.title}>Rate-Limit</div>
       <div className={styles.value}><strong>{usage.currentWindow}</strong><span> / {usage.limitPerMinute}</span></div>
