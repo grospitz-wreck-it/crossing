@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 type Usage = {
   limitPerMinute: number;
@@ -46,11 +46,9 @@ export default function ApiBudgetPanel() {
   const tone = pct >= 90 ? "#ef4444" : pct >= 75 ? "#f59e0b" : "#22c55e";
   const status = pct >= 90 ? "Limit fast erreicht" : pct >= 75 ? "Hohe Auslastung" : "Im sicheren Bereich";
   const maxEva = Math.max(1, ...usage.byEva.map((item) => item.requests));
-
-  const updatedLabel = useMemo(() => {
-    if (!updatedAt) return "gerade eben";
-    return updatedAt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  }, [updatedAt]);
+  const updatedLabel = updatedAt
+    ? updatedAt.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+    : "gerade eben";
 
   return (
     <section
