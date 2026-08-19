@@ -22,6 +22,11 @@ export type DivertedTrain = {
   note: string;
 };
 
+// Der Status-Endpunkt zeigt nur die nächsten 30 Minuten. Ein einstündiges
+// Timetable-Fenster reicht dafür aus und sorgt dafür, dass diversionRules
+// denselben In-Memory-/Turso-Cache wie throughRules verwenden können.
+const DIVERSION_TIMETABLE_HOURS = 1;
+
 export async function getDivertedTrains(
   crossing: Crossing
 ): Promise<DivertedTrain[]> {
@@ -35,7 +40,10 @@ export async function getDivertedTrains(
     let events;
 
     try {
-      events = await getStationTimetable(rule.observationEva);
+      events = await getStationTimetable(
+        rule.observationEva,
+        DIVERSION_TIMETABLE_HOURS
+      );
     } catch (error) {
       console.error(
         `getDivertedTrains: Timetable für ${rule.observationStation} (${rule.observationEva}) fehlgeschlagen`,
