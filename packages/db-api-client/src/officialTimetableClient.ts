@@ -18,6 +18,8 @@
 // (https://developers.deutschebahn.com) für das Produkt "Timetables".
 // Zugangsdaten werden als DB-Client-Id / DB-Api-Key Header mitgeschickt.
 
+import { acquireDbApiSlot } from "./apiRateLimiter";
+
 const BASE_URL =
   "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1";
 
@@ -66,8 +68,14 @@ function formatDateHour(date: Date): {
 
 async function fetchXml(
   url: string,
-  label: string
+  label: string,
+  meta: { eva: string; requestType: string }
 ): Promise<string> {
+  // The DB Timetables Free plan currently allows 60 requests/minute.
+  // The limiter is global in Turso, so concurrent Vercel instances share
+  // the same sliding 60-second window.
+  await acquireDbApiSlot(meta);
+
   const res = await fetch(url, {
     headers: dbHeaders(),
     cache: "no-store",
@@ -88,10 +96,10 @@ async function fetchXml(
 }
 
 // Holt den Sollfahrplan für eine EVA-Nummer für die aktuelle Stunde und die
-// folgende Stunde (damit auch Züge kurz nach der vollen Stunde nicht fehlen).
+// folgenden Stunden.
 export async function fetchPlanXml(
   eva: string,
-  hoursAhead = 4 // statt 2 – Puffer für Anfragen kurz vor voller Stunde
+  hoursAhead = 4
 ): Promise<string[]> {
   const now = Date.now();
   const requests = Array.from(
@@ -99,7 +107,11 @@ export async function fetchPlanXml(
     (_, i) => new Date(now + i * 60 * 60 * 1000)
   ).map((date) => {
     const { date: d, hour: h } = formatDateHour(date);
-    return fetchXml(`${BASE_URL}/plan/${eva}/${d}/${h}`, `plan/${eva}/${d}/${h}`);
+    return fetchXml(
+      `${BASE_URL}/plan/${eva}/${d}/${h}`,
+      `plan/${eva}/${d}/${h}`,
+      { eva, requestType: "plan" }
+    );
   });
   return Promise.all(requests);
 }
@@ -111,5 +123,9 @@ export async function fetchPlanXml(
 export async function fetchChangesXml(
   eva: string
 ): Promise<string> {
-  return fetchXml(`${BASE_URL}/fchg/${eva}`, `fchg/${eva}`);
+  return fetchXml(
+    `${BASE_URL}/fchg/${eva}`,
+    `fchg/${eva}`,
+    { eva, requestType: "fchg" }
+  );
 }
