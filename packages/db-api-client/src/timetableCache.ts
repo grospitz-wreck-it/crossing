@@ -10,7 +10,11 @@ const db = dbUrl && dbToken
 export type TimetableCacheKind = "plan" | "fchg";
 
 function ttlFor(kind: TimetableCacheKind) {
-  return kind === "fchg" ? 30_000 : 60_000;
+  // Plan data is stable within the hourly timetable slot. Keep it cached
+  // for several minutes so repeated crossing/status requests do not hit the
+  // DB API again for the exact same /plan window. Changes stay deliberately
+  // short-lived because operational reroutes can arrive through /fchg.
+  return kind === "fchg" ? 30_000 : 5 * 60_000;
 }
 
 function keyFor(kind: TimetableCacheKind, eva: string, slot: string) {
