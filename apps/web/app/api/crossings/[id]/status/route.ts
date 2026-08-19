@@ -71,34 +71,25 @@ async function loadCrossing(id: string): Promise<any | null> {
   }
 }
 
-/**
- * OSM is authoritative only when the crossing has a trusted mapping.
- * Without one, preserve the existing timetable/through-rule behaviour.
- */
 async function allowTrainForCrossing(crossingId: string, train: any): Promise<boolean> {
   const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
   if (!route.length) return true;
-
   const result = await filterTrainByCrossingOsm(crossingId, route);
   if (result.status === "rejected") {
     console.info("OSM rejected train for crossing", {
-      crossingId,
-      journeyNumber: train.journeyNumber,
-      line: train.line,
-      score: result.score,
-      railwayWayId: result.railwayWayId,
-      ref: result.ref,
+      crossingId, journeyNumber: train.journeyNumber, line: train.line,
+      score: result.score, railwayWayId: result.railwayWayId, ref: result.ref,
     });
     return false;
   }
   return true;
 }
 
-// The UI only exposes the near-term forecast. Two hours of DB timetable data
-// are therefore enough for the status endpoint while preserving the current
-// plan + fchg merge and real-time delay information. Previously every EVA
-// caused four /plan requests plus one /fchg request.
-const STATUS_TIMETABLE_HOURS = 2;
+// The UI only exposes the next 30 minutes. One hourly /plan window plus the
+// current /fchg feed is sufficient for that near-term forecast. Keeping the
+// same window for direct observations and through rules also makes both paths
+// share the same Turso/in-flight cache entry for an EVA.
+const STATUS_TIMETABLE_HOURS = 1;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -116,15 +107,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         const isStoppingTrain = train.platform === "1" || train.platform === "2";
         const crossingTime = train.actualTime;
         const etaSeconds = Math.floor((crossingTime.getTime() - Date.now()) / 1000);
-        trains.push({
-          id: `${train.category}-${train.journeyNumber}-${train.id}`,
-          line: train.line, category: train.category, journeyNumber: train.journeyNumber,
-          origin: train.origin, destination: train.destination, platform: train.platform,
-          isStoppingTrain, direction: getCrossingDirection(train.route),
-          directionLabel: train.destination ? `Richtung ${train.destination}` : null,
-          delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(),
-          arrival: crossingTime.toISOString(), etaSeconds,
-        });
+        trains.push({ id: `${train.category}-${train.journeyNumber}-${train.id}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, isStoppingTrain, direction: getCrossingDirection(train.route), directionLabel: train.destination ? `Richtung ${train.destination}` : null, delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds });
       }
     } catch (error) { console.error("Failed to load local timetable:", error); }
   }
@@ -141,17 +124,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           const key = `${train.category}-${train.journeyNumber}`;
           if (existingKeys.has(key)) continue;
           existingKeys.add(key);
-          trains.push({
-            id: `${train.category}-${train.journeyNumber}-${observationEva}`,
-            line: train.line, category: train.category, journeyNumber: train.journeyNumber,
-            origin: train.origin, destination: train.destination, platform: train.platform,
-            isStoppingTrain: train.platform === "1" || train.platform === "2",
-            direction: getCrossingDirection(train.route),
-            directionLabel: train.destination ? `Richtung ${train.destination}` : null,
-            delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(),
-            arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000),
-            estimatedFrom: { observationEva },
-          });
+          trains.push({ id: `${train.category}-${train.journeyNumber}-${observationEva}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, isStoppingTrain: train.platform === "1" || train.platform === "2", direction: getCrossingDirection(train.route), directionLabel: train.destination ? `Richtung ${train.destination}` : null, delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000), estimatedFrom: { observationEva } });
         }
       } catch (error) { console.error(`Failed to load observation timetable ${observationEva}:`, error); }
     }
@@ -165,15 +138,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       const key = `${train.category}-${train.journeyNumber}`;
       if (existingKeys.has(key)) continue;
       const crossingTime = new Date(train.crossingTime);
-      trains.push({
-        id: `${train.category}-${train.journeyNumber}`, line: train.line, category: train.category,
-        journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination,
-        platform: train.direction === "westbound" ? "1" : train.direction === "eastbound" ? "2" : undefined,
-        isStoppingTrain: false, direction: train.direction, directionLabel: "Durchfahrt",
-        delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(),
-        etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000),
-        estimatedFrom: { observationStation: train.observationStation, observationActualTime: train.observationActualTime, fallbackOffsetSeconds: train.fallbackOffsetSeconds },
-      });
+      trains.push({ id: `${train.category}-${train.journeyNumber}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.direction === "westbound" ? "1" : train.direction === "eastbound" ? "2" : undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Durchfahrt", delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000), estimatedFrom: { observationStation: train.observationStation, observationActualTime: train.observationActualTime, fallbackOffsetSeconds: train.fallbackOffsetSeconds } });
     }
   } catch (error) { console.error("Failed to load through trains:", error); }
 
@@ -189,15 +154,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       const key = `${train.category}-${train.journeyNumber}`;
       if (existingKeys.has(key)) continue;
       const crossingTime = new Date(train.crossingTime);
-      trains.push({
-        id: `${train.category}-${train.journeyNumber}-rerouted`, line: train.line, category: train.category,
-        journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination,
-        platform: undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Umleitung",
-        delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(),
-        etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000),
-        estimatedFrom: { observationStation: train.observationStation, observationActualTime: train.observationActualTime, fallbackOffsetSeconds: train.fallbackOffsetSeconds },
-        rerouted: true, note: train.note,
-      });
+      trains.push({ id: `${train.category}-${train.journeyNumber}-rerouted`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Umleitung", delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000), estimatedFrom: { observationStation: train.observationStation, observationActualTime: train.observationActualTime, fallbackOffsetSeconds: train.fallbackOffsetSeconds }, rerouted: true, note: train.note });
     }
   } catch (error) { console.error("Failed to load rerouted trains:", error); }
 
@@ -230,11 +187,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     else { state = "CLOSED"; nextOpenIn = Math.floor((nextClosure.end.getTime() - nowMs) / 1000); }
   }
 
-  return Response.json({
-    crossing: { id: crossing.id, name: crossing.name, lat: crossing.lat, lon: crossing.lon }, state, nextCloseIn, nextOpenIn,
-    phase: nextClosure ? { start: phaseStart, end: phaseEnd, durationMinutes: Math.round((nextClosure.end.getTime() - nextClosure.start.getTime()) / 60000), trainCount: nextClosure.trains.length, trains: nextClosure.trains } : null,
-    closureCount: visibleClosures.length,
-    closures: visibleClosures.map((closure) => ({ start: closure.start.toISOString(), end: closure.end.toISOString(), durationMinutes: Math.round((closure.end.getTime() - closure.start.getTime()) / 60000), trainCount: closure.trains.length, trains: closure.trains })),
-    trainCount: trains.length, trains, divertedTrains,
-  });
+  return Response.json({ crossing: { id: crossing.id, name: crossing.name, lat: crossing.lat, lon: crossing.lon }, state, nextCloseIn, nextOpenIn, phase: nextClosure ? { start: phaseStart, end: phaseEnd, durationMinutes: Math.round((nextClosure.end.getTime() - nextClosure.start.getTime()) / 60000), trainCount: nextClosure.trains.length, trains: nextClosure.trains } : null, closureCount: visibleClosures.length, closures: visibleClosures.map((closure) => ({ start: closure.start.toISOString(), end: closure.end.toISOString(), durationMinutes: Math.round((closure.end.getTime() - closure.start.getTime()) / 60000), trainCount: closure.trains.length, trains: closure.trains })), trainCount: trains.length, trains, divertedTrains });
 }
