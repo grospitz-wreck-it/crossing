@@ -71,8 +71,8 @@ function routeContains(route: string[], target: string) {
 function numberFrom(value?: string) { const m = String(value || "").match(/(\d{2,6})/); return m ? Number(m[1]) : 0; }
 
 function inferCategory(line: string, journey: any) {
-  const raw = `${line} ${firstText(journey, ["ProductCategoryRef", "VehicleMode", "VehicleModeRef", "TrainType"]) || ""}`.toUpperCase();
-  for (const category of ["ICE", "EC", "IC", "IRE", "RE", "RB", "TRAM", "STR", "S"]) if (raw.includes(category)) return category;
+  const raw = `${line} ${firstText(journey, ["ProductCategoryRef", "ProductCategory", "VehicleMode", "VehicleModeRef", "TrainType"]) || ""}`.toUpperCase();
+  for (const category of ["ICE", "EC", "IC", "IRE", "RE", "RB", "RS", "TRAM", "STR", "S"]) if (raw.includes(category)) return category;
   return line.split(/\s+/)[0] || "";
 }
 
@@ -83,24 +83,33 @@ function parseBody(body: string): MobilithekTrainEvent[] {
   const events: MobilithekTrainEvent[] = [];
   for (let index = 0; index < journeys.length; index += 1) {
     const journey = journeys[index];
-    const line = firstText(journey, ["LineRef", "PublishedLineName", "LineName"]) || "";
+    const line = firstText(journey, ["PublishedLineName", "LineRef", "LineName"]) || "";
     const journeyRef = firstText(journey, ["DatedVehicleJourneyRef", "VehicleJourneyRef", "VehicleJourneyName"]) || `${line}-${index}`;
     const calls = findAll(journey, "EstimatedCall").map((call) => {
       const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef"]) || "";
-      const planned = dateValue(call, ["PlannedArrivalTime", "PlannedDepartureTime"]);
-      const actual = dateValue(call, ["ActualArrivalTime", "ActualDepartureTime", "EstimatedArrivalTime", "EstimatedDepartureTime"]);
+      // SIRI 2.0 feeds use Aimed* for the scheduled time and Expected* for
+      // the live estimate. Keep the older Planned*/Estimated*/Actual* names
+      // as fallbacks for other Mobilithek datasets.
+      const planned = dateValue(call, ["AimedArrivalTime", "AimedDepartureTime", "PlannedArrivalTime", "PlannedDepartureTime"]);
+      const actual = dateValue(call, ["ExpectedArrivalTime", "ExpectedDepartureTime", "EstimatedArrivalTime", "EstimatedDepartureTime", "ActualArrivalTime", "ActualDepartureTime"]);
       return { name, planned, actual };
-    }).filter((call) => call.name);
+    }).filter((call) => call.name && (call.planned || call.actual));
     if (!calls.length) continue;
+
     const route = calls.map((call) => call.name);
-    const relevant = calls.find((call) => call.actual) || calls[0];
+    const now = Date.now();
+    const relevant = calls.find((call) => {
+      const time = call.actual || call.planned;
+      return time && time.getTime() >= now - 5 * 60_000;
+    }) || calls.find((call) => call.actual) || calls[0];
     const actualTime = relevant.actual || relevant.planned;
-    const scheduledTime = relevant.planned || actualTime;
+    const scheduledTime = relevant.planned || relevant.actual;
     if (!actualTime || !scheduledTime) continue;
+
     const lineName = line || firstText(journey, ["PublishedServiceName", "VehicleJourneyName"]) || "unknown";
     const destination = firstText(journey, ["DestinationName", "DestinationText", "DestinationDisplay"]) || calls[calls.length - 1]?.name;
-    const origin = calls[0]?.name;
-    const delayMinutes = Math.max(0, Math.round((actualTime.getTime() - scheduledTime.getTime()) / 60000));
+    const origin = firstText(journey, ["OriginName", "OriginText"]) || calls[0]?.name;
+    const delayMinutes = Math.round((actualTime.getTime() - scheduledTime.getTime()) / 60000);
     events.push({ id: journeyRef, line: lineName, category: inferCategory(lineName, journey), journeyNumber: numberFrom(firstText(journey, ["VehicleJourneyName", "PublishedServiceName"]) || journeyRef), journeyRef, origin, destination, route, calls, actualTime, scheduledTime, delayMinutes, direction: firstText(journey, ["DirectionRef", "DirectionName"]) || "" });
   }
   return events;
