@@ -7,10 +7,7 @@ export const runtime = "nodejs";
 export async function GET() {
   const configs = getMobilithekConfigs();
   if (!configs.length) {
-    return NextResponse.json({
-      configured: false,
-      error: "No MOBILITHEK_SUBSCRIPTION_ID variables configured",
-    }, { status: 503 });
+    return NextResponse.json({ configured: false, error: "No MOBILITHEK_SUBSCRIPTION_ID variables configured" }, { status: 503 });
   }
 
   const controller = new AbortController();
@@ -18,20 +15,25 @@ export async function GET() {
 
   try {
     const results = await Promise.all(configs.map(async (config) => {
+      const requestUrl = new URL(config.baseUrl);
+      requestUrl.searchParams.set("subscriptionID", config.subscriptionId);
       try {
         const result = await fetchMobilithekSubscription(config, { signal: controller.signal });
         return {
           subscriptionId: config.subscriptionId,
           ok: true,
+          requestUrl: requestUrl.toString(),
           status: result.status,
           contentType: result.contentType,
           bodyLength: result.body.length,
-          bodyPreview: result.body.slice(0, 2000),
+          responseHeaders: result.headers,
+          bodyPreview: result.body.slice(0, 5000),
         };
       } catch (error) {
         return {
           subscriptionId: config.subscriptionId,
           ok: false,
+          requestUrl: requestUrl.toString(),
           error: error instanceof Error ? error.message : String(error),
         };
       }
