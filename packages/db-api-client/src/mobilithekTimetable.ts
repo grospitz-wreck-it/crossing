@@ -4,6 +4,7 @@ import { gunzipSync } from "node:zlib";
 
 const DEFAULT_URL = "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
 const CACHE_TTL_MS = 30_000;
+const PARSED_CACHE_TTL_MS = 25_000;
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
 type Call = { name: string; planned?: Date; actual?: Date };
@@ -14,6 +15,7 @@ export type MobilithekTrainEvent = {
 };
 
 let cached: { expiresAt: number; body: string; lastModified?: string } | null = null;
+let parsedCached: { expiresAt: number; body: string; events: MobilithekTrainEvent[] } | null = null;
 let inFlight: Promise<MobilithekTrainEvent[]> | null = null;
 
 function asArray<T>(value: T | T[] | undefined): T[] { return value == null ? [] : Array.isArray(value) ? value : [value]; }
@@ -43,8 +45,6 @@ function parseBody(body: string): MobilithekTrainEvent[] {
     }).filter((call) => call.name && (call.planned || call.actual));
     if (!calls.length) continue;
     const route = calls.map((call) => call.name);
-    // Important: never fall back to the first journey call. That can be the
-    // origin of a long-distance trip and creates false 60-90 minute ETAs.
     const relevant = calls.find((call) => { const time = call.actual || call.planned; return time && time.getTime() >= now - 5 * 60_000; });
     if (!relevant) continue;
     const actualTime = relevant.actual || relevant.planned;
@@ -70,12 +70,17 @@ function fetchFeed(): Promise<string> {
   return new Promise((resolve, reject) => {
     const request = https.request(url, { method: "GET", pfx: Buffer.from(p12Base64, "base64"), passphrase, headers: { accept: "application/xml, text/xml, */*", "accept-encoding": "gzip", "user-agent": "Crossings/1.0 (meineschranke.com)", ...(cached?.lastModified ? { "if-modified-since": cached.lastModified } : {}) }, timeout: 15000 }, (response) => {
       const chunks: Buffer[] = []; response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      response.on("end", () => { if (response.statusCode === 304 && cached) { cached.expiresAt = Date.now() + CACHE_TTL_MS; return resolve(cached.body); } const raw = Buffer.concat(chunks); let body: string; try { body = String(response.headers["content-encoding"] || "").includes("gzip") ? gunzipSync(raw).toString("utf8") : raw.toString("utf8"); } catch (error) { return reject(error); } if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) return reject(new Error(`Mobilithek HTTP ${response.statusCode}: ${body.slice(0, 500)}`)); cached = { expiresAt: Date.now() + CACHE_TTL_MS, body, lastModified: String(response.headers["last-modified"] || "") || undefined }; resolve(body); });
+      response.on("end", () => { if (response.statusCode === 304 && cached) { cached.expiresAt = Date.now() + CACHE_TTL_MS; return resolve(cached.body); } const raw = Buffer.concat(chunks); let body: string; try { body = String(response.headers["content-encoding"] || "").includes("gzip") ? gunzipSync(raw).toString("utf8") : raw.toString("utf8"); } catch (error) { return reject(error); } if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) return reject(new Error(`Mobilithek HTTP ${response.statusCode}: ${body.slice(0, 500)}`)); cached = { expiresAt: Date.now() + CACHE_TTL_MS, body, lastModified: String(response.headers["last-modified"] || "") || undefined }; parsedCached = null; resolve(body); });
     });
     request.on("timeout", () => request.destroy(new Error("Mobilithek request timed out"))); request.on("error", reject); request.end();
   });
 }
 
-export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent[]> { if (cached && cached.expiresAt > Date.now()) return parseBody(cached.body); if (!inFlight) inFlight = fetchFeed().then(parseBody).finally(() => { inFlight = null; }); return inFlight; }
+export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent[]> {
+  if (parsedCached && parsedCached.expiresAt > Date.now() && cached?.body === parsedCached.body) return parsedCached.events;
+  if (cached && cached.expiresAt > Date.now()) { const events = parseBody(cached.body); parsedCached = { expiresAt: Date.now() + PARSED_CACHE_TTL_MS, body: cached.body, events }; return events; }
+  if (!inFlight) inFlight = fetchFeed().then((body) => { const events = parseBody(body); parsedCached = { expiresAt: Date.now() + PARSED_CACHE_TTL_MS, body, events }; return events; }).finally(() => { inFlight = null; });
+  return inFlight;
+}
 export async function getMobilithekTrainDiagnostics() { const body = await fetchFeed(); const root = parser.parse(body); const journeys = findAll(root, "EstimatedVehicleJourney"); const calls = findAll(root, "EstimatedCall"); return { bodyLength: body.length, estimatedVehicleJourneys: journeys.length, estimatedCalls: calls.length, hasSiri: /siri/i.test(body), hasEstimatedVehicleJourney: /EstimatedVehicleJourney/i.test(body), preview: body.slice(0, 1500) }; }
 export function filterMobilithekTrains(events: MobilithekTrainEvent[], categories: string[], observationStation: string, requiredRouteStops: string[]) { return events.filter((train) => { if (categories.length && !categories.some((category) => String(train.category).toUpperCase() === String(category).toUpperCase() || String(train.line).toUpperCase().includes(String(category).toUpperCase()))) return false; if (observationStation && !routeContains(train.route, observationStation)) return false; if (requiredRouteStops.length < 2) return true; const matched = requiredRouteStops.filter((stop) => routeContains(train.route, stop)); return matched.length >= 2; }); }
