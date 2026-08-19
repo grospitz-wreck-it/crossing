@@ -17,69 +17,19 @@ let cached: { expiresAt: number; body: string; lastModified?: string } | null = 
 let inFlight: Promise<MobilithekTrainEvent[]> | null = null;
 
 function asArray<T>(value: T | T[] | undefined): T[] { return value == null ? [] : Array.isArray(value) ? value : [value]; }
-
-function findAll(node: any, key: string): any[] {
-  const out: any[] = [];
-  const visit = (value: any) => {
-    if (!value || typeof value !== "object") return;
-    for (const [rawKey, v] of Object.entries(value)) {
-      const localKey = rawKey.includes(":") ? rawKey.slice(rawKey.lastIndexOf(":") + 1) : rawKey;
-      if (localKey === key) out.push(...asArray(v));
-      if (v && typeof v === "object") visit(v);
-    }
-  };
-  visit(node);
-  return out;
-}
-
-function text(value: any): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === "string" || typeof value === "number") return String(value).trim() || undefined;
-  if (Array.isArray(value)) return text(value[0]);
-  if (typeof value === "object") return text(value.Text ?? value.Name ?? value.Value ?? value["#text"]);
-  return undefined;
-}
-
-function firstText(node: any, keys: string[]): string | undefined {
-  for (const key of keys) {
-    const found = findAll(node, key).map(text).find(Boolean);
-    if (found) return found;
-  }
-  return undefined;
-}
-
-function dateValue(node: any, keys: string[]): Date | undefined {
-  for (const key of keys) {
-    const value = firstText(node, [key]);
-    if (!value) continue;
-    const date = new Date(value);
-    if (Number.isFinite(date.getTime())) return date;
-  }
-  return undefined;
-}
-
-function normalize(value: string) {
-  return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
-    .replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
-    .replace(/[^a-z0-9]+/g, "").trim();
-}
-
-function routeContains(route: string[], target: string) {
-  const t = normalize(target); return Boolean(t) && route.some((name) => { const n = normalize(name); return n === t || n.includes(t) || t.includes(n); });
-}
-
+function findAll(node: any, key: string): any[] { const out: any[] = []; const visit = (value: any) => { if (!value || typeof value !== "object") return; for (const [rawKey, v] of Object.entries(value)) { const localKey = rawKey.includes(":") ? rawKey.slice(rawKey.lastIndexOf(":") + 1) : rawKey; if (localKey === key) out.push(...asArray(v)); if (v && typeof v === "object") visit(v); } }; visit(node); return out; }
+function text(value: any): string | undefined { if (value == null) return undefined; if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value).trim() || undefined; if (Array.isArray(value)) return text(value[0]); if (typeof value === "object") return text(value.Text ?? value.Name ?? value.Value ?? value["#text"]); return undefined; }
+function firstText(node: any, keys: string[]): string | undefined { for (const key of keys) { const found = findAll(node, key).map(text).find(Boolean); if (found) return found; } return undefined; }
+function dateValue(node: any, keys: string[]): Date | undefined { const value = firstText(node, keys); if (!value) return undefined; const date = new Date(value); return Number.isFinite(date.getTime()) ? date : undefined; }
+function normalize(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
+function routeContains(route: string[], target: string) { const t = normalize(target); return Boolean(t) && route.some((name) => { const n = normalize(name); return n === t || n.includes(t) || t.includes(n); }); }
 function numberFrom(value?: string) { const m = String(value || "").match(/(\d{2,6})/); return m ? Number(m[1]) : 0; }
-
-function inferCategory(line: string, journey: any) {
-  const raw = `${line} ${firstText(journey, ["ProductCategoryRef", "ProductCategory", "VehicleMode", "VehicleModeRef", "TrainType"]) || ""}`.toUpperCase();
-  for (const category of ["ICE", "EC", "IC", "IRE", "RE", "RB", "RS", "TRAM", "STR", "S"]) if (raw.includes(category)) return category;
-  return line.split(/\s+/)[0] || "";
-}
+function inferCategory(line: string, journey: any) { const raw = `${line} ${firstText(journey, ["ProductCategoryRef", "ProductCategory", "VehicleMode", "VehicleModeRef", "TrainType"]) || ""}`.toUpperCase(); for (const category of ["ICE", "EC", "IC", "IRE", "RE", "RB", "U79", "U78", "U76", "U75", "U74", "U73", "U72", "U71", "U70", "U81", "TRAM", "STR", "S"]) if (raw.includes(category)) return category; return line.split(/\s+/)[0] || ""; }
 
 function parseBody(body: string): MobilithekTrainEvent[] {
-  let root: any;
-  try { root = parser.parse(body); } catch { return []; }
+  let root: any; try { root = parser.parse(body); } catch { return []; }
   const journeys = findAll(root, "EstimatedVehicleJourney");
+  const now = Date.now();
   const events: MobilithekTrainEvent[] = [];
   for (let index = 0; index < journeys.length; index += 1) {
     const journey = journeys[index];
@@ -87,25 +37,19 @@ function parseBody(body: string): MobilithekTrainEvent[] {
     const journeyRef = firstText(journey, ["DatedVehicleJourneyRef", "VehicleJourneyRef", "VehicleJourneyName"]) || `${line}-${index}`;
     const calls = findAll(journey, "EstimatedCall").map((call) => {
       const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef"]) || "";
-      // SIRI 2.0 feeds use Aimed* for the scheduled time and Expected* for
-      // the live estimate. Keep the older Planned*/Estimated*/Actual* names
-      // as fallbacks for other Mobilithek datasets.
       const planned = dateValue(call, ["AimedArrivalTime", "AimedDepartureTime", "PlannedArrivalTime", "PlannedDepartureTime"]);
       const actual = dateValue(call, ["ExpectedArrivalTime", "ExpectedDepartureTime", "EstimatedArrivalTime", "EstimatedDepartureTime", "ActualArrivalTime", "ActualDepartureTime"]);
       return { name, planned, actual };
     }).filter((call) => call.name && (call.planned || call.actual));
     if (!calls.length) continue;
-
     const route = calls.map((call) => call.name);
-    const now = Date.now();
-    const relevant = calls.find((call) => {
-      const time = call.actual || call.planned;
-      return time && time.getTime() >= now - 5 * 60_000;
-    }) || calls.find((call) => call.actual) || calls[0];
+    // Important: never fall back to the first journey call. That can be the
+    // origin of a long-distance trip and creates false 60-90 minute ETAs.
+    const relevant = calls.find((call) => { const time = call.actual || call.planned; return time && time.getTime() >= now - 5 * 60_000; });
+    if (!relevant) continue;
     const actualTime = relevant.actual || relevant.planned;
     const scheduledTime = relevant.planned || relevant.actual;
     if (!actualTime || !scheduledTime) continue;
-
     const lineName = line || firstText(journey, ["PublishedServiceName", "VehicleJourneyName"]) || "unknown";
     const destination = firstText(journey, ["DestinationName", "DestinationText", "DestinationDisplay"]) || calls[calls.length - 1]?.name;
     const origin = firstText(journey, ["OriginName", "OriginText"]) || calls[0]?.name;
@@ -125,44 +69,13 @@ function fetchFeed(): Promise<string> {
   const url = new URL(baseUrl); url.searchParams.set("subscriptionID", subscriptionId);
   return new Promise((resolve, reject) => {
     const request = https.request(url, { method: "GET", pfx: Buffer.from(p12Base64, "base64"), passphrase, headers: { accept: "application/xml, text/xml, */*", "accept-encoding": "gzip", "user-agent": "Crossings/1.0 (meineschranke.com)", ...(cached?.lastModified ? { "if-modified-since": cached.lastModified } : {}) }, timeout: 15000 }, (response) => {
-      const chunks: Buffer[] = [];
-      response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-      response.on("end", () => {
-        if (response.statusCode === 304 && cached) { cached.expiresAt = Date.now() + CACHE_TTL_MS; return resolve(cached.body); }
-        const raw = Buffer.concat(chunks);
-        let body: string;
-        try { body = String(response.headers["content-encoding"] || "").includes("gzip") ? gunzipSync(raw).toString("utf8") : raw.toString("utf8"); }
-        catch (error) { return reject(error); }
-        if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) return reject(new Error(`Mobilithek HTTP ${response.statusCode}: ${body.slice(0, 500)}`));
-        cached = { expiresAt: Date.now() + CACHE_TTL_MS, body, lastModified: String(response.headers["last-modified"] || "") || undefined };
-        resolve(body);
-      });
+      const chunks: Buffer[] = []; response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+      response.on("end", () => { if (response.statusCode === 304 && cached) { cached.expiresAt = Date.now() + CACHE_TTL_MS; return resolve(cached.body); } const raw = Buffer.concat(chunks); let body: string; try { body = String(response.headers["content-encoding"] || "").includes("gzip") ? gunzipSync(raw).toString("utf8") : raw.toString("utf8"); } catch (error) { return reject(error); } if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) return reject(new Error(`Mobilithek HTTP ${response.statusCode}: ${body.slice(0, 500)}`)); cached = { expiresAt: Date.now() + CACHE_TTL_MS, body, lastModified: String(response.headers["last-modified"] || "") || undefined }; resolve(body); });
     });
-    request.on("timeout", () => request.destroy(new Error("Mobilithek request timed out")));
-    request.on("error", reject); request.end();
+    request.on("timeout", () => request.destroy(new Error("Mobilithek request timed out"))); request.on("error", reject); request.end();
   });
 }
 
-export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent[]> {
-  if (cached && cached.expiresAt > Date.now()) return parseBody(cached.body);
-  if (!inFlight) inFlight = fetchFeed().then(parseBody).finally(() => { inFlight = null; });
-  return inFlight;
-}
-
-export async function getMobilithekTrainDiagnostics() {
-  const body = await fetchFeed();
-  const root = parser.parse(body);
-  const journeys = findAll(root, "EstimatedVehicleJourney");
-  const calls = findAll(root, "EstimatedCall");
-  return { bodyLength: body.length, estimatedVehicleJourneys: journeys.length, estimatedCalls: calls.length, hasSiri: /siri/i.test(body), hasEstimatedVehicleJourney: /EstimatedVehicleJourney/i.test(body), preview: body.slice(0, 1500) };
-}
-
-export function filterMobilithekTrains(events: MobilithekTrainEvent[], categories: string[], observationStation: string, requiredRouteStops: string[]) {
-  return events.filter((train) => {
-    if (categories.length && !categories.some((category) => String(train.category).toUpperCase() === String(category).toUpperCase() || String(train.line).toUpperCase().includes(String(category).toUpperCase()))) return false;
-    if (observationStation && !routeContains(train.route, observationStation)) return false;
-    if (requiredRouteStops.length < 2) return true;
-    const matched = requiredRouteStops.filter((stop) => routeContains(train.route, stop));
-    return matched.length >= 2;
-  });
-}
+export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent[]> { if (cached && cached.expiresAt > Date.now()) return parseBody(cached.body); if (!inFlight) inFlight = fetchFeed().then(parseBody).finally(() => { inFlight = null; }); return inFlight; }
+export async function getMobilithekTrainDiagnostics() { const body = await fetchFeed(); const root = parser.parse(body); const journeys = findAll(root, "EstimatedVehicleJourney"); const calls = findAll(root, "EstimatedCall"); return { bodyLength: body.length, estimatedVehicleJourneys: journeys.length, estimatedCalls: calls.length, hasSiri: /siri/i.test(body), hasEstimatedVehicleJourney: /EstimatedVehicleJourney/i.test(body), preview: body.slice(0, 1500) }; }
+export function filterMobilithekTrains(events: MobilithekTrainEvent[], categories: string[], observationStation: string, requiredRouteStops: string[]) { return events.filter((train) => { if (categories.length && !categories.some((category) => String(train.category).toUpperCase() === String(category).toUpperCase() || String(train.line).toUpperCase().includes(String(category).toUpperCase()))) return false; if (observationStation && !routeContains(train.route, observationStation)) return false; if (requiredRouteStops.length < 2) return true; const matched = requiredRouteStops.filter((stop) => routeContains(train.route, stop)); return matched.length >= 2; }); }
