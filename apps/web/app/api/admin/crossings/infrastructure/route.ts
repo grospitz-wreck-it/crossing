@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
 
 type Point = { lat: number; lon: number };
+type LineRelation = {
+  id: number;
+  routeType: string;
+  ref: string;
+  name: string;
+  from: string;
+  to: string;
+  network?: string;
+  operator?: string;
+};
 type Candidate = {
   kind: "route" | "track";
   routeType: "tracks" | "railway" | "track";
@@ -11,6 +21,7 @@ type Candidate = {
   distanceMeters: number;
   wayId: number;
   relationId: number | null;
+  lineRelations: LineRelation[];
   source: string;
   waysCount: number;
   segments: Point[][];
@@ -47,6 +58,7 @@ function makeCandidate(lat: number, lon: number, geometry: Point[], tags: Record
     distanceMeters: Math.round(distanceMeters),
     wayId,
     relationId: null,
+    lineRelations: [],
     source,
     waysCount: 1,
     segments: [geometry],
@@ -59,6 +71,16 @@ function normalizeRouteRef(value: string) {
 
 function normalizeRouteName(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9äöüß]+/gi, " ").replace(/\s+/g, " ").trim();
+}
+
+function mergeLineRelations(target: LineRelation[], incoming: LineRelation[]) {
+  const seen = new Set(target.map((relation) => relation.id));
+  for (const relation of incoming) {
+    if (seen.has(relation.id)) continue;
+    target.push(relation);
+    seen.add(relation.id);
+  }
+  return target;
 }
 
 function groupCandidates(candidates: Candidate[]) {
@@ -75,7 +97,7 @@ function groupCandidates(candidates: Candidate[]) {
 
     const existing = grouped.get(key);
     if (!existing) {
-      grouped.set(key, { ...candidate, segments: [...candidate.segments] });
+      grouped.set(key, { ...candidate, segments: [...candidate.segments], lineRelations: [...candidate.lineRelations] });
       continue;
     }
 
@@ -89,14 +111,14 @@ function groupCandidates(candidates: Candidate[]) {
     existing.waysCount += candidate.waysCount;
     existing.distanceMeters = Math.min(existing.distanceMeters, candidate.distanceMeters);
     existing.segments.push(...candidate.segments);
+    mergeLineRelations(existing.lineRelations, candidate.lineRelations);
   }
 
   const groupedCandidates = [...grouped.values()];
 
-  // If OSM gives us proper route references, the individual unreferenced
-  // track ways are only implementation details and should not be presented
-  // as separate choices in the admin wizard. Keep them as a fallback only
-  // when there is no referenced route at all.
+  // Physical railway refs remain the primary infrastructure choices. The
+  // passenger train relations are attached as metadata so they can be used
+  // for automatic line matching without replacing the selected OSM track.
   const referencedCandidates = groupedCandidates.filter((candidate) => normalizeRouteRef(candidate.ref).length > 0);
   const visibleCandidates = referencedCandidates.length > 0 ? referencedCandidates : groupedCandidates;
 
@@ -106,7 +128,10 @@ function groupCandidates(candidates: Candidate[]) {
 }
 
 async function tryOverpass(lat: number, lon: number) {
-  const query = `[out:json][timeout:20];way(around:200,${lat},${lon})[railway=rail];out geom tags;rel(bw)[type=route][route~"^(tracks|railway)$"];out tags;`;
+  // Railway infrastructure and passenger-line relations are different OSM
+  // concepts. route=train is the important one for RB/RE/IC/ICE line mapping;
+  // route=railway/tracks remains useful for physical infrastructure.
+  const query = `[out:json][timeout:20];way(around:200,${lat},${lon})[railway=rail];out geom tags;rel(bw)[type=route][route~"^(train|light_rail|railway|tracks)$"];out tags;`;
   const endpoints = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
   let lastError = "";
 
@@ -123,17 +148,29 @@ async function tryOverpass(lat: number, lon: number) {
       const elements = Array.isArray(data?.elements) ? data.elements : [];
       const ways = elements.filter((element: any) => element?.type === "way" && Array.isArray(element?.geometry));
       const relations = elements.filter((element: any) => element?.type === "relation");
-      const relationByWay = new Map<number, any[]>();
+      const relationByWay = new Map<number, LineRelation[]>();
+
       for (const relation of relations) {
         const routeType = String(relation.tags?.route || "");
-        if (relation.tags?.type !== "route" || !["tracks", "railway"].includes(routeType)) continue;
+        if (relation.tags?.type !== "route" || !["train", "light_rail", "railway", "tracks"].includes(routeType)) continue;
+        const lineRelation: LineRelation = {
+          id: Number(relation.id),
+          routeType,
+          ref: String(relation.tags?.ref || ""),
+          name: String(relation.tags?.name || ""),
+          from: String(relation.tags?.from || ""),
+          to: String(relation.tags?.to || ""),
+          network: relation.tags?.network ? String(relation.tags.network) : undefined,
+          operator: relation.tags?.operator ? String(relation.tags.operator) : undefined,
+        };
         for (const member of relation.members || []) {
           if (member.type !== "way") continue;
           const list = relationByWay.get(Number(member.ref)) || [];
-          list.push({ routeType, ref: String(relation.tags?.ref || ""), name: String(relation.tags?.name || ""), from: String(relation.tags?.from || ""), to: String(relation.tags?.to || ""), relationId: Number(relation.id) });
+          list.push(lineRelation);
           relationByWay.set(Number(member.ref), list);
         }
       }
+
       const candidates: Candidate[] = [];
       for (const way of ways) {
         const geometry: Point[] = way.geometry.map((point: any) => ({ lat: Number(point.lat), lon: Number(point.lon) })).filter((point: Point) => Number.isFinite(point.lat) && Number.isFinite(point.lon));
@@ -141,11 +178,20 @@ async function tryOverpass(lat: number, lon: number) {
         const local = makeCandidate(lat, lon, geometry, way.tags || {}, Number(way.id), "openstreetmap");
         if (!local) continue;
         const relationsForWay = relationByWay.get(Number(way.id)) || [];
+        local.lineRelations = relationsForWay;
         if (!relationsForWay.length) {
           candidates.push(local);
           continue;
         }
-        for (const relation of relationsForWay) candidates.push({ ...local, kind: "route", routeType: relation.routeType, ref: relation.ref || local.ref, name: relation.name || local.name, from: relation.from, to: relation.to, relationId: relation.relationId });
+        for (const relation of relationsForWay) {
+          candidates.push({
+            ...local,
+            kind: relation.routeType === "train" || relation.routeType === "light_rail" ? "route" : "route",
+            routeType: relation.routeType === "railway" || relation.routeType === "tracks" ? relation.routeType : "track",
+            relationId: relation.id,
+            lineRelations: [relation],
+          });
+        }
       }
       return { status: "OK" as const, candidates: groupCandidates(candidates), endpoint, wayCount: ways.length, relationCount: relations.length };
     } catch (error) {
