@@ -65,10 +65,6 @@ function groupCandidates(candidates: Candidate[]) {
   const grouped = new Map<string, Candidate>();
 
   for (const candidate of candidates) {
-    // OSM can model one physical railway route with several ways and
-    // several route relations. A relation id is therefore not a stable
-    // identity for the route shown to the admin. Prefer the railway ref,
-    // then the normalized name, and only fall back to the individual way.
     const ref = normalizeRouteRef(candidate.ref);
     const name = normalizeRouteName(candidate.name);
     const key = ref
@@ -95,7 +91,16 @@ function groupCandidates(candidates: Candidate[]) {
     existing.segments.push(...candidate.segments);
   }
 
-  return [...grouped.values()]
+  const groupedCandidates = [...grouped.values()];
+
+  // If OSM gives us proper route references, the individual unreferenced
+  // track ways are only implementation details and should not be presented
+  // as separate choices in the admin wizard. Keep them as a fallback only
+  // when there is no referenced route at all.
+  const referencedCandidates = groupedCandidates.filter((candidate) => normalizeRouteRef(candidate.ref).length > 0);
+  const visibleCandidates = referencedCandidates.length > 0 ? referencedCandidates : groupedCandidates;
+
+  return visibleCandidates
     .sort((a, b) => a.distanceMeters - b.distanceMeters)
     .slice(0, 8);
 }
