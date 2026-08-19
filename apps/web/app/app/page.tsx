@@ -174,36 +174,79 @@ const [data, setData] =
       null
     );
 
+const loadInFlightRef =
+  useRef<Promise<void> | null>(null);
+
+const loadRequestIdRef =
+  useRef(0);
+
   async function load() {
-    if (!activeId) {
-      return;
-    }
+  if (!activeId) {
+    return;
+  }
 
-    try {
-      const res = await fetch(
-        `/api/crossings/${activeId}/status`
-      );
+  // Nie mehrere Status-Requests gleichzeitig laufen lassen.
+  if (loadInFlightRef.current) {
+    return loadInFlightRef.current;
+  }
 
-      if (!res.ok) {
-        throw new Error(
-          `Status API returned ${res.status}`
-        );
-      }
+  const requestId =
+    ++loadRequestIdRef.current;
 
-      const json =
-        await res.json();
-
-      setData(json);
-
+  const request =
+    (async () => {
       try {
-        const adRes =
-          await fetch(
-            `/api/ads/${activeId}`
-          );
+        const res = await fetch(
+          `/api/crossings/${activeId}/status`,
+          {
+            cache: "no-store",
+          }
+        );
 
-        if (adRes.ok) {
+        if (!res.ok) {
+          throw new Error(
+            `Status API returned ${res.status}`
+          );
+        }
+
+        const json =
+          await res.json();
+
+        // Eine inzwischen überholte Antwort darf
+        // niemals den aktuelleren Zustand überschreiben.
+        if (
+          requestId !==
+          loadRequestIdRef.current
+        ) {
+          return;
+        }
+
+        setData(json);
+
+        // Werbung unabhängig vom Status laden.
+        try {
+          const adRes =
+            await fetch(
+              `/api/ads/${activeId}`,
+              {
+                cache: "no-store",
+              }
+            );
+
+          if (!adRes.ok) {
+            setAds([]);
+            return;
+          }
+
           const list =
             await adRes.json();
+
+          if (
+            requestId !==
+            loadRequestIdRef.current
+          ) {
+            return;
+          }
 
           setAds(
             Array.isArray(list)
@@ -212,35 +255,48 @@ const [data, setData] =
           );
 
           setCurrentAdIndex(0);
-        } else {
+        } catch (error) {
+          console.error(
+            "Failed to load ad:",
+            error
+          );
+
           setAds([]);
         }
       } catch (error) {
         console.error(
-          "Failed to load ad:",
+          "Failed to load status:",
           error
         );
 
+        if (
+          requestId !==
+          loadRequestIdRef.current
+        ) {
+          return;
+        }
+
+        setData({
+          error: true,
+          state: "UNKNOWN",
+          phase: null,
+          closures: [],
+          trains: [],
+          trainCount: 0,
+        });
+
         setAds([]);
+      } finally {
+        loadInFlightRef.current =
+          null;
       }
-    } catch (error) {
-      console.error(
-        "Failed to load status:",
-        error
-      );
+    })();
 
-      setData({
-        error: true,
-        state: "UNKNOWN",
-        phase: null,
-        closures: [],
-        trains: [],
-        trainCount: 0,
-      });
+  loadInFlightRef.current =
+    request;
 
-      setAds([]);
-    }
-  }
+  return request;
+}
 
 async function saveUnexpectedTrain() {
   if (!data?.predictionId) {
@@ -542,7 +598,10 @@ useEffect(() => {
       refresh();
     }
   }
-
+  document.addEventListener(
+    "visibilitychange",
+    handleVisibility
+  );
   window.addEventListener(
     "focus",
     refresh
@@ -620,53 +679,6 @@ useEffect(() => {
     }
   };
 }, [data]);
-useEffect(() => {
-  function refresh() {
-    load();
-  }
-
-  function handleVisibility() {
-    if (
-      document.visibilityState ===
-      "visible"
-    ) {
-      refresh();
-    }
-  }
-
-  document.addEventListener(
-    "visibilitychange",
-    handleVisibility
-  );
-
-  window.addEventListener(
-    "focus",
-    refresh
-  );
-
-  window.addEventListener(
-    "pageshow",
-    refresh
-  );
-
-  return () => {
-    document.removeEventListener(
-      "visibilitychange",
-      handleVisibility
-    );
-
-    window.removeEventListener(
-      "focus",
-      refresh
-    );
-
-    window.removeEventListener(
-      "pageshow",
-      refresh
-    );
-  };
-}, [activeId]);
-
 
 if (!data) {
   return <LoadingScreen />;
