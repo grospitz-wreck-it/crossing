@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMobilithekTrainDiagnostics } from "../../../../../packages/db-api-client/src/mobilithekTimetable";
+import { getMobilithekTrainDiagnostics } from "../../../../../../packages/db-api-client/src/mobilithekTimetable";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
