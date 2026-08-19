@@ -16,9 +16,14 @@ const CACHE_TTL_MS = 60_000;
 const timetableCache = new Map<string, { expiresAt: number; value: OfficialTrainEvent[] }>();
 const inFlight = new Map<string, Promise<OfficialTrainEvent[]>>();
 
+// Die Status-/Forecast-Oberfläche arbeitet mit einem 30-Minuten-Fenster.
+// Ein Stundenfenster ist dafür ausreichend und verhindert, dass ein
+// versehentlicher Default-Aufruf sofort vier /plan-Requests erzeugt.
+const DEFAULT_TIMETABLE_HOURS = 1;
+
 export async function getStationTimetable(
   eva: string,
-  hoursAhead = 4
+  hoursAhead = DEFAULT_TIMETABLE_HOURS
 ): Promise<OfficialTrainEvent[]> {
   const key = `${String(eva).trim()}|${hoursAhead}`;
   const now = Date.now();
