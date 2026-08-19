@@ -1,3 +1,11 @@
+.gestureStage {
+  width: 100%;
+  min-height: 100%;
+  touch-action: pan-y;
+  will-change: transform;
+  overflow-x: clip;
+}
+
 .nav {
   display: flex;
   justify-content: center;
