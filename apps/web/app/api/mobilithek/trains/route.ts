@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMobilithekTrainRegistry } from "../../../../../../packages/db-api-client/src/mobilithekTimetable";
+import { getMobilithekTrainRegistry } from "../../../../../packages/db-api-client/src/mobilithekTimetable";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -35,12 +35,6 @@ export async function GET() {
     });
   } catch (error) {
     console.error("[MOBILITHEK TEST]", error);
-    return NextResponse.json(
-      {
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      },
-      { status: 502 }
-    );
+    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 502 });
   }
 }
