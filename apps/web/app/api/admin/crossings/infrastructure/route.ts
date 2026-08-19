@@ -53,20 +53,51 @@ function makeCandidate(lat: number, lon: number, geometry: Point[], tags: Record
   };
 }
 
+function normalizeRouteRef(value: string) {
+  return value.trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+function normalizeRouteName(value: string) {
+  return value.trim().toLowerCase().replace(/[^a-z0-9äöüß]+/gi, " ").replace(/\s+/g, " ").trim();
+}
+
 function groupCandidates(candidates: Candidate[]) {
   const grouped = new Map<string, Candidate>();
+
   for (const candidate of candidates) {
-    const key = candidate.relationId ? `${candidate.routeType}:${candidate.relationId}` : `${candidate.routeType}:${candidate.ref || "way"}:${candidate.wayId}`;
+    // OSM can model one physical railway route with several ways and
+    // several route relations. A relation id is therefore not a stable
+    // identity for the route shown to the admin. Prefer the railway ref,
+    // then the normalized name, and only fall back to the individual way.
+    const ref = normalizeRouteRef(candidate.ref);
+    const name = normalizeRouteName(candidate.name);
+    const key = ref
+      ? `ref:${ref}`
+      : name
+        ? `name:${candidate.routeType}:${name}`
+        : `way:${candidate.routeType}:${candidate.wayId}`;
+
     const existing = grouped.get(key);
     if (!existing) {
       grouped.set(key, { ...candidate, segments: [...candidate.segments] });
       continue;
     }
+
+    existing.kind = existing.kind === "route" || candidate.kind === "route" ? "route" : "track";
+    existing.routeType = existing.routeType === "track" && candidate.routeType !== "track" ? candidate.routeType : existing.routeType;
+    existing.ref = existing.ref || candidate.ref;
+    existing.name = existing.name || candidate.name;
+    existing.from = existing.from || candidate.from;
+    existing.to = existing.to || candidate.to;
+    existing.relationId = existing.relationId ?? candidate.relationId;
     existing.waysCount += candidate.waysCount;
     existing.distanceMeters = Math.min(existing.distanceMeters, candidate.distanceMeters);
     existing.segments.push(...candidate.segments);
   }
-  return [...grouped.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 8);
+
+  return [...grouped.values()]
+    .sort((a, b) => a.distanceMeters - b.distanceMeters)
+    .slice(0, 8);
 }
 
 async function tryOverpass(lat: number, lon: number) {
