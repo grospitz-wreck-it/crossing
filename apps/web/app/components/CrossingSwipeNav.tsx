@@ -16,7 +16,9 @@ export default function CrossingSwipeNav({ children }: Props) {
   const startX = useRef<number | null>(null);
   const startY = useRef<number | null>(null);
   const pointerId = useRef<number | null>(null);
-  const animationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // window.setTimeout() returns a number in the browser. Using number here
+  // avoids the NodeJS.Timeout type leaking into the client component.
+  const animationTimer = useRef<number | null>(null);
 
   const [dragX, setDragX] = useState(0);
   const [animating, setAnimating] = useState(false);
@@ -136,8 +138,8 @@ export default function CrossingSwipeNav({ children }: Props) {
 
   useEffect(() => {
     return () => {
-      if (animationTimer.current) {
-        clearTimeout(animationTimer.current);
+      if (animationTimer.current !== null) {
+        window.clearTimeout(animationTimer.current);
       }
     };
   }, []);
