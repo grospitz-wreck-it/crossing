@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { fetchMobilithekSubscription, getMobilithekConfigs } from "../../../lib/mobilithek";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+export async function GET() {
   const configs = getMobilithekConfigs();
   if (!configs.length) {
     return NextResponse.json({
