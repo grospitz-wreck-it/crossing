@@ -15,9 +15,7 @@ export function getMobilithekConfigs(): MobilithekConfig[] {
     process.env.MOBILITHEK_SUBSCRIPTION_ID_3,
     process.env.MOBILITHEK_SUBSCRIPTION_ID_4,
     process.env.MOBILITHEK_SUBSCRIPTION_ID_5,
-  ]
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value));
+  ].map((value) => value?.trim()).filter((value): value is string => Boolean(value));
 
   return [...new Set(ids)].map((subscriptionId) => ({
     subscriptionId,
@@ -33,20 +31,12 @@ export function getMobilithekConfig(): MobilithekConfig | null {
 function getP12Options() {
   const base64 = process.env.MOBILITHEK_CLIENT_P12_BASE64?.trim();
   if (!base64) return null;
-
   const pfx = Buffer.from(base64, "base64");
   if (!pfx.length) throw new Error("MOBILITHEK_CLIENT_P12_BASE64 is empty or invalid");
-
-  return {
-    pfx,
-    passphrase: process.env.MOBILITHEK_P12_PASSWORD || undefined,
-  };
+  return { pfx, passphrase: process.env.MOBILITHEK_P12_PASSWORD || undefined };
 }
 
-export async function fetchMobilithekSubscription(
-  config: MobilithekConfig,
-  options: { signal?: AbortSignal } = {},
-) {
+export async function fetchMobilithekSubscription(config: MobilithekConfig, options: { signal?: AbortSignal } = {}) {
   const url = new URL(config.baseUrl);
   url.searchParams.set("subscriptionID", config.subscriptionId);
 
@@ -54,80 +44,57 @@ export async function fetchMobilithekSubscription(
     accept: "application/json, application/xml, text/plain, */*",
     "user-agent": "Crossings/1.0 (meineschranke.com)",
   };
-
-  if (config.token) {
-    headers.authorization = `Bearer ${config.token}`;
-  }
+  if (config.token) headers.authorization = `Bearer ${config.token}`;
 
   const p12 = getP12Options();
-
-  // Node's fetch/undici does not expose client certificates in the same way as
-  // https.request. Use the native HTTPS agent when a PKCS#12 client cert is configured.
   if (p12) {
-    return await new Promise<{
-      status: number;
-      contentType: string;
-      body: string;
-    }>((resolve, reject) => {
-      const request = https.request(
-        url,
-        {
-          method: "GET",
-          headers,
-          pfx: p12.pfx,
-          passphrase: p12.passphrase,
-          timeout: 15000,
-        },
-        (response) => {
-          const chunks: Buffer[] = [];
-          response.on("data", (chunk: Buffer) => chunks.push(chunk));
-          response.on("end", () => {
-            const body = Buffer.concat(chunks).toString("utf8");
-            const status = response.statusCode || 0;
-            const contentType = response.headers["content-type"] || "";
+    return await new Promise<{ status: number; contentType: string; body: string; headers: Record<string, string> }>((resolve, reject) => {
+      const request = https.request(url, {
+        method: "GET",
+        headers,
+        pfx: p12.pfx,
+        passphrase: p12.passphrase,
+        timeout: 15000,
+      }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          const body = Buffer.concat(chunks).toString("utf8");
+          const status = response.statusCode || 0;
+          const contentType = String(response.headers["content-type"] || "");
+          const safeHeaders: Record<string, string> = {};
+          for (const [key, value] of Object.entries(response.headers)) {
+            if (typeof value === "string") safeHeaders[key] = value;
+            else if (Array.isArray(value)) safeHeaders[key] = value.join(", ");
+          }
 
-            if (status < 200 || status >= 300) {
-              reject(new Error(`Mobilithek HTTP ${status}: ${body.slice(0, 500)}`));
-              return;
-            }
-
-            resolve({ status, contentType, body });
-          });
-        },
-      );
+          if (status < 200 || status >= 300) {
+            const detail = body.trim() || "<empty response body>";
+            reject(new Error(`Mobilithek HTTP ${status}: ${detail}`));
+            return;
+          }
+          resolve({ status, contentType, body, headers: safeHeaders });
+        });
+      });
 
       request.on("timeout", () => request.destroy(new Error("Mobilithek request timed out")));
       request.on("error", reject);
-
       if (options.signal) {
         const abort = () => request.destroy(new Error("Mobilithek request aborted"));
         if (options.signal.aborted) abort();
         else options.signal.addEventListener("abort", abort, { once: true });
       }
-
       request.end();
     });
   }
 
-  const response = await fetch(url, {
-    method: "GET",
-    headers,
-    cache: "no-store",
-    signal: options.signal,
-  });
-
+  const response = await fetch(url, { method: "GET", headers, cache: "no-store", signal: options.signal });
   const contentType = response.headers.get("content-type") || "";
   const body = await response.text();
-
-  if (!response.ok) {
-    throw new Error(`Mobilithek HTTP ${response.status}: ${body.slice(0, 500)}`);
-  }
-
-  return {
-    status: response.status,
-    contentType,
-    body,
-  };
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((value, key) => { responseHeaders[key] = value; });
+  if (!response.ok) throw new Error(`Mobilithek HTTP ${response.status}: ${body.trim() || "<empty response body>"}`);
+  return { status: response.status, contentType, body, headers: responseHeaders };
 }
 
 export function getMobilithekEnvTemplate() {
