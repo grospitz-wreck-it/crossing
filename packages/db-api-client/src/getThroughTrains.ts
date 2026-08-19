@@ -39,38 +39,21 @@ function routeContainsStation(route: string[], requiredStop: string) {
   });
 }
 
-/**
- * Match a train to the OSM-derived corridor without requiring the train to
- * stop at the observation station.
- *
- * The observation station is only the place where we obtain the timetable.
- * ICE/IC trains can pass the crossing corridor without appearing as a stop
- * there. Therefore a valid match is either:
- *   - observation station + at least one additional corridor anchor, or
- *   - at least two corridor anchors, even when the observation station is not
- *     part of the train's stop list.
- *
- * This keeps the corridor filter strict enough to prevent unrelated trains
- * from a shared observation station from leaking into a crossing forecast.
- */
 function matchesOsmCorridor(trainRoute: string[], observationStation: string, requiredRouteStops: string[]) {
   const observationMatches = routeContainsStation(trainRoute, observationStation);
   const observationKey = normalizeStationName(observationStation);
   const anchors = requiredRouteStops.filter((stop) => normalizeStationName(stop) !== observationKey);
   const matchedAnchors = anchors.filter((anchor) => routeContainsStation(trainRoute, anchor));
 
-  // Legacy/static crossings without corridor anchors keep the observation
-  // station as the matching signal.
   if (!anchors.length) return observationMatches;
-
-  // Preferred signal: observed station plus another corridor anchor.
   if (observationMatches && matchedAnchors.length >= 1) return true;
-
-  // Through trains such as ICE may skip the observed station. Two independent
-  // corridor anchors are sufficient to establish that the train is on the
-  // configured rail corridor.
   return matchedAnchors.length >= 2;
 }
+
+// The crossing status view only forecasts the near term. Keep the same
+// two-hour window as the normal observation load so a through-rule reuses the
+// exact same shared timetable cache instead of creating another 4-hour batch.
+const THROUGH_TIMETABLE_HOURS = 2;
 
 export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain[]> {
   if (!crossing.throughRules?.length) return [];
@@ -80,7 +63,7 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
   for (const rule of crossing.throughRules) {
     let events;
     try {
-      events = await getStationTimetable(rule.observationEva);
+      events = await getStationTimetable(rule.observationEva, THROUGH_TIMETABLE_HOURS);
     } catch (error) {
       console.error(`getThroughTrains: Timetable für ${rule.observationStation} (${rule.observationEva}) fehlgeschlagen`, error);
       continue;
@@ -89,12 +72,9 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
     const matching = events.filter((train) => {
       if (train.cancelled) return false;
       if (!rule.categories.includes(train.category)) return false;
-
       if (!matchesOsmCorridor(train.route || [], rule.observationStation, crossing.requiredRouteStops || [])) return false;
-
       if (rule.direction === "westbound" && train.destination !== "Amsterdam Centraal") return false;
       if (rule.direction === "eastbound" && train.destination !== "Berlin Südkreuz") return false;
-
       return true;
     });
 
