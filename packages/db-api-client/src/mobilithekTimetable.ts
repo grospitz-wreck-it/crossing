@@ -95,7 +95,7 @@ function numberFrom(value?: string) {
 
 function inferCategory(line: string, journey: any) {
   const raw = `${line} ${firstText(journey, ["ProductCategoryRef", "VehicleMode", "VehicleModeRef", "TrainType"]) || ""}`.toUpperCase();
-  for (const category of ["ICE", "EC", "IC", "IRE", "RE", "RB", "S", "TRAM", "STR"]) {
+  for (const category of ["ICE", "EC", "IC", "IRE", "RE", "RB", "TRAM", "STR", "S"]) {
     if (raw.includes(category)) return category;
   }
   return line.split(/\s+/)[0] || "";
