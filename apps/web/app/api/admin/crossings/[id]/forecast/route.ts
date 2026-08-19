@@ -5,9 +5,6 @@ import { getThroughTrains } from "../../../../../../../../packages/db-api-client
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
 const MAX_DIRECT_OBSERVATION_STATIONS = 6;
 const MAX_RULE_STATIONS = 8;
-// Admin forecast is also a near-term view. Keep it aligned with the public
-// status endpoint so opening an admin detail page does not silently fan out
-// to four hours of /plan calls per EVA.
 const FORECAST_TIMETABLE_HOURS = 1;
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -41,7 +38,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         if (train.cancelled || train.actualTime.getTime() <= now - 60_000) continue;
         const crossingTime = train.actualTime;
         const key = `${train.category}-${train.journeyNumber}`;
-        const candidate = { id: `${key}-${eva}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, delayMinutes: train.delayMinutes, observationStation: stationNameByEva.get(eva) || eva, observationEva: eva, crossingTime: crossingTime.toISOString(), closeAt: new Date(crossingTime.getTime() - Number(crossing.close_offset_seconds || 80) * 1000).toISOString(), openAt: new Date(crossingTime.getTime() + Number(crossing.open_offset_seconds || 20) * 1000).toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - now) / 1000), direction: "unknown", route: train.route, source: "observation" };
+        const candidate = { id: `${key}-${eva}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, delayMinutes: train.delayMinutes, observationStation: stationNameByEva.get(eva) || eva, observationEva: eva, crossingTime: crossingTime.toISOString(), closeAt: new Date(crossingTime.getTime() - Number(crossing.close_offset_seconds || 80) * 1000).toISOString(), openAt: new Date(crossingTime.getTime() + Number(crossing.open_offset_seconds || 20) * 1000).toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - now) / 1000), direction: "unknown", route: train.route, source: "observation", detection: "station-observation" };
         const existing = trainsByKey.get(key); if (!existing || candidate.etaSeconds < existing.etaSeconds) trainsByKey.set(key, candidate);
       }
     } catch (error) { stationResults.push({ eva, stationName: stationNameByEva.get(eva) || eva, role: "observation", count: 0, ok: false, error: error instanceof Error ? error.message : String(error) }); }
@@ -67,7 +64,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         const crossingTime = new Date(train.crossingTime), etaSeconds = Math.floor((crossingTime.getTime() - now) / 1000);
         if (etaSeconds <= 0) continue;
         const key = `${train.category}-${train.journeyNumber}`;
-        const candidate = { id: `${key}-through`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, delayMinutes: train.delayMinutes, observationStation: train.observationStation, observationEva: train.observationEva, crossingTime: crossingTime.toISOString(), closeAt: new Date(crossingTime.getTime() - Number(crossing.close_offset_seconds || 80) * 1000).toISOString(), openAt: new Date(crossingTime.getTime() + Number(crossing.open_offset_seconds || 20) * 1000).toISOString(), etaSeconds, direction: train.direction, route: train.route, source: "through-rule" };
+        const candidate = { id: `${key}-through`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, delayMinutes: train.delayMinutes, observationStation: train.observationStation, observationEva: train.observationEva, crossingTime: crossingTime.toISOString(), closeAt: new Date(crossingTime.getTime() - Number(crossing.close_offset_seconds || 80) * 1000).toISOString(), openAt: new Date(crossingTime.getTime() + Number(crossing.open_offset_seconds || 20) * 1000).toISOString(), etaSeconds, direction: train.direction, route: train.route, source: "through-rule", detection: train.detection, isThrough: true, throughObservation: train.observationStation };
         const existing = trainsByKey.get(key); if (!existing || candidate.etaSeconds < existing.etaSeconds) trainsByKey.set(key, candidate);
       }
     } catch (error) { stationResults.push({ role: "rule", ok: false, count: 0, error: error instanceof Error ? error.message : String(error) }); }
