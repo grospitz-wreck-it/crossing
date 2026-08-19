@@ -89,6 +89,9 @@ function groupCandidates(candidates: Candidate[]) {
   for (const candidate of candidates) {
     const ref = normalizeRouteRef(candidate.ref);
     const name = normalizeRouteName(candidate.name);
+    // The physical OSM way/railway ref is the identity of the infrastructure.
+    // Passenger train relations are metadata attached to that physical track;
+    // they must never replace the physical ref (e.g. 2982/2992).
     const key = ref
       ? `ref:${ref}`
       : name
@@ -115,10 +118,6 @@ function groupCandidates(candidates: Candidate[]) {
   }
 
   const groupedCandidates = [...grouped.values()];
-
-  // Physical railway refs remain the primary infrastructure choices. The
-  // passenger train relations are attached as metadata so they can be used
-  // for automatic line matching without replacing the selected OSM track.
   const referencedCandidates = groupedCandidates.filter((candidate) => normalizeRouteRef(candidate.ref).length > 0);
   const visibleCandidates = referencedCandidates.length > 0 ? referencedCandidates : groupedCandidates;
 
@@ -183,15 +182,14 @@ async function tryOverpass(lat: number, lon: number) {
           candidates.push(local);
           continue;
         }
-        for (const relation of relationsForWay) {
-          candidates.push({
-            ...local,
-            kind: relation.routeType === "train" || relation.routeType === "light_rail" ? "route" : "route",
-            routeType: relation.routeType === "railway" || relation.routeType === "tracks" ? relation.routeType : "track",
-            relationId: relation.id,
-            lineRelations: [relation],
-          });
-        }
+        // Keep the physical OSM candidate intact and attach every passenger
+        // line relation to it. This is what lets us distinguish two parallel
+        // tracks such as 2982 and 2992 even when different lines use them.
+        candidates.push({
+          ...local,
+          lineRelations: relationsForWay,
+          relationId: relationsForWay[0]?.id ?? null,
+        });
       }
       return { status: "OK" as const, candidates: groupCandidates(candidates), endpoint, wayCount: ways.length, relationCount: relations.length };
     } catch (error) {
