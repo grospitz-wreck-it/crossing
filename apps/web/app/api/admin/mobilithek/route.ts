@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
-import { fetchMobilithekSubscription, getMobilithekConfig } from "../../../lib/mobilithek";
+import { fetchMobilithekSubscription, getMobilithekConfigs } from "../../../lib/mobilithek";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const config = getMobilithekConfig();
-  if (!config) {
+  const configs = getMobilithekConfigs();
+  if (!configs.length) {
     return NextResponse.json({
       configured: false,
-      error: "MOBILITHEK_SUBSCRIPTION_ID is missing",
+      error: "No MOBILITHEK_SUBSCRIPTION_ID variables configured",
     }, { status: 503 });
   }
 
@@ -16,23 +16,27 @@ export async function GET(request: Request) {
   const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
-    const result = await fetchMobilithekSubscription({ signal: controller.signal });
-    const bodyPreview = result.body.slice(0, 2000);
+    const results = await Promise.all(configs.map(async (config) => {
+      try {
+        const result = await fetchMobilithekSubscription(config, { signal: controller.signal });
+        return {
+          subscriptionId: config.subscriptionId,
+          ok: true,
+          status: result.status,
+          contentType: result.contentType,
+          bodyLength: result.body.length,
+          bodyPreview: result.body.slice(0, 2000),
+        };
+      } catch (error) {
+        return {
+          subscriptionId: config.subscriptionId,
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }));
 
-    return NextResponse.json({
-      configured: true,
-      status: result.status,
-      contentType: result.contentType,
-      subscriptionId: config.subscriptionId,
-      bodyLength: result.body.length,
-      bodyPreview,
-    });
-  } catch (error) {
-    return NextResponse.json({
-      configured: true,
-      subscriptionId: config.subscriptionId,
-      error: error instanceof Error ? error.message : String(error),
-    }, { status: 502 });
+    return NextResponse.json({ configured: true, count: configs.length, results });
   } finally {
     clearTimeout(timeout);
   }
