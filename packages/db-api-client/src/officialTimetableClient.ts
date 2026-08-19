@@ -1,24 +1,7 @@
 // Offizieller Client für die DB API Marketplace "Timetables v1"-API.
-//
-// WICHTIG: Diese API liefert zwei getrennte Ressourcen, die manuell
-// zusammengeführt werden müssen:
-//
-//   /plan/{eva}/{date}/{hour}  -> reiner Sollfahrplan, OHNE Verspätungen
-//   /fchg/{eva}                -> alle aktuellen Änderungen (Verspätung,
-//                                  Gleiswechsel, Ausfall, geänderter Laufweg)
-//                                  für die Station, für die aktuelle Zeit
-//                                  bis mehrere Stunden im Voraus
-//
-// Nur wenn beide Antworten anhand des <s id="..."> zusammengeführt werden,
-// bekommt man tatsächliche (verspätete) Zeiten. Das war in der Vorversion
-// dieses Projekts (route_old.ts) nicht der Fall - dort wurde ausschließlich
-// /plan/ abgefragt, weshalb dort nie echte Verspätungen berücksichtigt wurden.
-//
-// Beide Endpunkte benötigen einen genehmigten Zugang im DB API Marketplace
-// (https://developers.deutschebahn.com) für das Produkt "Timetables".
-// Zugangsdaten werden als DB-Client-Id / DB-Api-Key Header mitgeschickt.
 
 import { acquireDbApiSlot } from "./apiRateLimiter";
+import { getTimetableCache, setTimetableCache } from "./timetableCache";
 
 const BASE_URL =
   "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1";
@@ -26,28 +9,16 @@ const BASE_URL =
 function dbHeaders() {
   const clientId = process.env.DB_CLIENT_ID;
   const apiKey = process.env.DB_API_KEY;
-
   if (!clientId || !apiKey) {
     throw new Error(
       "DB_CLIENT_ID / DB_API_KEY fehlen. Bitte in apps/web/.env.local setzen " +
         "(Zugangsdaten aus dem DB API Marketplace für das Produkt 'Timetables')."
     );
   }
-
-  return {
-    "DB-Client-Id": clientId,
-    "DB-Api-Key": apiKey,
-  };
+  return { "DB-Client-Id": clientId, "DB-Api-Key": apiKey };
 }
 
-// DB erwartet Datum/Stunde in der Form YYMMDD / HH, in der Zeitzone,
-// in der der jeweilige Bahnhof betrieben wird (praktisch: Europe/Berlin).
-// Wir bilden das bewusst über Intl mit expliziter Zeitzone ab, statt über
-// getUTCHours(), damit das auch während der Sommerzeit stimmt.
-function formatDateHour(date: Date): {
-  date: string;
-  hour: string;
-} {
+function formatDateHour(date: Date): { date: string; hour: string } {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/Berlin",
     year: "2-digit",
@@ -56,51 +27,54 @@ function formatDateHour(date: Date): {
     hour: "2-digit",
     hour12: false,
   }).formatToParts(date);
-
   const get = (type: string) =>
     parts.find((p) => p.type === type)?.value ?? "00";
-
   return {
     date: `${get("year")}${get("month")}${get("day")}`,
     hour: get("hour") === "24" ? "00" : get("hour"),
   };
 }
 
+function currentFchgSlot() {
+  return String(Math.floor(Date.now() / 30_000));
+}
+
 async function fetchXml(
   url: string,
   label: string,
-  meta: { eva: string; requestType: string }
+  meta: { eva: string; requestType: string },
+  cacheKind: "plan" | "fchg",
+  cacheSlot: string
 ): Promise<string> {
-  // The DB Timetables Free plan currently allows 60 requests/minute.
-  // The limiter is global in Turso, so concurrent Vercel instances share
-  // the same sliding 60-second window.
+  // Shared Turso cache comes BEFORE the DB API limiter: cache hits consume
+  // zero Timetables quota and are shared by all Vercel instances.
+  const cached = await getTimetableCache(cacheKind, meta.eva, cacheSlot);
+  if (cached !== null) return cached;
+
   await acquireDbApiSlot(meta);
 
   const res = await fetch(url, {
     headers: dbHeaders(),
     cache: "no-store",
   });
-
   const text = await res.text();
 
   if (!res.ok) {
     throw new Error(
-      `${label} fehlgeschlagen: ${res.status} ${res.statusText} - ${text.slice(
-        0,
-        200
-      )}`
+      `${label} fehlgeschlagen: ${res.status} ${res.statusText} - ${text.slice(0, 200)}`
     );
+  }
+
+  try {
+    await setTimetableCache(cacheKind, meta.eva, cacheSlot, text);
+  } catch (error) {
+    console.warn("[TIMETABLE CACHE WRITE FAILED]", error);
   }
 
   return text;
 }
 
-// Holt den Sollfahrplan für eine EVA-Nummer für die aktuelle Stunde und die
-// folgenden Stunden.
-export async function fetchPlanXml(
-  eva: string,
-  hoursAhead = 4
-): Promise<string[]> {
+export async function fetchPlanXml(eva: string, hoursAhead = 4): Promise<string[]> {
   const now = Date.now();
   const requests = Array.from(
     { length: hoursAhead },
@@ -110,22 +84,21 @@ export async function fetchPlanXml(
     return fetchXml(
       `${BASE_URL}/plan/${eva}/${d}/${h}`,
       `plan/${eva}/${d}/${h}`,
-      { eva, requestType: "plan" }
+      { eva, requestType: "plan" },
+      "plan",
+      `${d}-${h}`
     );
   });
   return Promise.all(requests);
 }
 
-// Holt alle aktuellen Änderungen (Verspätungen, Ausfälle, Gleiswechsel) für
-// eine EVA-Nummer. Deckt laut DB-Dokumentation den Zeitraum "jetzt bis
-// mehrere Stunden in die Zukunft" ab - ein separater Aufruf pro Stunde ist
-// hier (anders als bei /plan/) nicht nötig.
-export async function fetchChangesXml(
-  eva: string
-): Promise<string> {
+export async function fetchChangesXml(eva: string): Promise<string> {
+  const slot = currentFchgSlot();
   return fetchXml(
     `${BASE_URL}/fchg/${eva}`,
     `fchg/${eva}`,
-    { eva, requestType: "fchg" }
+    { eva, requestType: "fchg" },
+    "fchg",
+    slot
   );
 }
