@@ -184,9 +184,10 @@ async function loadMappings(): Promise<Mapping[]> {
 
 /**
  * Authoritative OSM decision based on railway topology, not global geometry.
- * Shared track before a switch is intentionally allowed. A train is assigned
- * to a crossing only when the graph path between consecutive timetable
- * stations actually traverses that crossing's OSM node.
+ * A crossing is only matched when the train path traverses the actual
+ * railway way(s) recorded for that crossing at the crossing node. This keeps
+ * nearby crossings on competing branches separate even after their tracks
+ * merge further down the network.
  */
 export async function filterTrainByCrossingOsm(
   crossingId: string,
@@ -214,9 +215,6 @@ export async function filterTrainByCrossingOsm(
       const target = nearestNode(graph, to, 5000);
       if (!start || !target) continue;
 
-      // Only solve graph paths for station segments whose straight corridor
-      // comes reasonably close to one of our known BÜs. This keeps the work
-      // bounded while retaining the exact node-level topology decision.
       const nearbyMappings = mappings.filter((mapping) => {
         const d = Math.min(
           distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, from),
@@ -229,20 +227,43 @@ export async function filterTrainByCrossingOsm(
       const path = shortestRailPath(graph, start.nodeId, target.nodeId);
       if (!path) continue;
 
-      const pathNodes = new Set(path.nodes);
       for (const mapping of nearbyMappings) {
-        const hitNode = [...mapping.crossingNodeIds].find((nodeId) => pathNodes.has(nodeId));
+        const allowedWays = new Set(mapping.railwayWayIds);
+        const hitNode = [...mapping.crossingNodeIds].find((nodeId) => {
+          const hitIndex = path.nodes.indexOf(nodeId);
+          if (hitIndex < 0) return false;
+
+          // The path must enter or leave the crossing through one of the
+          // railway ways explicitly mapped to this crossing. Looking only at
+          // the node is insufficient where two branches run next to each other
+          // and merge later in the network.
+          const adjacentEdges = [
+            ...(hitIndex > 0 ? graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [] : []),
+            ...(graph.adjacency.get(nodeId) ?? []),
+          ];
+          return adjacentEdges.some((edge) =>
+            edge.to === nodeId ? allowedWays.has(edge.wayId) : allowedWays.has(edge.wayId),
+          );
+        });
+
         if (!hitNode) continue;
+
         const hitIndex = path.nodes.indexOf(hitNode);
-        const pathWayId = hitIndex > 0
-          ? [...(graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [])].find((edge) => edge.to === hitNode)?.wayId
+        const incomingEdge = hitIndex > 0
+          ? [...(graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [])].find((edge) => edge.to === hitNode)
           : undefined;
+        const outgoingEdge = [...(graph.adjacency.get(hitNode) ?? [])].find((edge) =>
+          hitIndex >= 0 && path.nodes[hitIndex + 1] === edge.to,
+        );
+        const matchedWayId = [incomingEdge?.wayId, outgoingEdge?.wayId].find((wayId) =>
+          wayId != null && allowedWays.has(wayId),
+        );
         const distanceToCrossing = distanceMeters(
           { lat: mapping.crossingLat, lon: mapping.crossingLon },
           graph.nodePoints.get(hitNode) ?? { lat: mapping.crossingLat, lon: mapping.crossingLon },
         );
         candidateHits.set(mapping.crossingId, {
-          wayId: pathWayId || mapping.railwayWayIds[0],
+          wayId: matchedWayId || mapping.railwayWayIds[0],
           ref: undefined,
           distance: distanceToCrossing,
         });
@@ -259,9 +280,6 @@ export async function filterTrainByCrossingOsm(
       };
     }
 
-    // If the timetable route reaches another mapped BÜ but not this one, the
-    // topology gives us a deterministic rejection. If it reaches neither,
-    // preserve legacy behaviour instead of inventing a route decision.
     if (candidateHits.size > 0) {
       const other = [...candidateHits.entries()].find(([id]) => id !== crossingId);
       if (other) return { status: "rejected", railwayWayId: other[1].wayId, ref: other[1].ref };
