@@ -1,19 +1,19 @@
+import styles from "./LoadingScreen.module.css";
+
 export default function LoadingScreen() {
   return (
-    <main className="loadingScreen">
-
-      <div className="loadingOverlay" />
+    <main className={styles.loadingScreen}>
+      <div className={styles.loadingOverlay} />
 
       <img
         src="/images/meineschranke_logo.webp"
         alt="Meine Schranke"
-        className="loadingLogo"
+        className={styles.loadingLogo}
       />
 
-      <div className="loadingBar">
-        <div className="loadingBarFill" />
+      <div className={styles.loadingBar}>
+        <div className={styles.loadingBarFill} />
       </div>
-
     </main>
   );
 }
