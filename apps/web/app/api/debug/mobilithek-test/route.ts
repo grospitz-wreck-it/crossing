@@ -4,8 +4,15 @@ import { fetchMobilithekSubscription, getMobilithekConfigs } from "../../../lib/
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-type S28Call = { stopPointRef?: string; visitNumber?: string; aimedArrival?: string; expectedArrival?: string; actualArrival?: string; aimedDeparture?: string; expectedDeparture?: string; actualDeparture?: string; stopPointName?: string };
-type S28Journey = { recordedAtTime?: string; lineRef?: string; publishedLineName?: string; directionRef?: string; directionName?: string; productCategoryRef?: string; monitored?: boolean; predictionInaccurate?: boolean; datedVehicleJourneyRef?: string; vehicleJourneyRef?: string; calls: S28Call[] };
+type JourneySummary = {
+  lineRef?: string;
+  publishedLineName?: string;
+  directionName?: string;
+  originName?: string;
+  destinationName?: string;
+  operatorRef?: string;
+  productCategoryRef?: string;
+};
 
 function findTagValue(xml: string, tag: string): string | undefined {
   const marker = `<${tag}`;
@@ -26,54 +33,8 @@ function findTagValue(xml: string, tag: string): string | undefined {
   return undefined;
 }
 
-function boolTag(xml: string, tag: string): boolean | undefined {
-  const value = findTagValue(xml, tag)?.toLowerCase();
-  if (value === "true") return true;
-  if (value === "false") return false;
-  return undefined;
-}
-
-function extractBlocks(xml: string, openName: string, closeName: string): string[] {
-  const blocks: string[] = [];
-  let cursor = 0;
-  while (true) {
-    const start = xml.indexOf(openName, cursor);
-    if (start < 0) break;
-    const openEnd = xml.indexOf(">", start);
-    if (openEnd < 0) break;
-    const contentStart = openEnd + 1;
-    const end = xml.indexOf(closeName, contentStart);
-    if (end < 0) break;
-    blocks.push(xml.slice(contentStart, end));
-    cursor = end + closeName.length;
-  }
-  return blocks;
-}
-
-function extractCalls(journeyXml: string): S28Call[] {
-  const calls: S28Call[] = [];
-  const sections = [...extractBlocks(journeyXml, "<RecordedCalls", "</RecordedCalls>"), ...extractBlocks(journeyXml, "<EstimatedCalls", "</EstimatedCalls>")];
-  for (const section of sections) {
-    const callBlocks = [...extractBlocks(section, "<RecordedCall", "</RecordedCall>"), ...extractBlocks(section, "<EstimatedCall", "</EstimatedCall>")];
-    for (const xml of callBlocks) {
-      calls.push({
-        stopPointRef: findTagValue(xml, "StopPointRef"),
-        visitNumber: findTagValue(xml, "VisitNumber"),
-        stopPointName: findTagValue(xml, "StopPointName"),
-        aimedArrival: findTagValue(xml, "AimedArrivalTime"),
-        expectedArrival: findTagValue(xml, "ExpectedArrivalTime"),
-        actualArrival: findTagValue(xml, "ActualArrivalTime"),
-        aimedDeparture: findTagValue(xml, "AimedDepartureTime"),
-        expectedDeparture: findTagValue(xml, "ExpectedDepartureTime"),
-        actualDeparture: findTagValue(xml, "ActualDepartureTime"),
-      });
-    }
-  }
-  return calls;
-}
-
-function extractS28Journeys(body: string, limit: number): S28Journey[] {
-  const journeys: S28Journey[] = [];
+function extractJourneySummaries(body: string, limit: number): JourneySummary[] {
+  const journeys: JourneySummary[] = [];
   let cursor = 0;
   while (journeys.length < limit) {
     const start = body.indexOf("<EstimatedVehicleJourney", cursor);
@@ -83,22 +44,15 @@ function extractS28Journeys(body: string, limit: number): S28Journey[] {
     const end = body.indexOf("</EstimatedVehicleJourney>", openEnd + 1);
     if (end < 0) break;
     const xml = body.slice(openEnd + 1, end);
-    const lineRef = findTagValue(xml, "LineRef");
-    if (lineRef?.replace(/\s+/g, "").toUpperCase() === "S28") {
-      journeys.push({
-        recordedAtTime: findTagValue(xml, "RecordedAtTime"),
-        lineRef,
-        publishedLineName: findTagValue(xml, "PublishedLineName"),
-        directionRef: findTagValue(xml, "DirectionRef"),
-        directionName: findTagValue(xml, "DirectionName"),
-        productCategoryRef: findTagValue(xml, "ProductCategoryRef"),
-        monitored: boolTag(xml, "Monitored"),
-        predictionInaccurate: boolTag(xml, "PredictionInaccurate"),
-        datedVehicleJourneyRef: findTagValue(xml, "DatedVehicleJourneyRef"),
-        vehicleJourneyRef: findTagValue(xml, "VehicleJourneyRef"),
-        calls: extractCalls(xml),
-      });
-    }
+    journeys.push({
+      lineRef: findTagValue(xml, "LineRef"),
+      publishedLineName: findTagValue(xml, "PublishedLineName"),
+      directionName: findTagValue(xml, "DirectionName"),
+      originName: findTagValue(xml, "OriginName"),
+      destinationName: findTagValue(xml, "DestinationName") || findTagValue(xml, "DestinationShortName"),
+      operatorRef: findTagValue(xml, "OperatorRef"),
+      productCategoryRef: findTagValue(xml, "ProductCategoryRef"),
+    });
     cursor = end + "</EstimatedVehicleJourney>".length;
   }
   return journeys;
@@ -122,18 +76,17 @@ export async function GET(request: Request) {
   if (!config) return NextResponse.json({ ok: false, error: "Subscription 4 could not be resolved" }, { status: 500 });
 
   const url = new URL(request.url);
-  const requestedLimit = Number(url.searchParams.get("limit") || "20");
-  const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 20, 1), 100);
+  const requestedLimit = Number(url.searchParams.get("limit") || "100");
+  const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 100, 1), 1000);
 
   try {
     const result = await fetchMobilithekSubscription(config);
     const body = result.body || "";
-    const journeys = extractS28Journeys(body, limit);
-    const totalCalls = journeys.reduce((sum, journey) => sum + journey.calls.length, 0);
-    const expectedArrivalCount = journeys.reduce((sum, journey) => sum + journey.calls.filter((call) => Boolean(call.expectedArrival)).length, 0);
-    const expectedDepartureCount = journeys.reduce((sum, journey) => sum + journey.calls.filter((call) => Boolean(call.expectedDeparture)).length, 0);
-    const firstS28Index = body.indexOf("<LineRef>S28</LineRef>");
-    const firstS28Context = firstS28Index >= 0 ? body.slice(Math.max(0, firstS28Index - 300), firstS28Index + 700) : null;
+    const summaries = extractJourneySummaries(body, limit);
+    const publishedLineNames = [...new Set(summaries.map((j) => j.publishedLineName).filter(Boolean))].sort();
+    const lineRefs = [...new Set(summaries.map((j) => j.lineRef).filter(Boolean))].sort();
+    const matchingS28Names = publishedLineNames.filter((name) => /S.?28/i.test(name || ""));
+    const matchingS28Refs = lineRefs.filter((ref) => /S.?28/i.test(ref || ""));
 
     return NextResponse.json({
       ok: true,
@@ -141,18 +94,15 @@ export async function GET(request: Request) {
       status: result.status,
       contentType: result.contentType,
       bodyLength: body.length,
-      requestedLimit: limit,
       diagnostics: {
         estimatedVehicleJourneyTags: countOccurrences(body, "<EstimatedVehicleJourney"),
-        exactS28LineRefTags: countOccurrences(body, "<LineRef>S28</LineRef>"),
-        s28TextOccurrences: countOccurrences(body, "S28"),
-        firstS28Context,
+        sampledJourneys: summaries.length,
+        matchingS28PublishedLineNames: matchingS28Names,
+        matchingS28LineRefs: matchingS28Refs,
       },
-      returnedJourneys: journeys.length,
-      totalCalls,
-      expectedArrivalCount,
-      expectedDepartureCount,
-      journeys,
+      uniquePublishedLineNames: publishedLineNames,
+      uniqueLineRefs: lineRefs,
+      journeys: summaries,
     });
   } catch (error) {
     return NextResponse.json({ ok: false, subscriptionId, error: error instanceof Error ? error.message : String(error) }, { status: 502 });
