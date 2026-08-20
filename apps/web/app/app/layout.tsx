@@ -20,8 +20,8 @@ export default async function AppLayout({
   return (
     <div className={styles.app}>
       <CrossingsProvider>
+        <Header />
         <CrossingSwipeNav>
-          <Header />
           {children}
         </CrossingSwipeNav>
       </CrossingsProvider>
