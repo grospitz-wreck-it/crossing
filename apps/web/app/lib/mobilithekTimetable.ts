@@ -97,11 +97,7 @@ function inferCategory(line: string, journey: any) {
 
 function parseBody(body: string): MobilithekTrainEvent[] {
   let root: any;
-  try {
-    root = parser.parse(body);
-  } catch {
-    return [];
-  }
+  try { root = parser.parse(body); } catch { return []; }
 
   const journeys = findAll(root, "EstimatedVehicleJourney");
   const now = Date.now();
@@ -126,13 +122,11 @@ function parseBody(body: string): MobilithekTrainEvent[] {
       .filter((call) => call.name && (call.plannedArrival || call.plannedDeparture || call.expectedArrival || call.expectedDeparture));
 
     if (!calls.length) continue;
-
     const route = calls.map((call) => call.name);
     const nextCall = calls.find((call) => {
       const t = call.expectedArrival || call.expectedDeparture || call.plannedArrival || call.plannedDeparture;
       return t && t.getTime() >= now - 5 * 60_000;
     }) || calls[calls.length - 1];
-
     const actualTime = nextCall.expectedArrival || nextCall.expectedDeparture || nextCall.plannedArrival || nextCall.plannedDeparture;
     const scheduledTime = nextCall.plannedArrival || nextCall.plannedDeparture || actualTime;
     if (!actualTime || !scheduledTime) continue;
@@ -162,15 +156,14 @@ function parseBody(body: string): MobilithekTrainEvent[] {
       productCategoryRef,
     });
   }
-
   return events;
 }
 
 function fetchFeed(): Promise<string> {
   const baseUrl = process.env.MOBILITHEK_SUBSCRIPTION_URL?.trim() || DEFAULT_URL;
-  const subscriptionId = process.env.MOBILITHEK_SUBSCRIPTION_ID?.trim();
+  const subscriptionId = process.env.MOBILITHEK_SUBSCRIPTION_ID_4?.trim() || process.env.MOBILITHEK_SUBSCRIPTION_ID?.trim();
   const p12Base64 = process.env.MOBILITHEK_CLIENT_P12_BASE64?.trim();
-  if (!subscriptionId) throw new Error("MOBILITHEK_SUBSCRIPTION_ID fehlt");
+  if (!subscriptionId) throw new Error("MOBILITHEK_SUBSCRIPTION_ID_4/MOBILITHEK_SUBSCRIPTION_ID fehlt");
   if (!p12Base64) throw new Error("MOBILITHEK_CLIENT_P12_BASE64 fehlt");
 
   const url = new URL(baseUrl);
@@ -181,45 +174,22 @@ function fetchFeed(): Promise<string> {
       method: "GET",
       pfx: Buffer.from(p12Base64, "base64"),
       passphrase: process.env.MOBILITHEK_P12_PASSWORD || undefined,
-      headers: {
-        accept: "application/xml, text/xml, */*",
-        "accept-encoding": "gzip",
-        "user-agent": "Crossings/1.0 (meineschranke.com)",
-        ...(cached?.lastModified ? { "if-modified-since": cached.lastModified } : {}),
-      },
+      headers: { accept: "application/xml, text/xml, */*", "accept-encoding": "gzip", "user-agent": "Crossings/1.0 (meineschranke.com)", ...(cached?.lastModified ? { "if-modified-since": cached.lastModified } : {}) },
       timeout: 20_000,
     }, (response) => {
       const chunks: Buffer[] = [];
       response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       response.on("end", () => {
-        if (response.statusCode === 304 && cached) {
-          cached.expiresAt = Date.now() + CACHE_TTL_MS;
-          return resolve(cached.body);
-        }
-
+        if (response.statusCode === 304 && cached) { cached.expiresAt = Date.now() + CACHE_TTL_MS; return resolve(cached.body); }
         const raw = Buffer.concat(chunks);
         let body: string;
-        try {
-          body = String(response.headers["content-encoding"] || "").includes("gzip")
-            ? gunzipSync(raw).toString("utf8")
-            : raw.toString("utf8");
-        } catch (error) {
-          return reject(error);
-        }
-
-        if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) {
-          return reject(new Error(`Mobilithek HTTP ${response.statusCode}: ${body.slice(0, 500)}`));
-        }
-
-        cached = {
-          expiresAt: Date.now() + CACHE_TTL_MS,
-          body,
-          lastModified: String(response.headers["last-modified"] || "") || undefined,
-        };
+        try { body = String(response.headers["content-encoding"] || "").includes("gzip") ? gunzipSync(raw).toString("utf8") : raw.toString("utf8"); }
+        catch (error) { return reject(error); }
+        if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) return reject(new Error(`Mobilithek HTTP ${response.statusCode}: ${body.slice(0, 500)}`));
+        cached = { expiresAt: Date.now() + CACHE_TTL_MS, body, lastModified: String(response.headers["last-modified"] || "") || undefined };
         resolve(body);
       });
     });
-
     request.on("timeout", () => request.destroy(new Error("Mobilithek request timed out")));
     request.on("error", reject);
     request.end();
@@ -232,29 +202,22 @@ export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent
   return inFlight;
 }
 
+export function getMobilithekStopEvent(train: MobilithekTrainEvent, eva: string): MobilithekTrainEvent | null {
+  const normalizedEva = String(eva || "").trim();
+  if (!normalizedEva) return null;
+  const call = train.calls.find((candidate) => String(candidate.stopRef || "").trim() === normalizedEva);
+  if (!call) return null;
+  const actualTime = call.expectedArrival || call.expectedDeparture || call.plannedArrival || call.plannedDeparture;
+  const scheduledTime = call.plannedArrival || call.plannedDeparture || actualTime;
+  if (!actualTime || !scheduledTime) return null;
+  return { ...train, id: `${train.journeyRef}:${normalizedEva}`, actualTime, scheduledTime, delayMinutes: Math.round((actualTime.getTime() - scheduledTime.getTime()) / 60_000) };
+}
+
 export async function getMobilithekTrainDiagnostics() {
   const body = await fetchFeed();
   const root = parser.parse(body);
   const journeys = findAll(root, "EstimatedVehicleJourney");
   const calls = findAll(root, "EstimatedCall");
   const parsed = parseBody(body);
-  return {
-    bodyLength: body.length,
-    estimatedVehicleJourneys: journeys.length,
-    estimatedCalls: calls.length,
-    parsedJourneys: parsed.length,
-    categories: Array.from(new Set(parsed.map((train) => train.category))).sort(),
-    lines: Array.from(new Set(parsed.map((train) => train.line))).sort().slice(0, 200),
-    sample: parsed.slice(0, 10).map((train) => ({
-      line: train.line,
-      category: train.category,
-      journeyNumber: train.journeyNumber,
-      origin: train.origin,
-      destination: train.destination,
-      direction: train.direction,
-      routeStops: train.route.length,
-      nextStop: train.calls.find((call) => (call.expectedArrival || call.expectedDeparture || call.plannedArrival || call.plannedDeparture)?.getTime() >= Date.now())?.name,
-      delayMinutes: train.delayMinutes,
-    })),
-  };
+  return { bodyLength: body.length, estimatedVehicleJourneys: journeys.length, estimatedCalls: calls.length, parsedJourneys: parsed.length, categories: Array.from(new Set(parsed.map((train) => train.category))).sort(), lines: Array.from(new Set(parsed.map((train) => train.line))).sort().slice(0, 200), sample: parsed.slice(0, 10).map((train) => ({ line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, direction: train.direction, routeStops: train.route.length, nextStop: train.calls.find((call) => (call.expectedArrival || call.expectedDeparture || call.plannedArrival || call.plannedDeparture)?.getTime() >= Date.now())?.name, delayMinutes: train.delayMinutes })) };
 }
