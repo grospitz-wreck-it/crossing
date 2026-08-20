@@ -28,6 +28,11 @@ export type ReroutedTrain = {
   note: string;
 };
 
+// Der Status-Endpunkt zeigt nur die nächsten 30 Minuten. Ein einstündiges
+// Timetable-Fenster reicht dafür aus und nutzt denselben Cache-Slot wie
+// direkte Beobachtungen und diversionRules.
+const REROUTE_TIMETABLE_HOURS = 1;
+
 export async function getReroutedTrains(
   crossing: Crossing
 ): Promise<ReroutedTrain[]> {
@@ -41,7 +46,10 @@ export async function getReroutedTrains(
     let events;
 
     try {
-      events = await getStationTimetable(rule.observationEva);
+      events = await getStationTimetable(
+        rule.observationEva,
+        REROUTE_TIMETABLE_HOURS
+      );
     } catch (error) {
       console.error(
         `getReroutedTrains: Timetable für ${rule.observationStation} (${rule.observationEva}) fehlgeschlagen`,
