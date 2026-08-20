@@ -85,10 +85,6 @@ async function allowTrainForCrossing(crossingId: string, train: any): Promise<bo
   return true;
 }
 
-// The UI only exposes the next 30 minutes. One hourly /plan window plus the
-// current /fchg feed is sufficient for that near-term forecast. Keeping the
-// same window for direct observations and through rules also makes both paths
-// share the same Turso/in-flight cache entry for an EVA.
 const STATUS_TIMETABLE_HOURS = 1;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -96,67 +92,155 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const crossing = (await loadCrossing(id)) || staticCrossings.find((c) => c.id === id);
   if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
 
+  // All independent sources are started together. Previously the endpoint
+  // waited for direct timetable -> through -> diverted -> rerouted in strict
+  // sequence, so a BÜ switch could stack several remote/API and OSM waits.
+  const localEventsPromise = crossing.eva
+    ? getStationTimetable(crossing.eva, STATUS_TIMETABLE_HOURS).catch((error) => {
+        console.error("Failed to load local timetable:", error);
+        return [];
+      })
+    : Promise.resolve([]);
+
+  const observationEventsPromise = !crossing.eva && crossing.observationEvas?.length
+    ? Promise.all(crossing.observationEvas.map((eva: string) =>
+        getStationTimetable(eva, STATUS_TIMETABLE_HOURS).catch((error) => {
+          console.error(`Failed to load observation timetable ${eva}:`, error);
+          return [];
+        })
+      )).then((sets) => sets.flat())
+    : Promise.resolve([]);
+
+  const throughPromise = withMemoryCache(
+    `through-${crossing.id}`,
+    5000,
+    () => getThroughTrains(crossing)
+  ).catch((error) => {
+    console.error("Failed to load through trains:", error);
+    return [];
+  });
+
+  const divertedPromise = withMemoryCache(
+    `diverted-${crossing.id}`,
+    5000,
+    () => getDivertedTrains(crossing)
+  ).catch((error) => {
+    console.error("Failed to load diverted trains:", error);
+    return [];
+  });
+
+  const reroutedPromise = withMemoryCache(
+    `rerouted-${crossing.id}`,
+    5000,
+    () => getReroutedTrains(crossing)
+  ).catch((error) => {
+    console.error("Failed to load rerouted trains:", error);
+    return [];
+  });
+
+  const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] =
+    await Promise.all([
+      localEventsPromise,
+      observationEventsPromise,
+      throughPromise,
+      divertedPromise,
+      reroutedPromise,
+    ]);
+
   const trains: any[] = [];
 
-  if (crossing.eva) {
-    try {
-      const localEvents = await getStationTimetable(crossing.eva, STATUS_TIMETABLE_HOURS);
-      for (const train of localEvents) {
-        if (train.cancelled) continue;
-        if (!(await allowTrainForCrossing(crossing.id, train))) continue;
-        const isStoppingTrain = train.platform === "1" || train.platform === "2";
-        const crossingTime = train.actualTime;
-        const etaSeconds = Math.floor((crossingTime.getTime() - Date.now()) / 1000);
-        trains.push({ id: `${train.category}-${train.journeyNumber}-${train.id}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, isStoppingTrain, direction: getCrossingDirection(train.route), directionLabel: train.destination ? `Richtung ${train.destination}` : null, delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds });
-      }
-    } catch (error) { console.error("Failed to load local timetable:", error); }
+  // OSM checks for direct/observation trains can now run concurrently instead
+  // of serially awaiting one route after another.
+  const directEvents = crossing.eva ? localEvents : observationEvents;
+  const eligibleDirect = await Promise.all(
+    directEvents
+      .filter((train: any) => !train.cancelled && (!crossing.eva || true))
+      .map(async (train: any) => ({ train, allowed: await allowTrainForCrossing(crossing.id, train) }))
+  );
+
+  for (const { train, allowed } of eligibleDirect) {
+    if (!allowed) continue;
+    const isStoppingTrain = train.platform === "1" || train.platform === "2";
+    const crossingTime = train.actualTime;
+    const etaSeconds = Math.floor((crossingTime.getTime() - Date.now()) / 1000);
+    if (!crossing.eva && crossingTime.getTime() <= Date.now() - 60_000) continue;
+    trains.push({
+      id: `${train.category}-${train.journeyNumber}-${train.id}`,
+      line: train.line,
+      category: train.category,
+      journeyNumber: train.journeyNumber,
+      origin: train.origin,
+      destination: train.destination,
+      platform: train.platform,
+      isStoppingTrain,
+      direction: getCrossingDirection(train.route),
+      directionLabel: train.destination ? `Richtung ${train.destination}` : null,
+      delayMinutes: train.delayMinutes,
+      crossingTime: crossingTime.toISOString(),
+      arrival: crossingTime.toISOString(),
+      etaSeconds,
+      ...(!crossing.eva ? { estimatedFrom: { observationEva: train.observationEva } } : {}),
+    });
   }
 
-  if (!crossing.eva && crossing.observationEvas?.length) {
-    const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
-    for (const observationEva of crossing.observationEvas) {
-      try {
-        const events = await getStationTimetable(observationEva, STATUS_TIMETABLE_HOURS);
-        for (const train of events) {
-          if (train.cancelled || train.actualTime.getTime() <= Date.now() - 60_000) continue;
-          if (!(await allowTrainForCrossing(crossing.id, train))) continue;
-          const crossingTime = train.actualTime;
-          const key = `${train.category}-${train.journeyNumber}`;
-          if (existingKeys.has(key)) continue;
-          existingKeys.add(key);
-          trains.push({ id: `${train.category}-${train.journeyNumber}-${observationEva}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, isStoppingTrain: train.platform === "1" || train.platform === "2", direction: getCrossingDirection(train.route), directionLabel: train.destination ? `Richtung ${train.destination}` : null, delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000), estimatedFrom: { observationEva } });
-        }
-      } catch (error) { console.error(`Failed to load observation timetable ${observationEva}:`, error); }
-    }
+  const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
+  const eligibleThrough = await Promise.all(
+    throughTrains.map(async (train: any) => ({ train, allowed: await allowTrainForCrossing(crossing.id, train) }))
+  );
+  for (const { train, allowed } of eligibleThrough) {
+    if (!allowed) continue;
+    const key = `${train.category}-${train.journeyNumber}`;
+    if (existingKeys.has(key)) continue;
+    existingKeys.add(key);
+    const crossingTime = new Date(train.crossingTime);
+    trains.push({
+      id: `${train.category}-${train.journeyNumber}`,
+      line: train.line,
+      category: train.category,
+      journeyNumber: train.journeyNumber,
+      origin: train.origin,
+      destination: train.destination,
+      platform: train.direction === "westbound" ? "1" : train.direction === "eastbound" ? "2" : undefined,
+      isStoppingTrain: false,
+      direction: train.direction,
+      directionLabel: "Durchfahrt",
+      delayMinutes: train.delayMinutes,
+      crossingTime: crossingTime.toISOString(),
+      arrival: crossingTime.toISOString(),
+      etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000),
+      estimatedFrom: { observationStation: train.observationStation, observationActualTime: train.observationActualTime, fallbackOffsetSeconds: train.fallbackOffsetSeconds },
+    });
   }
 
-  try {
-    const throughTrains = await withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing));
-    const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
-    for (const train of throughTrains) {
-      if (!(await allowTrainForCrossing(crossing.id, train))) continue;
-      const key = `${train.category}-${train.journeyNumber}`;
-      if (existingKeys.has(key)) continue;
-      const crossingTime = new Date(train.crossingTime);
-      trains.push({ id: `${train.category}-${train.journeyNumber}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.direction === "westbound" ? "1" : train.direction === "eastbound" ? "2" : undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Durchfahrt", delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000), estimatedFrom: { observationStation: train.observationStation, observationActualTime: train.observationActualTime, fallbackOffsetSeconds: train.fallbackOffsetSeconds } });
-    }
-  } catch (error) { console.error("Failed to load through trains:", error); }
-
-  let divertedTrains: any[] = [];
-  try { divertedTrains = await withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)); }
-  catch (error) { console.error("Failed to load diverted trains:", error); }
-
-  try {
-    const reroutedTrains = await withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing));
-    const existingKeys = new Set(trains.map((t) => `${t.category}-${t.journeyNumber}`));
-    for (const train of reroutedTrains) {
-      if (!(await allowTrainForCrossing(crossing.id, train))) continue;
-      const key = `${train.category}-${train.journeyNumber}`;
-      if (existingKeys.has(key)) continue;
-      const crossingTime = new Date(train.crossingTime);
-      trains.push({ id: `${train.category}-${train.journeyNumber}-rerouted`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Umleitung", delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000), estimatedFrom: { observationStation: train.observationStation, observationActualTime: train.observationActualTime, fallbackOffsetSeconds: train.fallbackOffsetSeconds }, rerouted: true, note: train.note });
-    }
-  } catch (error) { console.error("Failed to load rerouted trains:", error); }
+  const eligibleRerouted = await Promise.all(
+    reroutedTrains.map(async (train: any) => ({ train, allowed: await allowTrainForCrossing(crossing.id, train) }))
+  );
+  for (const { train, allowed } of eligibleRerouted) {
+    if (!allowed) continue;
+    const key = `${train.category}-${train.journeyNumber}`;
+    if (existingKeys.has(key)) continue;
+    existingKeys.add(key);
+    const crossingTime = new Date(train.crossingTime);
+    trains.push({
+      id: `${train.category}-${train.journeyNumber}-rerouted`,
+      line: train.line,
+      category: train.category,
+      journeyNumber: train.journeyNumber,
+      origin: train.origin,
+      destination: train.destination,
+      platform: undefined,
+      isStoppingTrain: false,
+      direction: train.direction,
+      directionLabel: "Umleitung",
+      delayMinutes: train.delayMinutes,
+      crossingTime: crossingTime.toISOString(),
+      arrival: crossingTime.toISOString(),
+      etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000),
+      estimatedFrom: { observationStation: train.observationStation, observationActualTime: train.observationActualTime, fallbackOffsetSeconds: train.fallbackOffsetSeconds },
+      rerouted: true,
+      note: train.note,
+    });
+  }
 
   trains.sort((a, b) => new Date(a.crossingTime).getTime() - new Date(b.crossingTime).getTime());
   const upcoming = trains.filter((t) => t.etaSeconds > 0);
