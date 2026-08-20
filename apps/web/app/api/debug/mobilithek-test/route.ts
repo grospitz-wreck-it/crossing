@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { XMLParser } from "fast-xml-parser";
 import {
   fetchMobilithekSubscription,
   getMobilithekConfigs,
@@ -33,81 +32,72 @@ type S28Journey = {
   calls: S28Call[];
 };
 
-function text(value: unknown): string | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value === "string") return value.trim() || undefined;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return undefined;
+function tagValue(xml: string, tag: string) {
+  const match = xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "i"));
+  return match?.[1]?.trim() || undefined;
 }
 
-function bool(value: unknown): boolean | undefined {
-  const normalized = text(value)?.toLowerCase();
-  if (normalized === undefined) return undefined;
-  if (normalized === "true") return true;
-  if (normalized === "false") return false;
-  return undefined;
+function boolTag(xml: string, tag: string) {
+  const value = tagValue(xml, tag);
+  if (value === undefined) return undefined;
+  return value.toLowerCase() === "true";
 }
 
-function asArray<T>(value: T | T[] | undefined): T[] {
-  if (value === undefined) return [];
-  return Array.isArray(value) ? value : [value];
+function extractCalls(journeyXml: string): S28Call[] {
+  const calls: S28Call[] = [];
+  const sectionRegex = /<(?:RecordedCalls|EstimatedCalls)(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:RecordedCalls|EstimatedCalls)>/gi;
+  let sectionMatch: RegExpExecArray | null;
+
+  while ((sectionMatch = sectionRegex.exec(journeyXml))) {
+    const section = sectionMatch[1];
+    const callRegex = /<(?:RecordedCall|EstimatedCall)(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:RecordedCall|EstimatedCall)>/gi;
+    let callMatch: RegExpExecArray | null;
+    while ((callMatch = callRegex.exec(section))) {
+      const xml = callMatch[1];
+      calls.push({
+        stopPointRef: tagValue(xml, "StopPointRef"),
+        visitNumber: tagValue(xml, "VisitNumber"),
+        aimedArrival: tagValue(xml, "AimedArrivalTime"),
+        expectedArrival: tagValue(xml, "ExpectedArrivalTime"),
+        actualArrival: tagValue(xml, "ActualArrivalTime"),
+        aimedDeparture: tagValue(xml, "AimedDepartureTime"),
+        expectedDeparture: tagValue(xml, "ExpectedDepartureTime"),
+        actualDeparture: tagValue(xml, "ActualDepartureTime"),
+      });
+    }
+  }
+  return calls;
 }
 
 function extractS28Journeys(body: string, limit: number): S28Journey[] {
-  const parser = new XMLParser({
-    ignoreAttributes: false,
-    removeNSPrefix: true,
-    parseTagValue: false,
-    trimValues: true,
-  });
-
-  const parsed = parser.parse(body) as any;
-  const deliveries = asArray(parsed?.Siri?.ServiceDelivery?.EstimatedTimetableDelivery);
   const journeys: S28Journey[] = [];
+  const journeyOpen = /<EstimatedVehicleJourney(?:\s[^>]*)?>/gi;
+  let match: RegExpExecArray | null;
 
-  for (const delivery of deliveries) {
-    const frames = asArray(delivery?.EstimatedJourneyVersionFrame);
+  while ((match = journeyOpen.exec(body)) && journeys.length < limit) {
+    const start = match.index;
+    const end = body.indexOf("</EstimatedVehicleJourney>", journeyOpen.lastIndex);
+    if (end < 0) break;
+    const xml = body.slice(start, end + "</EstimatedVehicleJourney>".length);
+    const lineRef = tagValue(xml, "LineRef");
+    if (lineRef?.trim().toUpperCase() !== "S28") continue;
 
-    for (const frame of frames) {
-      const vehicleJourneys = asArray(frame?.EstimatedVehicleJourney);
+    const datedVehicleJourneyRef = tagValue(xml, "DatedVehicleJourneyRef");
+    journeys.push({
+      recordedAtTime: tagValue(xml, "RecordedAtTime"),
+      lineRef,
+      publishedLineName: tagValue(xml, "PublishedLineName"),
+      directionRef: tagValue(xml, "DirectionRef"),
+      directionName: tagValue(xml, "DirectionName"),
+      productCategoryRef: tagValue(xml, "ProductCategoryRef"),
+      monitored: boolTag(xml, "Monitored"),
+      predictionInaccurate: boolTag(xml, "PredictionInaccurate"),
+      datedVehicleJourneyRef,
+      vehicleJourneyRef: tagValue(xml, "VehicleJourneyRef"),
+      calls: extractCalls(xml),
+    });
 
-      for (const journey of vehicleJourneys) {
-        if (journeys.length >= limit) return journeys;
-
-        const lineRef = text(journey?.LineRef);
-        if (lineRef?.toUpperCase() !== "S28") continue;
-
-        const calls = [
-          ...asArray(journey?.RecordedCalls?.RecordedCall),
-          ...asArray(journey?.EstimatedCalls?.EstimatedCall),
-        ].map((call) => ({
-          stopPointRef: text(call?.StopPointRef),
-          visitNumber: text(call?.VisitNumber),
-          aimedArrival: text(call?.AimedArrivalTime),
-          expectedArrival: text(call?.ExpectedArrivalTime),
-          actualArrival: text(call?.ActualArrivalTime),
-          aimedDeparture: text(call?.AimedDepartureTime),
-          expectedDeparture: text(call?.ExpectedDepartureTime),
-          actualDeparture: text(call?.ActualDepartureTime),
-        }));
-
-        const datedJourneyRef = journey?.FramedVehicleJourneyRef?.DatedVehicleJourneyRef;
-
-        journeys.push({
-          recordedAtTime: text(journey?.RecordedAtTime),
-          lineRef,
-          publishedLineName: text(journey?.PublishedLineName),
-          directionRef: text(journey?.DirectionRef),
-          directionName: text(journey?.DirectionName),
-          productCategoryRef: text(journey?.ProductCategoryRef),
-          monitored: bool(journey?.Monitored),
-          predictionInaccurate: bool(journey?.PredictionInaccurate),
-          datedVehicleJourneyRef: text(datedJourneyRef),
-          vehicleJourneyRef: text(journey?.VehicleJourneyRef),
-          calls,
-        });
-      }
-    }
+    journeyOpen.lastIndex = end + "</EstimatedVehicleJourney>".length;
   }
 
   return journeys;
@@ -115,45 +105,26 @@ function extractS28Journeys(body: string, limit: number): S28Journey[] {
 
 export async function GET(request: Request) {
   const subscriptionId = process.env.MOBILITHEK_SUBSCRIPTION_ID_4?.trim();
-
   if (!subscriptionId) {
-    return NextResponse.json(
-      { ok: false, error: "MOBILITHEK_SUBSCRIPTION_ID_4 is not configured" },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: "MOBILITHEK_SUBSCRIPTION_ID_4 is not configured" }, { status: 500 });
   }
 
-  const config = getMobilithekConfigs().find(
-    (entry) => entry.subscriptionId === subscriptionId,
-  );
-
+  const config = getMobilithekConfigs().find((entry) => entry.subscriptionId === subscriptionId);
   if (!config) {
-    return NextResponse.json(
-      { ok: false, error: "Subscription 4 could not be resolved from the configured Mobilithek settings" },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: "Subscription 4 could not be resolved" }, { status: 500 });
   }
 
   const url = new URL(request.url);
   const requestedLimit = Number(url.searchParams.get("limit") || "20");
-  const limit = Math.min(
-    Math.max(Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 20, 1),
-    100,
-  );
+  const limit = Math.min(Math.max(Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 20, 1), 100);
 
   try {
     const result = await fetchMobilithekSubscription(config);
     const body = result.body || "";
     const journeys = extractS28Journeys(body, limit);
     const totalCalls = journeys.reduce((sum, journey) => sum + journey.calls.length, 0);
-    const expectedArrivalCount = journeys.reduce(
-      (sum, journey) => sum + journey.calls.filter((call) => Boolean(call.expectedArrival)).length,
-      0,
-    );
-    const expectedDepartureCount = journeys.reduce(
-      (sum, journey) => sum + journey.calls.filter((call) => Boolean(call.expectedDeparture)).length,
-      0,
-    );
+    const expectedArrivalCount = journeys.reduce((sum, journey) => sum + journey.calls.filter((call) => Boolean(call.expectedArrival)).length, 0);
+    const expectedDepartureCount = journeys.reduce((sum, journey) => sum + journey.calls.filter((call) => Boolean(call.expectedDeparture)).length, 0);
 
     return NextResponse.json({
       ok: true,
@@ -169,13 +140,6 @@ export async function GET(request: Request) {
       journeys,
     });
   } catch (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        subscriptionId,
-        error: error instanceof Error ? error.message : String(error),
-      },
-      { status: 502 },
-    );
+    return NextResponse.json({ ok: false, subscriptionId, error: error instanceof Error ? error.message : String(error) }, { status: 502 });
   }
 }
