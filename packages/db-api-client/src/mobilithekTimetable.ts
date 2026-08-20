@@ -5,6 +5,7 @@ import { gunzipSync } from "node:zlib";
 const DEFAULT_URL = "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
 const CACHE_TTL_MS = 30_000;
 const PARSED_CACHE_TTL_MS = 25_000;
+const LAST_GOOD_CACHE_TTL_MS = 120_000;
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
 type Call = { name: string; planned?: Date; actual?: Date };
@@ -16,6 +17,7 @@ export type MobilithekTrainEvent = {
 
 let cached: { expiresAt: number; body: string; lastModified?: string } | null = null;
 let parsedCached: { expiresAt: number; body: string; events: MobilithekTrainEvent[] } | null = null;
+let lastGoodRegistry: { expiresAt: number; events: MobilithekTrainEvent[] } | null = null;
 let inFlight: Promise<MobilithekTrainEvent[]> | null = null;
 
 function asArray<T>(value: T | T[] | undefined): T[] { return value == null ? [] : Array.isArray(value) ? value : [value]; }
@@ -77,9 +79,34 @@ function fetchFeed(): Promise<string> {
 }
 
 export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent[]> {
-  if (parsedCached && parsedCached.expiresAt > Date.now() && cached?.body === parsedCached.body) return parsedCached.events;
-  if (cached && cached.expiresAt > Date.now()) { const events = parseBody(cached.body); parsedCached = { expiresAt: Date.now() + PARSED_CACHE_TTL_MS, body: cached.body, events }; return events; }
-  if (!inFlight) inFlight = fetchFeed().then((body) => { const events = parseBody(body); parsedCached = { expiresAt: Date.now() + PARSED_CACHE_TTL_MS, body, events }; return events; }).finally(() => { inFlight = null; });
+  const now = Date.now();
+  if (parsedCached && parsedCached.expiresAt > now && cached?.body === parsedCached.body) return parsedCached.events;
+  if (cached && cached.expiresAt > now) {
+    const events = parseBody(cached.body);
+    if (events.length > 0) {
+      lastGoodRegistry = { expiresAt: now + LAST_GOOD_CACHE_TTL_MS, events };
+    } else if (lastGoodRegistry && lastGoodRegistry.expiresAt > now) {
+      console.warn("Mobilithek refresh parsed zero journeys; serving last known good registry");
+      parsedCached = { expiresAt: now + PARSED_CACHE_TTL_MS, body: cached.body, events: lastGoodRegistry.events };
+      return lastGoodRegistry.events;
+    }
+    parsedCached = { expiresAt: now + PARSED_CACHE_TTL_MS, body: cached.body, events };
+    return events;
+  }
+  if (!inFlight) {
+    inFlight = fetchFeed().then((body) => {
+      const events = parseBody(body);
+      if (events.length > 0) {
+        lastGoodRegistry = { expiresAt: Date.now() + LAST_GOOD_CACHE_TTL_MS, events };
+      } else if (lastGoodRegistry && lastGoodRegistry.expiresAt > Date.now()) {
+        console.warn("Mobilithek refresh parsed zero journeys; serving last known good registry");
+        parsedCached = { expiresAt: Date.now() + PARSED_CACHE_TTL_MS, body, events: lastGoodRegistry.events };
+        return lastGoodRegistry.events;
+      }
+      parsedCached = { expiresAt: Date.now() + PARSED_CACHE_TTL_MS, body, events };
+      return events;
+    }).finally(() => { inFlight = null; });
+  }
   return inFlight;
 }
 export async function getMobilithekTrainDiagnostics() { const body = await fetchFeed(); const root = parser.parse(body); const journeys = findAll(root, "EstimatedVehicleJourney"); const calls = findAll(root, "EstimatedCall"); return { bodyLength: body.length, estimatedVehicleJourneys: journeys.length, estimatedCalls: calls.length, hasSiri: /siri/i.test(body), hasEstimatedVehicleJourney: /EstimatedVehicleJourney/i.test(body), preview: body.slice(0, 1500) }; }
