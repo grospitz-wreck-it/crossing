@@ -1,4 +1,4 @@
-import type { Crossing } from "../../crossing-model/src/types";
+import type { Crossing, ThroughRuleOsmRoute } from "../../crossing-model/src/types";
 import { getStationTimetable } from "./getStationTimetable";
 import type { OfficialTrainEvent } from "./parseOfficialTimetable";
 import { getMobilithekTrainRegistry, type MobilithekTrainEvent } from "./mobilithekTimetable";
@@ -22,6 +22,18 @@ function matchesOsmCorridor(trainRoute: string[], observationStation: string, re
   for (let i = 1; i < ordered.length; i += 1) if (ordered[i - 1].index >= ordered[i].index) return false;
   const observationIndex = routeIndex(trainRoute, observationStation);
   if (observationIndex >= 0) { const first = ordered[0].index; const last = ordered[ordered.length - 1].index; if (observationIndex < first || observationIndex > last) return false; }
+  return true;
+}
+function matchesSelectedOsmRoute(trainRoute: string[], trainLine: string, route?: ThroughRuleOsmRoute) {
+  if (!route) return true;
+  const fromIndex = route.from ? routeIndex(trainRoute, route.from) : -1;
+  const toIndex = route.to ? routeIndex(trainRoute, route.to) : -1;
+  const lineRefs = Array.isArray(route.lineRefs) ? route.lineRefs.map((value) => normalizeStationName(value)).filter(Boolean) : [];
+  const lineMatches = lineRefs.length > 0 && lineRefs.some((ref) => normalizeStationName(trainLine) === ref || normalizeStationName(trainLine).includes(ref) || ref.includes(normalizeStationName(trainLine)));
+  const hasStationFingerprint = fromIndex >= 0 || toIndex >= 0;
+  if (fromIndex >= 0 && toIndex >= 0) return fromIndex < toIndex;
+  if (hasStationFingerprint) return lineRefs.length ? lineMatches : true;
+  if (lineRefs.length) return lineMatches;
   return true;
 }
 function trainKey(train: { category: string; journeyNumber: number; id?: string }) { return `${train.category}-${train.journeyNumber}-${train.id || ""}`; }
@@ -59,9 +71,6 @@ function mobilithekCallForStation(train: MobilithekTrainEvent, station: string) 
 
 function ruleAllowsTrain(rule: any, train: MobilithekTrainEvent) {
   const categories = Array.isArray(rule.categories) ? rule.categories : [];
-  // Older crossings were created with the generic [ICE, IC, EC] defaults.
-  // Treat that legacy default as "rail transit" rather than excluding local
-  // Stadtbahn/tram services such as U79.
   const legacyLongDistance = categories.length === 3 && categories.includes("ICE") && categories.includes("IC") && categories.includes("EC");
   if (legacyLongDistance) return true;
   if (!categories.length) return true;
@@ -74,6 +83,7 @@ function buildMobilithekCandidates(events: MobilithekTrainEvent[], crossing: Cro
   for (const rule of crossing.throughRules || []) {
     for (const train of events) {
       if (!ruleAllowsTrain(rule, train)) continue;
+      if (!matchesSelectedOsmRoute(train.route, train.line, rule.osmRoute)) continue;
       if (!matchesOsmCorridor(train.route, rule.observationStation, requiredRouteStops)) continue;
       const observationCall = mobilithekCallForStation(train, rule.observationStation);
       if (!observationCall?.actual) continue;
@@ -113,6 +123,7 @@ export async function getThroughTrains(crossing: Crossing): Promise<ThroughTrain
     for (const train of events) {
       if (train.cancelled || !ruleAllowsTrain(rule, train as any)) continue;
       const route = train.route || [];
+      if (!matchesSelectedOsmRoute(route, train.line, rule.osmRoute)) continue;
       if (!matchesOsmCorridor(route, rule.observationStation, crossing.requiredRouteStops || [])) continue;
       const expectedDirection = directionForRoute(route, rule.observationStation, crossing.requiredRouteStops || []);
       if (rule.direction !== "unknown" && expectedDirection !== "unknown" && rule.direction !== expectedDirection) continue;

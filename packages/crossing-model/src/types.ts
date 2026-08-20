@@ -5,6 +5,16 @@ export type CrossingRule = {
   openOffsetSeconds?: number;
 };
 
+export type ThroughRuleOsmRoute = {
+  wayId?: number | null;
+  relationId?: number | null;
+  ref?: string;
+  name?: string;
+  from?: string;
+  to?: string;
+  lineRefs?: string[];
+};
+
 export type ThroughRule = {
   observationEva: string;
   observationStation: string;
@@ -12,6 +22,8 @@ export type ThroughRule = {
   trackDistanceMeters: number;
   fallbackOffsetSeconds: number;
   direction: "eastbound" | "westbound" | "unknown";
+  /** The OSM route selected when this crossing was created. */
+  osmRoute?: ThroughRuleOsmRoute;
 };
 
 export type DiversionRule = {

@@ -3,8 +3,10 @@ import https from "node:https";
 import { gunzipSync } from "node:zlib";
 
 const DEFAULT_URL = "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
-const CACHE_TTL_MS = 30_000;
-const PARSED_CACHE_TTL_MS = 25_000;
+// The feed is ~29 MB. Keep the parsed registry warm long enough that normal
+// crossing refreshes do not repeatedly trigger a full download/parse.
+const CACHE_TTL_MS = 90_000;
+const PARSED_CACHE_TTL_MS = 60_000;
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
 type Call = { name: string; planned?: Date; actual?: Date };
@@ -68,7 +70,7 @@ function fetchFeed(): Promise<string> {
   if (!p12Base64) throw new Error("MOBILITHEK_CLIENT_P12_BASE64 fehlt");
   const url = new URL(baseUrl); url.searchParams.set("subscriptionID", subscriptionId);
   return new Promise((resolve, reject) => {
-    const request = https.request(url, { method: "GET", pfx: Buffer.from(p12Base64, "base64"), passphrase, headers: { accept: "application/xml, text/xml, */*", "accept-encoding": "gzip", "user-agent": "Crossings/1.0 (meineschranke.com)", ...(cached?.lastModified ? { "if-modified-since": cached.lastModified } : {}) }, timeout: 15000 }, (response) => {
+    const request = https.request(url, { method: "GET", pfx: Buffer.from(p12Base64, "base64"), passphrase, headers: { accept: "application/xml, text/xml, */*", "accept-encoding": "gzip", "user-agent": "Crossings/1.0 (meineschranke.com)", ...(cached?.lastModified ? { "if-modified-since": cached.lastModified } : {}) }, timeout: 10000 }, (response) => {
       const chunks: Buffer[] = []; response.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
       response.on("end", () => { if (response.statusCode === 304 && cached) { cached.expiresAt = Date.now() + CACHE_TTL_MS; return resolve(cached.body); } const raw = Buffer.concat(chunks); let body: string; try { body = String(response.headers["content-encoding"] || "").includes("gzip") ? gunzipSync(raw).toString("utf8") : raw.toString("utf8"); } catch (error) { return reject(error); } if ((response.statusCode || 0) < 200 || (response.statusCode || 0) >= 300) return reject(new Error(`Mobilithek HTTP ${response.statusCode}: ${body.slice(0, 500)}`)); cached = { expiresAt: Date.now() + CACHE_TTL_MS, body, lastModified: String(response.headers["last-modified"] || "") || undefined }; parsedCached = null; resolve(body); });
     });
