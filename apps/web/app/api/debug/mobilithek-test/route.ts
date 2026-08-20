@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { XMLParser } from "fast-xml-parser";
 import {
   fetchMobilithekSubscription,
   getMobilithekConfigs,
@@ -32,68 +33,81 @@ type S28Journey = {
   calls: S28Call[];
 };
 
-function tagValue(xml: string, tag: string) {
-  const match = xml.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, "i"));
-  return match?.[1]?.trim() || undefined;
+function text(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value.trim() || undefined;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return undefined;
 }
 
-function boolTag(xml: string, tag: string) {
-  const value = tagValue(xml, tag);
-  if (value === undefined) return undefined;
-  return value.toLowerCase() === "true";
+function bool(value: unknown): boolean | undefined {
+  const normalized = text(value)?.toLowerCase();
+  if (normalized === undefined) return undefined;
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+  return undefined;
 }
 
-function extractCalls(journeyXml: string): S28Call[] {
-  const calls: S28Call[] = [];
-  const sectionRegex = /<(?:RecordedCalls|EstimatedCalls)(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:RecordedCalls|EstimatedCalls)>/gi;
-  let sectionMatch: RegExpExecArray | null;
-
-  while ((sectionMatch = sectionRegex.exec(journeyXml))) {
-    const section = sectionMatch[1];
-    const callRegex = /<(?:RecordedCall|EstimatedCall)(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:RecordedCall|EstimatedCall)>/gi;
-    let callMatch: RegExpExecArray | null;
-
-    while ((callMatch = callRegex.exec(section))) {
-      const xml = callMatch[1];
-      calls.push({
-        stopPointRef: tagValue(xml, "StopPointRef"),
-        visitNumber: tagValue(xml, "VisitNumber"),
-        aimedArrival: tagValue(xml, "AimedArrivalTime"),
-        expectedArrival: tagValue(xml, "ExpectedArrivalTime"),
-        actualArrival: tagValue(xml, "ActualArrivalTime"),
-        aimedDeparture: tagValue(xml, "AimedDepartureTime"),
-        expectedDeparture: tagValue(xml, "ExpectedDepartureTime"),
-        actualDeparture: tagValue(xml, "ActualDepartureTime"),
-      });
-    }
-  }
-
-  return calls;
+function asArray<T>(value: T | T[] | undefined): T[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 function extractS28Journeys(body: string, limit: number): S28Journey[] {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    removeNSPrefix: true,
+    parseTagValue: false,
+    trimValues: true,
+  });
+
+  const parsed = parser.parse(body) as any;
+  const deliveries = asArray(parsed?.Siri?.ServiceDelivery?.EstimatedTimetableDelivery);
   const journeys: S28Journey[] = [];
-  const journeyRegex = /<EstimatedVehicleJourney(?:\\s[^>]*)?>([\\s\\S]*?)<\\/EstimatedVehicleJourney>/gi;
-  let match: RegExpExecArray | null;
 
-  while ((match = journeyRegex.exec(body)) && journeys.length < limit) {
-    const xml = match[1];
-    const lineRef = tagValue(xml, "LineRef");
-    if (lineRef?.trim().toUpperCase() !== "S28") continue;
+  for (const delivery of deliveries) {
+    const frames = asArray(delivery?.EstimatedJourneyVersionFrame);
 
-    journeys.push({
-      recordedAtTime: tagValue(xml, "RecordedAtTime"),
-      lineRef,
-      publishedLineName: tagValue(xml, "PublishedLineName"),
-      directionRef: tagValue(xml, "DirectionRef"),
-      directionName: tagValue(xml, "DirectionName"),
-      productCategoryRef: tagValue(xml, "ProductCategoryRef"),
-      monitored: boolTag(xml, "Monitored"),
-      predictionInaccurate: boolTag(xml, "PredictionInaccurate"),
-      datedVehicleJourneyRef: tagValue(xml, "DatedVehicleJourneyRef"),
-      vehicleJourneyRef: tagValue(xml, "VehicleJourneyRef"),
-      calls: extractCalls(xml),
-    });
+    for (const frame of frames) {
+      const vehicleJourneys = asArray(frame?.EstimatedVehicleJourney);
+
+      for (const journey of vehicleJourneys) {
+        if (journeys.length >= limit) return journeys;
+
+        const lineRef = text(journey?.LineRef);
+        if (lineRef?.toUpperCase() !== "S28") continue;
+
+        const calls = [
+          ...asArray(journey?.RecordedCalls?.RecordedCall),
+          ...asArray(journey?.EstimatedCalls?.EstimatedCall),
+        ].map((call) => ({
+          stopPointRef: text(call?.StopPointRef),
+          visitNumber: text(call?.VisitNumber),
+          aimedArrival: text(call?.AimedArrivalTime),
+          expectedArrival: text(call?.ExpectedArrivalTime),
+          actualArrival: text(call?.ActualArrivalTime),
+          aimedDeparture: text(call?.AimedDepartureTime),
+          expectedDeparture: text(call?.ExpectedDepartureTime),
+          actualDeparture: text(call?.ActualDepartureTime),
+        }));
+
+        const datedJourneyRef = journey?.FramedVehicleJourneyRef?.DatedVehicleJourneyRef;
+
+        journeys.push({
+          recordedAtTime: text(journey?.RecordedAtTime),
+          lineRef,
+          publishedLineName: text(journey?.PublishedLineName),
+          directionRef: text(journey?.DirectionRef),
+          directionName: text(journey?.DirectionName),
+          productCategoryRef: text(journey?.ProductCategoryRef),
+          monitored: bool(journey?.Monitored),
+          predictionInaccurate: bool(journey?.PredictionInaccurate),
+          datedVehicleJourneyRef: text(datedJourneyRef),
+          vehicleJourneyRef: text(journey?.VehicleJourneyRef),
+          calls,
+        });
+      }
+    }
   }
 
   return journeys;
