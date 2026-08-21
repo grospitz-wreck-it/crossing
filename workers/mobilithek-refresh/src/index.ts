@@ -36,7 +36,25 @@ async function main() {
     );
   }
 
-  await writeSnapshot(result.events, startedAt);
+  await writeSnapshot(result.events, startedAt, {
+    subscriptionCount: result.subscriptionCount,
+    successful: result.successful,
+    failed: result.failed,
+  });
+
+  // Diagnostic: show distribution of actual timestamps.
+  const byDay = new Map<string, number>();
+
+  for (const item of result.events) {
+    const date = item.event.actualTime.toISOString().slice(0, 10);
+    byDay.set(date, (byDay.get(date) || 0) + 1);
+  }
+
+  console.log("[Mobilithek Worker] event date distribution:");
+
+  for (const [date, count] of [...byDay.entries()].sort()) {
+    console.log(`  ${date}: ${count}`);
+  }
 
   console.log("[Mobilithek Worker] refresh successful");
 }

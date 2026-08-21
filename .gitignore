@@ -11,3 +11,5 @@ coverage
 .vercel
 
 *.log
+apps/web/certificate.p12
+apps/web/debug.log

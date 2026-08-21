@@ -92,9 +92,26 @@ async function fetchFeed(
   });
 }
 
+function isValidTrainTime(value: Date): boolean {
+  const timestamp = value.getTime();
+
+  if (!Number.isFinite(timestamp)) {
+    return false;
+  }
+
+  // Reject clearly impossible dates, but do not impose a
+  // business-level "live window" on the timetable feed.
+  const year = value.getUTCFullYear();
+
+  return year >= 2020 && year <= 2100;
+}
+
 export async function refreshOnce(): Promise<{
   subscriptionCount: number;
   eventCount: number;
+  parsedEvents: number;
+  invalidActualTimeEvents: number;
+  acceptedEvents: number;
   successful: number;
   failed: number;
   events: Array<{
@@ -109,6 +126,9 @@ export async function refreshOnce(): Promise<{
 
   let successful = 0;
   let failed = 0;
+  let parsedEvents = 0;
+  let invalidActualTimeEvents = 0;
+  let acceptedEvents = 0;
 
   for (const subscriptionId of config.subscriptionIds) {
     try {
@@ -129,16 +149,42 @@ export async function refreshOnce(): Promise<{
       }
 
       successful++;
+      parsedEvents += events.length;
+
+      let subscriptionAccepted = 0;
 
       for (const event of events) {
+        const actualValid = isValidTrainTime(event.actualTime);
+
+        if (!actualValid) {
+          invalidActualTimeEvents++;
+
+          console.warn(
+            `[Mobilithek] dropping invalid timestamp`,
+            JSON.stringify({
+              subscriptionId,
+              id: event.id,
+              journeyRef: event.journeyRef,
+              actualTime: event.actualTime?.toISOString?.(),
+              scheduledTime: event.scheduledTime?.toISOString?.(),
+            }),
+          );
+
+          continue;
+        }
+
         snapshotEvents.push({
           subscriptionId,
           event,
         });
+
+        acceptedEvents++;
+        subscriptionAccepted++;
       }
 
       console.log(
-        `[Mobilithek] ${subscriptionId}: ${events.length} events`,
+        `[Mobilithek] ${subscriptionId}: ${events.length} parsed, ` +
+          `${subscriptionAccepted} accepted`,
       );
     } catch (error) {
       failed++;
@@ -152,9 +198,19 @@ export async function refreshOnce(): Promise<{
     }
   }
 
+  console.log(
+    `[Mobilithek] refresh stats: ` +
+      `parsed=${parsedEvents} ` +
+      `invalidActualTime=${invalidActualTimeEvents} ` +
+      `accepted=${acceptedEvents}`,
+  );
+
   return {
     subscriptionCount: config.subscriptionIds.length,
     eventCount: snapshotEvents.length,
+    parsedEvents,
+    invalidActualTimeEvents,
+    acceptedEvents,
     successful,
     failed,
     events: snapshotEvents,
