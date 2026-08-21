@@ -108,7 +108,7 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
 // workers/mobilithek-refresh: XML with EstimatedVehicleJourney => siri-journey, XML with
 // FacilityMonitoringDelivery/FacilityCondition => siri-facility, anything non-XML => gtfs-rt
 // (protobuf), everything else => unknown.
-function classifyFeed(bytes: Buffer): MobilithekFeedKind {
+export function classifyFeed(bytes: Buffer): MobilithekFeedKind {
   const preview = bytes.subarray(0, Math.min(bytes.length, 512_000)).toString("utf8");
   const trimmed = preview.trimStart();
   if (trimmed.startsWith("<")) {
@@ -129,7 +129,7 @@ function countFacilityStatuses(body: string) {
 
 // GTFS-RT (protobuf) TripUpdates parser, mirroring the logic already proven in
 // workers/mobilithek-refresh/src/adapters/gtfs-rt.ts, adapted to MobilithekTrainEvent.
-function parseGtfsRtTripUpdates(bytes: Buffer): MobilithekTrainEvent[] {
+export function parseGtfsRtTripUpdates(bytes: Buffer): MobilithekTrainEvent[] {
   let feed: any;
   try {
     feed = (GtfsRealtimeBindings as any).transit_realtime.FeedMessage.decode(bytes);

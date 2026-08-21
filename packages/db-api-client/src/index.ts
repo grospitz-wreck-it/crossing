@@ -7,3 +7,14 @@ export async function getNextTrainEta() {
     now.getTime() + 5 * 60 * 1000
   );
 }
+export {
+  classifyFeed,
+  parseBody,
+  parseGtfsRtTripUpdates,
+  filterMobilithekTrains,
+} from "./mobilithekTimetable";
+
+export type {
+  MobilithekTrainEvent,
+  MobilithekFeedKind,
+} from "./mobilithekTimetable";
