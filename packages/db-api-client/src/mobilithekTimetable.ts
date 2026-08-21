@@ -85,7 +85,29 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
     const calls = findAll(journey, "EstimatedCall").map((call) => {
       const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef"]) || "";
       const planned = dateValue(call, ["AimedArrivalTime", "AimedDepartureTime", "PlannedArrivalTime", "PlannedDepartureTime"]);
-      const actual = dateValue(call, ["ExpectedArrivalTime", "ExpectedDepartureTime", "EstimatedArrivalTime", "EstimatedDepartureTime", "ActualArrivalTime", "ActualDepartureTime"]);
+      let actual = dateValue(call, ["ExpectedArrivalTime", "ExpectedDepartureTime", "EstimatedArrivalTime", "EstimatedDepartureTime", "ActualArrivalTime", "ActualDepartureTime"]);
+
+      // SIRI can occasionally contain technically valid but obviously corrupt
+      // realtime timestamps (e.g. an actual time decades away from the
+      // scheduled time). Never turn those into huge delays.
+      if (actual && planned) {
+        const difference = Math.abs(actual.getTime() - planned.getTime());
+        const MAX_REASONABLE_DEVIATION_MS = 7 * 24 * 60 * 60 * 1000;
+
+        if (difference > MAX_REASONABLE_DEVIATION_MS) {
+          console.warn(
+            "[Mobilithek] ignoring implausible actual timestamp",
+            JSON.stringify({
+              name,
+              planned: planned.toISOString(),
+              actual: actual.toISOString(),
+            }),
+          );
+
+          actual = undefined;
+        }
+      }
+
       return { name, planned, actual };
     }).filter((call) => call.name && (call.planned || call.actual));
     if (!calls.length) continue;
