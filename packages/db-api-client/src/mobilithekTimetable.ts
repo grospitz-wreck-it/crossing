@@ -269,35 +269,46 @@ async function fetchAllFeeds(): Promise<FetchedFeed[]> {
     throw new Error("Keine MOBILITHEK_SUBSCRIPTION_ID* Variablen konfiguriert");
   }
 
-  const results = await Promise.allSettled(
-    ids.map(async (id) => {
+  const successful: FetchedFeed[] = [];
+  const failed: string[] = [];
+
+  // IMPORTANT: Feeds bewusst SEQUENZIELL laden.
+  // Große Mobilithek-SIRI-Feeds können mehrere Dutzend MB groß sein.
+  // Promise.allSettled() würde alle Payloads gleichzeitig im Vercel-RAM halten.
+  for (const id of ids) {
+    try {
       const now = Date.now();
       const existing = cached.get(id);
 
       if (existing && existing.expiresAt > now) {
-        return { id, body: existing.body, bytes: existing.bytes, contentType: existing.contentType };
+        successful.push({
+          id,
+          body: existing.body,
+          bytes: existing.bytes,
+          contentType: existing.contentType,
+        });
+        continue;
       }
 
       const feed = await fetchFeed(id);
-      return { id, body: feed.body, bytes: feed.bytes, contentType: feed.contentType };
-    }),
-  );
 
-  const successful = results
-    .filter(
-      (result): result is PromiseFulfilledResult<FetchedFeed> =>
-        result.status === "fulfilled",
-    )
-    .map((result) => result.value);
-
-  const failed = results.filter((result) => result.status === "rejected");
+      successful.push({
+        id,
+        body: feed.body,
+        bytes: feed.bytes,
+        contentType: feed.contentType,
+      });
+    } catch (error) {
+      failed.push(
+        `${id}: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
 
   if (failed.length) {
     console.warn(
       `Mobilithek: ${failed.length}/${ids.length} Subscriptions fehlgeschlagen`,
-      failed.map((result) =>
-        result.status === "rejected" ? result.reason?.message || String(result.reason) : "",
-      ),
+      failed,
     );
   }
 
