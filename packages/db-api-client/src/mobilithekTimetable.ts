@@ -13,6 +13,45 @@ const LAST_GOOD_CACHE_TTL_MS = 120_000;
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
 type Call = { name: string; planned?: Date; actual?: Date };
+export function normalizeMobilithekLine(value: unknown): string | null {
+  if (value == null) return null;
+
+  const normalized = String(value)
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return null;
+
+  // Technical SIRI LineRef, e.g. de:nrw:s28:
+  const technicalSMatch = normalized.match(
+    /^de:[^:]+:s[\s-]*(\d+[A-Za-z]?):?$/i,
+  );
+  if (technicalSMatch) {
+    return `S${technicalSMatch[1].toUpperCase()}`;
+  }
+
+  // S-Bahn: S 28 / S28 / S-28 -> S28
+  const sMatch = normalized.match(/^S[\s-]*(\d+[A-Za-z]?)$/i);
+  if (sMatch) {
+    return `S${sMatch[1].toUpperCase()}`;
+  }
+
+  // Regionalbahn: RB71 / RB 71 / RB-71 -> RB 71
+  const rbMatch = normalized.match(/^RB[\s-]*(\d+[A-Za-z]?)$/i);
+  if (rbMatch) {
+    return `RB ${rbMatch[1].toUpperCase()}`;
+  }
+
+  // Regional-Express: RE6 / RE 6 / RE-6 -> RE 6
+  const reMatch = normalized.match(/^RE[\s-]*(\d+[A-Za-z]?)$/i);
+  if (reMatch) {
+    return `RE ${reMatch[1].toUpperCase()}`;
+  }
+
+  // Other line names remain untouched apart from whitespace normalization.
+  return normalized;
+}
+
 export type MobilithekTrainEvent = {
   id: string; line: string; category: string; journeyNumber: number; journeyRef: string;
   origin?: string; destination?: string; route: string[]; calls: Call[];
@@ -80,8 +119,27 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
   const events: MobilithekTrainEvent[] = [];
   for (let index = 0; index < journeys.length; index += 1) {
     const journey = journeys[index];
-    const line = firstText(journey, ["PublishedLineName", "LineRef", "LineName"]) || "";
-    const journeyRef = firstText(journey, ["DatedVehicleJourneyRef", "VehicleJourneyRef", "VehicleJourneyName"]) || `${line}-${index}`;
+
+    const publishedLineName =
+      firstText(journey, ["PublishedLineName"]);
+
+    const lineRef =
+      firstText(journey, ["LineRef"]);
+
+    const fallbackLineName =
+      firstText(journey, ["LineName"]);
+
+    const line =
+      normalizeMobilithekLine(publishedLineName) ??
+      normalizeMobilithekLine(lineRef) ??
+      normalizeMobilithekLine(fallbackLineName) ??
+      "";
+
+    const journeyRef =
+      firstText(
+        journey,
+        ["DatedVehicleJourneyRef", "VehicleJourneyRef", "VehicleJourneyName"],
+      ) || `${line}-${index}`;
     const calls = findAll(journey, "EstimatedCall").map((call) => {
       const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef"]) || "";
       const planned = dateValue(call, ["AimedArrivalTime", "AimedDepartureTime", "PlannedArrivalTime", "PlannedDepartureTime"]);
@@ -112,7 +170,21 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
     }).filter((call) => call.name && (call.planned || call.actual));
     if (!calls.length) continue;
     const route = calls.map((call) => call.name);
-    const relevant = calls.find((call) => { const time = call.actual || call.planned; return time && time.getTime() >= now - 5 * 60_000; });
+    const MIN_RELEVANT_TIME_MS = now - 5 * 60_000;
+    const MAX_RELEVANT_TIME_MS = now + 24 * 60 * 60_000;
+
+    const relevant = calls.find((call) => {
+      const time = call.actual || call.planned;
+      if (!time) return false;
+
+      const timestamp = time.getTime();
+
+      return (
+        timestamp >= MIN_RELEVANT_TIME_MS &&
+        timestamp <= MAX_RELEVANT_TIME_MS
+      );
+    });
+
     if (!relevant) continue;
     const actualTime = relevant.actual || relevant.planned;
     const scheduledTime = relevant.planned || relevant.actual;
