@@ -4,7 +4,10 @@ import { gunzipSync } from "node:zlib";
 import GtfsRealtimeBindings from "gtfs-realtime-bindings";
 
 const DEFAULT_URL = "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
-const CACHE_TTL_MS = 30_000;
+// Rohfeeds sind sehr groß (teilweise mehrere Dutzend MB).
+// Sie werden NICHT längerfristig im Process-RAM gecached.
+// Der kompakte Event-Cache darunter übernimmt die Request-Entlastung.
+const CACHE_TTL_MS = 0;
 const PARSED_CACHE_TTL_MS = 25_000;
 const LAST_GOOD_CACHE_TTL_MS = 120_000;
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
@@ -240,15 +243,8 @@ async function fetchFeed(subscriptionId: string): Promise<{ body: string; bytes:
             );
           }
 
-          cached.set(subscriptionId, {
-            expiresAt: Date.now() + CACHE_TTL_MS,
-            body,
-            bytes,
-            contentType,
-            lastModified:
-              String(response.headers["last-modified"] || "") || undefined,
-          });
-
+          // Do not retain the full feed in process memory.
+          // The registry keeps only normalized train events.
           resolve({ body, bytes, contentType });
         });
       },
@@ -262,45 +258,68 @@ async function fetchFeed(subscriptionId: string): Promise<{ body: string; bytes:
   });
 }
 
-async function fetchAllFeeds(): Promise<FetchedFeed[]> {
-  const ids = getMobilithekSubscriptionIds();
-
-  if (!ids.length) {
-    throw new Error("Keine MOBILITHEK_SUBSCRIPTION_ID* Variablen konfiguriert");
-  }
-
-  const successful: FetchedFeed[] = [];
+async function processMobilithekFeeds(
+  ids: string[],
+): Promise<MobilithekTrainEvent[]> {
+  const allEvents: MobilithekTrainEvent[] = [];
   const failed: string[] = [];
 
-  // IMPORTANT: Feeds bewusst SEQUENZIELL laden.
-  // Große Mobilithek-SIRI-Feeds können mehrere Dutzend MB groß sein.
-  // Promise.allSettled() würde alle Payloads gleichzeitig im Vercel-RAM halten.
+  // IMPORTANT:
+  // Exactly one large Mobilithek feed is processed at a time.
+  // Do not collect FetchedFeed[] first: large SIRI feeds can consume
+  // tens of MB as Buffer + UTF-8 string + parsed XML.
   for (const id of ids) {
     try {
       const now = Date.now();
       const existing = cached.get(id);
 
+      let body: string;
+      let bytes: Buffer;
+
       if (existing && existing.expiresAt > now) {
-        successful.push({
-          id,
-          body: existing.body,
-          bytes: existing.bytes,
-          contentType: existing.contentType,
-        });
-        continue;
+        body = existing.body;
+        bytes = existing.bytes;
+      } else {
+        const feed = await fetchFeed(id);
+        body = feed.body;
+        bytes = feed.bytes;
       }
 
-      const feed = await fetchFeed(id);
+      let events: MobilithekTrainEvent[] = [];
 
-      successful.push({
-        id,
-        body: feed.body,
-        bytes: feed.bytes,
-        contentType: feed.contentType,
-      });
+      try {
+        const kind = classifyFeed(bytes);
+
+        if (kind === "siri-journey") {
+          events = parseBody(body);
+        } else if (kind === "gtfs-rt") {
+          events = parseGtfsRtTripUpdates(bytes);
+        } else {
+          // siri-facility / unknown do not produce train events.
+          events = [];
+        }
+      } catch (error) {
+        console.warn(
+          `Mobilithek: Feed ${id} konnte nicht geparst werden`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+
+      for (const event of events) {
+        allEvents.push({
+          ...event,
+          id: `${id}:${event.id}`,
+          journeyRef: `${id}:${event.journeyRef}`,
+        });
+      }
+
+      // Drop local references before processing the next subscription.
+      events = [];
+      body = "";
+      bytes = Buffer.alloc(0);
     } catch (error) {
       failed.push(
-        `${id}: ${error instanceof Error ? error.message : String(error)}`
+        `${id}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
@@ -312,12 +331,9 @@ async function fetchAllFeeds(): Promise<FetchedFeed[]> {
     );
   }
 
-  if (!successful.length) {
-    throw new Error("Alle Mobilithek-Subscriptions fehlgeschlagen");
-  }
-
-  return successful;
+  return allEvents;
 }
+
 export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent[]> {
   const now = Date.now();
   const ids = getMobilithekSubscriptionIds();
@@ -337,42 +353,8 @@ export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent
   }
 
   if (!inFlight) {
-    inFlight = fetchAllFeeds()
-      .then((feeds) => {
-        const allEvents: MobilithekTrainEvent[] = [];
-
-        for (const feed of feeds) {
-          let events: MobilithekTrainEvent[] = [];
-
-          try {
-            const kind = classifyFeed(feed.bytes);
-            if (kind === "siri-journey") {
-              events = parseBody(feed.body);
-            } else if (kind === "gtfs-rt") {
-              events = parseGtfsRtTripUpdates(feed.bytes);
-            } else {
-              // siri-facility and unknown feeds carry no journey/train events for the
-              // registry; they are valid feeds, just not journey sources, so we skip
-              // them here without treating this as an error.
-              events = [];
-            }
-          } catch (error) {
-            console.warn(
-              `Mobilithek: Feed ${feed.id} konnte nicht geparst werden`,
-              error instanceof Error ? error.message : String(error),
-            );
-            events = [];
-          }
-
-          for (const event of events) {
-            allEvents.push({
-              ...event,
-              id: `${feed.id}:${event.id}`,
-              journeyRef: `${feed.id}:${event.journeyRef}`,
-            });
-          }
-        }
-
+    inFlight = processMobilithekFeeds(ids)
+      .then((allEvents) => {
         const unique = new Map<string, MobilithekTrainEvent>();
 
         for (const event of allEvents) {
@@ -382,7 +364,9 @@ export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent
             event.actualTime.toISOString(),
           ].join("|");
 
-          if (!unique.has(key)) unique.set(key, event);
+          if (!unique.has(key)) {
+            unique.set(key, event);
+          }
         }
 
         const events = Array.from(unique.values());
@@ -424,6 +408,7 @@ export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent
 
   return inFlight;
 }
+
 export async function getMobilithekTrainDiagnostics() {
   const subscriptionIds = getMobilithekSubscriptionIds();
   const feeds: Array<{
