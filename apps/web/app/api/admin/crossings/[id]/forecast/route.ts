@@ -62,9 +62,6 @@ function mobilithekCallForStation(train: MobilithekTrainEvent, station: string) 
 
 function ruleAllowsTrain(rule: any, train: MobilithekTrainEvent) {
   const categories = Array.isArray(rule.categories) ? rule.categories.map((v: any) => String(v).toUpperCase()) : [];
-  // The automatically generated ICE/IC/EC set is a legacy placeholder, not a
-  // restriction to long-distance trains. The selected OSM corridor is the
-  // authoritative filter for the crossing.
   const legacyLongDistance = categories.length === 3 && categories.includes("ICE") && categories.includes("IC") && categories.includes("EC");
   if (legacyLongDistance || !categories.length) return true;
   return categories.includes(String(train.category || "").toUpperCase()) || categories.some((category: string) => String(train.line || "").toUpperCase().includes(category));
@@ -129,9 +126,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const trainsByKey = new Map<string, any>();
   const stationResults: any[] = [];
 
-  // A crossing without an EVA is a route/infrastructure crossing. Do not fan
-  // out to arbitrary nearby station timetables: that was the source of the
-  // Hamburg/U-Bahn/10-km false positives seen in the admin forecast.
   if (!crossing.eva && throughRules.length) {
     try {
       const registry = await getMobilithekTrainRegistry();
@@ -139,7 +133,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         const station = String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || "").trim();
         if (!station) continue;
         for (const train of registry) {
-          if (train.cancelled || !ruleAllowsTrain(rule, train)) continue;
+          if (!ruleAllowsTrain(rule, train)) continue;
           if (!matchesCorridor(train.route || [], station, requiredRouteStops)) continue;
           const call = mobilithekCallForStation(train, station);
           if (!call?.actual) continue;
@@ -152,9 +146,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       stationResults.push({ role: "rule", ok: false, count: 0, error: error instanceof Error ? error.message : String(error) });
     }
   } else {
-    // EVA based crossings still use the official station timetable, but every
-    // observed train must match the configured route corridor. Never accept an
-    // entire station just because it happens to be nearby.
     const observationResults = await Promise.all(observationEvas.map(async (eva) => {
       try { return { eva, events: await getStationTimetable(eva, FORECAST_TIMETABLE_HOURS), error: null as any }; }
       catch (error) { return { eva, events: [] as any[], error: error instanceof Error ? error.message : String(error) }; }
