@@ -39,13 +39,14 @@ export async function writeSnapshot(
           origin,
           destination,
           route_json,
+          calls_json,
           delay_minutes,
           actual_time,
           scheduled_time,
           direction,
           source_subscription_id,
           refreshed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       args: [
         `${subscriptionId}:${event.id}:${event.actualTime.getTime()}:${event.journeyRef}`,
@@ -56,6 +57,9 @@ export async function writeSnapshot(
         event.origin ?? null,
         event.destination ?? null,
         JSON.stringify(event.route ?? []),
+        JSON.stringify(event.calls ?? [], (_, value) =>
+          value instanceof Date ? value.toISOString() : value
+        ),
         event.delayMinutes ?? 0,
         event.actualTime.toISOString(),
         event.scheduledTime.toISOString(),
