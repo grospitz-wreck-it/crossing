@@ -144,6 +144,77 @@ export async function refreshOnce(): Promise<{
 
       if (feed.kind === "siri-journey") {
         events = parseBody(feed.bytes.toString("utf8"));
+
+        const s28 = events.filter((event) => event.line === "S28");
+
+        if (s28.length > 0) {
+          const calls = s28.flatMap((event) => event.calls);
+          const withPlanned = calls.filter((call) => call.planned);
+          const withActual = calls.filter((call) => call.actual);
+          const withBoth = calls.filter(
+            (call) => call.planned && call.actual,
+          );
+
+          const delayed = s28.filter(
+            (event) => event.delayMinutes > 0,
+          );
+          const early = s28.filter(
+            (event) => event.delayMinutes < 0,
+          );
+          const onTime = s28.filter(
+            (event) => event.delayMinutes === 0,
+          );
+
+          const routes = s28
+            .map((event) => event.route.length)
+            .filter((length) => length > 0);
+
+          console.log(
+            "[Mobilithek SIRI DIAGNOSTIC] S28",
+            JSON.stringify(
+              {
+                journeys: s28.length,
+                calls: calls.length,
+                withPlanned: withPlanned.length,
+                withActual: withActual.length,
+                withBoth: withBoth.length,
+                delayed: delayed.length,
+                early: early.length,
+                onTime: onTime.length,
+                shortestRoute: routes.length
+                  ? Math.min(...routes)
+                  : 0,
+                longestRoute: routes.length
+                  ? Math.max(...routes)
+                  : 0,
+                samples: s28.slice(0, 3).map((event) => ({
+                  id: event.id,
+                  journeyRef: event.journeyRef,
+                  origin: event.origin,
+                  destination: event.destination,
+                  direction: event.direction,
+                  delayMinutes: event.delayMinutes,
+                  route: event.route,
+                  calls: event.calls.map((call) => ({
+                    stop: call.name,
+                    planned: call.planned?.toISOString() ?? null,
+                    actual: call.actual?.toISOString() ?? null,
+                    delayMinutes:
+                      call.planned && call.actual
+                        ? Math.round(
+                            (call.actual.getTime() -
+                              call.planned.getTime()) /
+                              60000,
+                          )
+                        : null,
+                  })),
+                })),
+              },
+              null,
+              2,
+            ),
+          );
+        }
       } else if (feed.kind === "gtfs-rt") {
         events = parseGtfsRtTripUpdates(feed.bytes);
       }
