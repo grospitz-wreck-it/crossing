@@ -1,0 +1,26 @@
+-- Retroactive migration.
+--
+-- The `calls_json` column was already added directly to the production
+-- Turso database via `ALTER TABLE` before this migration file was written.
+-- This file exists purely to document that schema change in the repo, so
+-- future environments (staging, a fresh Turso DB, disaster recovery) end up
+-- with the same schema as production.
+--
+-- DO NOT run this against the existing production database — the column
+-- already exists there and `ADD COLUMN` will fail with a duplicate-column
+-- error. Only run this against a database that does NOT yet have the
+-- column (e.g. a freshly created mobilithek_train_snapshot table that only
+-- has the original columns).
+--
+-- Verified against production on 2026-08-23 via:
+--   SELECT sql FROM sqlite_master WHERE type='table'
+--     AND name='mobilithek_train_snapshot';
+--
+-- Stores the individual stop-level call data (stop name, planned/actual
+-- times) for each Mobilithek journey event, as JSON. Introduced alongside
+-- the SIRI/GTFS-RT feed-type-aware parsing in
+-- packages/db-api-client/src/mobilithekTimetable.ts so downstream
+-- consumers (diagnostics, snapshot analysis) can inspect per-stop timing,
+-- not just the aggregate route names already stored in route_json.
+
+ALTER TABLE mobilithek_train_snapshot ADD COLUMN calls_json TEXT;
