@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
 import { db } from "../../../../lib/db";
+import { linkCrossingToOsm } from "../../../../lib/crossingOsmMatcher";
 
 export async function POST(request: Request) {
   try {
@@ -34,7 +35,26 @@ export async function POST(request: Request) {
       });
     }
 
-    return Response.json({ id, ok: true }, { status: 201 });
+    let osmMatch = null;
+    try {
+      osmMatch = await linkCrossingToOsm(db, id, lat, lon, routeRef);
+      if (osmMatch) {
+        console.log(
+          `OSM MATCH ${name} -> ${osmMatch.osmCrossingId} ` +
+          `distance=${osmMatch.distanceMeters.toFixed(1)}m ` +
+          `method=${osmMatch.matchMethod} ` +
+          `confidence=${osmMatch.confidence}`,
+        );
+      } else {
+        console.log(`OSM MATCH ${name} -> no suitable local OSM crossing`);
+      }
+    } catch (error) {
+      // OSM matching is an enrichment step. A temporary DB issue must not
+      // prevent the actual crossing from being created.
+      console.error("OSM auto-match failed:", error);
+    }
+
+    return Response.json({ id, ok: true, osmMatch }, { status: 201 });
   } catch (error) {
     console.error("POST /api/admin/crossings/save failed:", error);
     return Response.json({ error: error instanceof Error ? error.message : String(error) }, { status: 500 });
