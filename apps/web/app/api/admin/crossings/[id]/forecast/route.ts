@@ -7,7 +7,7 @@ const MAX_DIRECT_OBSERVATION_STATIONS = 6;
 const MAX_RULE_STATIONS = 8;
 const FORECAST_TIMETABLE_HOURS = 1;
 const FORECAST_CACHE_TTL_MS = 60_000;
-const FORECAST_VERSION = 4;
+const FORECAST_VERSION = 5;
 function normalizeStationName(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function normalizeLine(value: unknown) { return String(value || "").toUpperCase().replace(/\s+/g, "").replace(/[._-]/g, ""); }
 function routeIndex(route: string[], station: string) { const target = normalizeStationName(station); if (!target) return -1; return route.findIndex((stop) => { const value = normalizeStationName(stop); return value === target || value.includes(target) || target.includes(value); }); }
@@ -24,10 +24,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
   const crossing: any = result.rows[0];
   if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
-  const requiredRouteStops = jsonArray(crossing.required_route_stops).map((v) => String(v || "").trim()).filter(Boolean);
-  const infrastructureRefs = requiredRouteStops.filter((value) => /^\d{2,6}$/.test(value));
-  const isInfrastructureForecast = infrastructureRefs.length > 0;
-  const lineHints = isInfrastructureForecast ? [infrastructureRefs.includes("2530") ? "S28" : ""] .filter(Boolean) : Array.from(new Set([...(Array.isArray(osmRoute?.lineRelations) ? osmRoute.lineRelations.flatMap((relation: any) => [relation.ref, relation.name]).filter(Boolean) : []), ...requiredRouteStops].map(String).filter(Boolean)));
+  const storedRouteStops = jsonArray(crossing.required_route_stops).map((v) => String(v || "").trim()).filter(Boolean);
+  const osmRefs = Array.isArray(osmRoute?.railwayRefs) ? osmRoute.railwayRefs.map(String) : [];
+  const infrastructureRefs = Array.from(new Set([...storedRouteStops.filter((value) => /^\d{2,6}$/.test(value)), ...osmRefs.filter((value) => /^\d{2,6}$/.test(value))]));
+  const isInfrastructureForecast = infrastructureRefs.length > 0 || /strecke\s*2530/i.test(String(crossing.name || ""));
+  const lineHints = isInfrastructureForecast ? [infrastructureRefs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || "")) ? "S28" : ""].filter(Boolean) : Array.from(new Set([...(Array.isArray(osmRoute?.lineRelations) ? osmRoute.lineRelations.flatMap((relation: any) => [relation.ref, relation.name]).filter(Boolean) : []), ...storedRouteStops].map(String).filter(Boolean)));
   const stationLinks = await db.execute({ sql: `SELECT eva,station_name,role,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }).catch(() => ({ rows: [] as any[] }));
   const stationNameByEva = new Map<string, string>();
   for (const row of stationLinks.rows as any[]) { const eva = String(row.eva || "").trim(); if (eva) stationNameByEva.set(eva, String(row.station_name || eva)); }
@@ -39,10 +40,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const now = Date.now();
   const trainsByKey = new Map<string, any>();
   const stationResults: any[] = [];
-
-  // Infrastructure crossings (e.g. railway ref 2530) are NOT stations. Use the
-  // official S28 train registry and the configured observation station(s) to
-  // project the train to the crossing. Never call a giant station timetable here.
   if (isInfrastructureForecast) {
     try {
       const registry = await getMobilithekTrainRegistry();
@@ -54,7 +51,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         let matched = 0;
         for (const train of scopedRegistry) {
           if (!ruleAllowsTrain(rule, train, lineHints)) continue;
-          if (!matchesCorridor(train.route || [], rule.observationStation, requiredRouteStops)) continue;
+          if (!matchesCorridor(train.route || [], rule.observationStation, infrastructureRefs)) continue;
           const call = mobilithekCallForStation(train, rule.observationStation);
           const observationTime = call?.actual || call?.planned;
           if (!observationTime) continue;
@@ -71,13 +68,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       const scopedRegistry = lineHints.length ? registry.filter((train) => lineMatchesHints(train, lineHints)) : registry;
       for (const rule of storedThroughRules) {
         const station = String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || "").trim(); if (!station) continue;
-        for (const train of scopedRegistry) { if (!ruleAllowsTrain(rule, train, lineHints)) continue; if (!matchesCorridor(train.route || [], station, requiredRouteStops)) continue; const call = mobilithekCallForStation(train, station); const observationTime = call?.actual || call?.planned; if (!observationTime) continue; addCandidate(trainsByKey, crossing, train, rule, station, new Date(observationTime.getTime() + Number(rule.fallbackOffsetSeconds || 0) * 1000), now, "through-rule"); }
+        for (const train of scopedRegistry) { if (!ruleAllowsTrain(rule, train, lineHints)) continue; if (!matchesCorridor(train.route || [], station, storedRouteStops)) continue; const call = mobilithekCallForStation(train, station); const observationTime = call?.actual || call?.planned; if (!observationTime) continue; addCandidate(trainsByKey, crossing, train, rule, station, new Date(observationTime.getTime() + Number(rule.fallbackOffsetSeconds || 0) * 1000), now, "through-rule"); }
         stationResults.push({ eva: String(rule.observationEva || ""), stationName: station, role: "rule", ok: true, count: scopedRegistry.length, lineHints });
       }
     } catch (error) { stationResults.push({ role: "rule", ok: false, count: 0, error: error instanceof Error ? error.message : String(error) }); }
   } else {
     const observationResults = await Promise.all(observationEvas.map(async (eva) => { try { return { eva, events: await getStationTimetable(eva, FORECAST_TIMETABLE_HOURS), error: null as any }; } catch (error) { return { eva, events: [] as any[], error: error instanceof Error ? error.message : String(error) }; } }));
-    for (const { eva, events, error } of observationResults) { const stationName = stationNameByEva.get(eva) || eva; if (error) { stationResults.push({ eva, stationName, role: "observation", count: 0, ok: false, error }); continue; } const scopedEvents = lineHints.length ? events.filter((train: any) => lineMatchesHints(train, lineHints)) : events; stationResults.push({ eva, stationName, role: "observation", count: scopedEvents.length, ok: true, lineHints }); for (const train of scopedEvents) { if (train.cancelled || train.actualTime.getTime() <= now - 60000) continue; if (!matchesCorridor(train.route || [], stationName, requiredRouteStops)) continue; addCandidate(trainsByKey, crossing, train as any, { observationEva: eva }, stationName, train.actualTime, now, "observation"); } }
+    for (const { eva, events, error } of observationResults) { const stationName = stationNameByEva.get(eva) || eva; if (error) { stationResults.push({ eva, stationName, role: "observation", count: 0, ok: false, error }); continue; } const scopedEvents = lineHints.length ? events.filter((train: any) => lineMatchesHints(train, lineHints)) : events; stationResults.push({ eva, stationName, role: "observation", count: scopedEvents.length, ok: true, lineHints }); for (const train of scopedEvents) { if (train.cancelled || train.actualTime.getTime() <= now - 60000) continue; if (!matchesCorridor(train.route || [], stationName, storedRouteStops)) continue; addCandidate(trainsByKey, crossing, train as any, { observationEva: eva }, stationName, train.actualTime, now, "observation"); } }
   }
   for (const eva of contextEvas.slice(0, 2)) if (!storedThroughRules.some((rule: any) => String(rule.observationEva || "") === eva)) stationResults.push({ eva, stationName: stationNameByEva.get(eva) || eva, role: "context", rule: false, ok: true });
   const trains = [...trainsByKey.values()].filter((train) => train.etaSeconds > 0).sort((a, b) => a.etaSeconds - b.etaSeconds);
@@ -85,7 +82,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   for (const train of trains) { const start = new Date(train.closeAt); const end = new Date(train.openAt); const last = closures[closures.length - 1]; if (!last || start.getTime() > last.end.getTime() + 30000) closures.push({ start, end, trains: [train] }); else { if (end.getTime() > last.end.getTime()) last.end = end; last.trains.push(train); } }
   const nextClosure = closures.find((closure) => closure.end.getTime() > now) || null;
   let state = "OPEN"; if (nextClosure && now >= nextClosure.start.getTime() && now < nextClosure.end.getTime()) state = "CLOSED";
-  const payload = { forecastVersion: FORECAST_VERSION, crossing: { id: String(crossing.id), name: String(crossing.name), lat: Number(crossing.lat), lon: Number(crossing.lon), route: requiredRouteStops, lineHints }, state, nextClosure: nextClosure ? { start: nextClosure.start.toISOString(), end: nextClosure.end.toISOString(), closeInSeconds: Math.max(0, Math.floor((nextClosure.start.getTime() - now) / 1000)), openInSeconds: Math.max(0, Math.floor((nextClosure.end.getTime() - now) / 1000)), trains: nextClosure.trains } : null, closures: closures.slice(0, 30).map((closure) => ({ start: closure.start.toISOString(), end: closure.end.toISOString(), durationMinutes: Math.round((closure.end.getTime() - closure.start.getTime()) / 60000), trainCount: closure.trains.length, trains: closure.trains })), trains, stations: stationResults, rules: { requiredRouteStops, throughRules: storedThroughRules, diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules), apiProtection: { maxDirectObservationStations: MAX_DIRECT_OBSERVATION_STATIONS, maxRuleStations: MAX_RULE_STATIONS, timetableHours: FORECAST_TIMETABLE_HOURS, routeOnlyForInfrastructureCrossings: true } } };
+  const payload = { forecastVersion: FORECAST_VERSION, crossing: { id: String(crossing.id), name: String(crossing.name), lat: Number(crossing.lat), lon: Number(crossing.lon), route: storedRouteStops, lineHints, infrastructureRefs }, state, nextClosure: nextClosure ? { start: nextClosure.start.toISOString(), end: nextClosure.end.toISOString(), closeInSeconds: Math.max(0, Math.floor((nextClosure.start.getTime() - now) / 1000)), openInSeconds: Math.max(0, Math.floor((nextClosure.end.getTime() - now) / 1000)), trains: nextClosure.trains } : null, closures: closures.slice(0, 30).map((closure) => ({ start: closure.start.toISOString(), end: closure.end.toISOString(), durationMinutes: Math.round((closure.end.getTime() - closure.start.getTime()) / 60000), trainCount: closure.trains.length, trains: closure.trains })), trains, stations: stationResults, rules: { requiredRouteStops: storedRouteStops, throughRules: storedThroughRules, diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules), apiProtection: { maxDirectObservationStations: MAX_DIRECT_OBSERVATION_STATIONS, maxRuleStations: MAX_RULE_STATIONS, timetableHours: FORECAST_TIMETABLE_HOURS, routeOnlyForInfrastructureCrossings: true } } };
   await writeCrossingForecastCache(id, payload);
   return Response.json(payload, { headers: { "X-Crossing-Forecast-Cache": "MISS" } });
 }
