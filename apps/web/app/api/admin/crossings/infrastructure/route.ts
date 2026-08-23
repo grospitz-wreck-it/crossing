@@ -7,56 +7,19 @@ type Candidate = { kind: "route" | "track"; routeType: "tracks" | "railway" | "t
 const INFRASTRUCTURE_TYPES = new Set(["rail", "tram", "light_rail"]);
 const ROUTE_RELATION_TYPES = new Set(["train", "tram", "light_rail", "railway", "tracks"]);
 
-function pointSegmentDistanceMeters(lat: number, lon: number, a: Point, b: Point) {
-  const scale = 111320;
-  const x = (lon - a.lon) * scale * Math.cos((lat * Math.PI) / 180);
-  const y = (lat - a.lat) * scale;
-  const bx = (b.lon - a.lon) * scale * Math.cos((lat * Math.PI) / 180);
-  const by = (b.lat - a.lat) * scale;
-  const denom = bx * bx + by * by;
-  let t = denom ? (x * bx + y * by) / denom : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(x - bx * t, y - by * t);
-}
+function pointSegmentDistanceMeters(lat: number, lon: number, a: Point, b: Point) { const scale = 111320; const x = (lon - a.lon) * scale * Math.cos((lat * Math.PI) / 180); const y = (lat - a.lat) * scale; const bx = (b.lon - a.lon) * scale * Math.cos((lat * Math.PI) / 180); const by = (b.lat - a.lat) * scale; const denom = bx * bx + by * by; let t = denom ? (x * bx + y * by) / denom : 0; t = Math.max(0, Math.min(1, t)); return Math.hypot(x - bx * t, y - by * t); }
 function geometryDistanceMeters(lat: number, lon: number, geometry: Point[]) { let best = Infinity; for (let i = 1; i < geometry.length; i += 1) best = Math.min(best, pointSegmentDistanceMeters(lat, lon, geometry[i - 1], geometry[i])); return best; }
 function normalizeRouteRef(value: string) { return value.trim().toUpperCase().replace(/\s+/g, " "); }
 function normalizeRouteName(value: string) { return value.trim().toLowerCase().replace(/[^a-z0-9äöüß]+/gi, " ").replace(/\s+/g, " ").trim(); }
-function makeCandidate(lat: number, lon: number, geometry: Point[], tags: Record<string, string | undefined>, wayId: number, source: string): Candidate | null {
-  const distanceMeters = geometryDistanceMeters(lat, lon, geometry); if (!Number.isFinite(distanceMeters) || distanceMeters > 200) return null;
-  const infrastructureType = tags.railway === "tram" ? "tram" : tags.railway === "light_rail" ? "light_rail" : "rail";
-  return { kind: "track", routeType: infrastructureType === "tram" ? "tram" : infrastructureType === "light_rail" ? "light_rail" : "track", infrastructureType, ref: String(tags.ref || ""), name: String(tags.name || ""), from: String(tags.from || ""), to: String(tags.to || ""), distanceMeters: Math.round(distanceMeters), wayId, relationId: null, lineRelations: [], source, waysCount: 1, segments: [geometry] };
-}
+function makeCandidate(lat: number, lon: number, geometry: Point[], tags: Record<string, string | undefined>, wayId: number, source: string): Candidate | null { const distanceMeters = geometryDistanceMeters(lat, lon, geometry); if (!Number.isFinite(distanceMeters) || distanceMeters > 200) return null; const infrastructureType = tags.railway === "tram" ? "tram" : tags.railway === "light_rail" ? "light_rail" : "rail"; return { kind: "track", routeType: infrastructureType === "tram" ? "tram" : infrastructureType === "light_rail" ? "light_rail" : "track", infrastructureType, ref: String(tags.ref || ""), name: String(tags.name || ""), from: String(tags.from || ""), to: String(tags.to || ""), distanceMeters: Math.round(distanceMeters), wayId, relationId: null, lineRelations: [], source, waysCount: 1, segments: [geometry] }; }
 function mergeLineRelations(target: LineRelation[], incoming: LineRelation[]) { const seen = new Set(target.map((relation) => relation.id)); for (const relation of incoming) { if (seen.has(relation.id)) continue; target.push(relation); seen.add(relation.id); } }
-function enrichFromRelations(candidate: Candidate) {
-  const relations = candidate.lineRelations;
-  candidate.ref = candidate.ref || relations.map((r) => r.ref).find(Boolean) || "";
-  candidate.name = candidate.name || relations.map((r) => r.name).find(Boolean) || "";
-  candidate.from = candidate.from || relations.map((r) => r.from).find(Boolean) || "";
-  candidate.to = candidate.to || relations.map((r) => r.to).find(Boolean) || "";
-  candidate.relationId = candidate.relationId ?? relations[0]?.id ?? null;
-  candidate.kind = relations.length ? "route" : "track";
-}
-function groupCandidates(candidates: Candidate[]) {
-  const grouped = new Map<string, Candidate>();
-  for (const candidate of candidates) {
-    enrichFromRelations(candidate);
-    // Anonymous nearby tracks are deliberately not shown. We only expose a railway line when OSM actually links the local track to a named route relation.
-    if (!candidate.lineRelations.length && !candidate.ref) continue;
-    const ref = normalizeRouteRef(candidate.ref);
-    const relationRefs = candidate.lineRelations.map((r) => normalizeRouteRef(r.ref)).filter(Boolean).sort();
-    const name = normalizeRouteName(candidate.name);
-    const key = ref ? `ref:${candidate.infrastructureType}:${ref}` : relationRefs.length ? `relations:${candidate.infrastructureType}:${relationRefs.join(",")}` : `name:${candidate.infrastructureType}:${name}`;
-    const existing = grouped.get(key);
-    if (!existing) { grouped.set(key, { ...candidate, segments: [...candidate.segments], lineRelations: [...candidate.lineRelations] }); continue; }
-    existing.kind = "route"; existing.ref = existing.ref || candidate.ref; existing.name = existing.name || candidate.name; existing.from = existing.from || candidate.from; existing.to = existing.to || candidate.to; existing.relationId = existing.relationId ?? candidate.relationId; existing.waysCount += candidate.waysCount; existing.distanceMeters = Math.min(existing.distanceMeters, candidate.distanceMeters); existing.segments.push(...candidate.segments); mergeLineRelations(existing.lineRelations, candidate.lineRelations); enrichFromRelations(existing);
-  }
-  return [...grouped.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 8);
-}
+function enrichFromRelations(candidate: Candidate) { const relations = candidate.lineRelations; candidate.ref = candidate.ref || relations.map((r) => r.ref).find(Boolean) || ""; candidate.name = candidate.name || relations.map((r) => r.name).find(Boolean) || ""; candidate.from = candidate.from || relations.map((r) => r.from).find(Boolean) || ""; candidate.to = candidate.to || relations.map((r) => r.to).find(Boolean) || ""; candidate.relationId = candidate.relationId ?? relations[0]?.id ?? null; candidate.kind = relations.length ? "route" : "track"; }
+function groupCandidates(candidates: Candidate[]) { const grouped = new Map<string, Candidate>(); for (const candidate of candidates) { enrichFromRelations(candidate); if (!candidate.lineRelations.length && !candidate.ref) continue; const ref = normalizeRouteRef(candidate.ref); const relationRefs = candidate.lineRelations.map((r) => normalizeRouteRef(r.ref)).filter(Boolean).sort(); const name = normalizeRouteName(candidate.name); const key = ref ? `ref:${candidate.infrastructureType}:${ref}` : relationRefs.length ? `relations:${candidate.infrastructureType}:${relationRefs.join(",")}` : `name:${candidate.infrastructureType}:${name}`; const existing = grouped.get(key); if (!existing) { grouped.set(key, { ...candidate, segments: [...candidate.segments], lineRelations: [...candidate.lineRelations] }); continue; } existing.kind = "route"; existing.ref = existing.ref || candidate.ref; existing.name = existing.name || candidate.name; existing.from = existing.from || candidate.from; existing.to = existing.to || candidate.to; existing.relationId = existing.relationId ?? candidate.relationId; existing.waysCount += candidate.waysCount; existing.distanceMeters = Math.min(existing.distanceMeters, candidate.distanceMeters); existing.segments.push(...candidate.segments); mergeLineRelations(existing.lineRelations, candidate.lineRelations); enrichFromRelations(existing); } return [...grouped.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 8); }
 
 async function tryOverpass(lat: number, lon: number) {
-  // Only local railway ways + route relations that cover this local area.
-  // The previous 500m relation query returned unrelated lines in the vicinity.
-  const query = `[out:json][timeout:7];way(around:220,${lat},${lon})[railway~"^(rail|tram|light_rail)$"]->.localWays;.localWays out geom tags;rel(around:300,${lat},${lon})[type=route][route~"^(train|tram|light_rail|railway|tracks)$"]->.nearRoutes;.nearRoutes out tags members;`;
+  // Crucial: relations are resolved FROM THE LOCAL TRACK WAYS. This prevents
+  // unrelated railway lines in the surrounding area from becoming candidates.
+  const query = `[out:json][timeout:7];way(around:220,${lat},${lon})[railway~"^(rail|tram|light_rail)$"]->.localWays;.localWays out geom tags;rel(bw.localWays)[type=route][route~"^(train|tram|light_rail|railway|tracks)$"]->.localRoutes;.localRoutes out tags members;`;
   const endpoints = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
   let lastError = "";
   for (const endpoint of endpoints) {
@@ -88,11 +51,4 @@ async function tryOverpass(lat: number, lon: number) {
   return { status: "OVERPASS_ERROR" as const, error: lastError, candidates: [] as Candidate[] };
 }
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url); const lat = Number(searchParams.get("lat")); const lon = Number(searchParams.get("lon"));
-  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return NextResponse.json({ status: "INVALID_COORDINATES", candidates: [] }, { status: 400 });
-  const overpass = await tryOverpass(lat, lon);
-  // Never fall back to anonymous nearby tracks: a wrong line is worse than no line.
-  if (overpass.status === "OK") return NextResponse.json(overpass);
-  return NextResponse.json({ status: "OSM_ERROR", error: overpass.error || "OSM-Bahnlinien konnten nicht ermittelt werden.", candidates: [] });
-}
+export async function GET(request: Request) { const { searchParams } = new URL(request.url); const lat = Number(searchParams.get("lat")); const lon = Number(searchParams.get("lon")); if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return NextResponse.json({ status: "INVALID_COORDINATES", candidates: [] }, { status: 400 }); const overpass = await tryOverpass(lat, lon); if (overpass.status === "OK") return NextResponse.json(overpass); return NextResponse.json({ status: "OSM_ERROR", error: overpass.error || "OSM-Bahnlinien konnten nicht ermittelt werden.", candidates: [] }); }
