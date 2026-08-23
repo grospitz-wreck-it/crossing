@@ -64,7 +64,10 @@ export async function isTrainRouteNearCrossing(
       .map((stop) => catalog.get(normalize(stop)))
       .filter((point): point is { lat: number; lon: number } => Boolean(point));
 
-    if (!resolved.length) return true;
+    // 0 resolved stops means this route has nothing in common with the DB
+// long-distance catalog (e.g. a pure U-Bahn/Tram/S-Bahn route) — treat as
+// not near any crossing rather than fail-open.
+if (!resolved.length) return false;
     return resolved.some((point) => distanceKm({ lat, lon }, point) <= MAX_ROUTE_PROXIMITY_KM);
   } catch {
     return true;
