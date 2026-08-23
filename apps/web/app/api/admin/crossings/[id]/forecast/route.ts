@@ -7,7 +7,7 @@ const MAX_DIRECT_OBSERVATION_STATIONS = 6;
 const MAX_RULE_STATIONS = 8;
 const FORECAST_TIMETABLE_HOURS = 1;
 const FORECAST_CACHE_TTL_MS = 60_000;
-const FORECAST_VERSION = 2;
+const FORECAST_VERSION = 3;
 function normalizeStationName(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function normalizeLine(value: unknown) { return String(value || "").toUpperCase().replace(/\s+/g, "").replace(/[._-]/g, ""); }
 function routeIndex(route: string[], station: string) { const target = normalizeStationName(station); if (!target) return -1; return route.findIndex((stop) => { const value = normalizeStationName(stop); return value === target || value.includes(target) || target.includes(value); }); }
@@ -48,9 +48,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           if (!ruleAllowsTrain(rule, train, lineHints)) continue;
           if (!matchesCorridor(train.route || [], station, requiredRouteStops)) continue;
           const call = mobilithekCallForStation(train, station);
-          if (!call?.actual) continue;
+          const observationTime = call?.actual || call?.planned;
+          if (!observationTime) continue;
           const fallbackOffset = Number(rule.fallbackOffsetSeconds || 0);
-          addCandidate(trainsByKey, crossing, train, rule, station, new Date(call.actual.getTime() + fallbackOffset * 1000), now, "through-rule");
+          addCandidate(trainsByKey, crossing, train, rule, station, new Date(observationTime.getTime() + fallbackOffset * 1000), now, "through-rule");
         }
         stationResults.push({ eva: String(rule.observationEva || ""), stationName: station, role: "rule", rule: true, ok: true, count: scopedRegistry.length, lineHints });
       }
