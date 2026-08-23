@@ -2,7 +2,6 @@ import { db } from "../../../../../lib/db";
 import { getStationTimetable } from "../../../../../../../../packages/db-api-client/src/getStationTimetable";
 import { getMobilithekTrainRegistry, type MobilithekTrainEvent } from "../../../../../../../../packages/db-api-client/src/mobilithekTimetable";
 import { loadCrossingOsmRoute, readCrossingForecastCache, writeCrossingForecastCache } from "../../../../../lib/crossingForecastCache";
-
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
 const MAX_DIRECT_OBSERVATION_STATIONS = 6;
 const MAX_RULE_STATIONS = 8;
@@ -11,12 +10,21 @@ const FORECAST_CACHE_TTL_MS = 60_000;
 function normalizeStationName(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function normalizeLine(value: unknown) { return String(value || "").toUpperCase().replace(/\s+/g, "").replace(/[._-]/g, ""); }
 function routeIndex(route: string[], station: string) { const target = normalizeStationName(station); if (!target) return -1; return route.findIndex((stop) => { const value = normalizeStationName(stop); return value === target || value.includes(target) || target.includes(value); }); }
-function matchesCorridor(route: string[], observationStation: string, requiredRouteStops: string[]) { if (!route.length) return false; if (requiredRouteStops.length >= 2) { let previous = -1; for (const stop of requiredRouteStops) { const index = routeIndex(route, stop); if (index < 0 || index <= previous) return false; previous = index; } const observation = routeIndex(route, observationStation); if (observation >= 0) { const first = routeIndex(route, requiredRouteStops[0]); const last = routeIndex(route, requiredRouteStops[requiredRouteStops.length - 1]); if (observation < first || observation > last) return false; } return true; } if (requiredRouteStops.length === 1) return routeIndex(route, requiredRouteStops[0]) >= 0; return routeIndex(route, observationStation) >= 0; }
+function matchesCorridor(route: string[], observationStation: string, requiredRouteStops: string[]) {
+  if (!route.length) return false;
+  const infrastructureRefs = requiredRouteStops.filter((stop) => /^\d{2,6}$/.test(String(stop).trim()));
+  // "2530" is the OSM railway ref, not a Mobilithek station. Never try to
+  // find it in the journey's stop list; the selected infrastructure is already
+  // represented by the crossing and the S28 line/observation station below.
+  if (infrastructureRefs.length) return routeIndex(route, observationStation) >= 0;
+  if (requiredRouteStops.length >= 2) { let previous = -1; for (const stop of requiredRouteStops) { const index = routeIndex(route, stop); if (index < 0 || index <= previous) return false; previous = index; } const observation = routeIndex(route, observationStation); if (observation >= 0) { const first = routeIndex(route, requiredRouteStops[0]); const last = routeIndex(route, requiredRouteStops[requiredRouteStops.length - 1]); if (observation < first || observation > last) return false; } return true; }
+  if (requiredRouteStops.length === 1) return routeIndex(route, requiredRouteStops[0]) >= 0;
+  return routeIndex(route, observationStation) >= 0;
+}
 function mobilithekCallForStation(train: MobilithekTrainEvent, station: string) { const target = normalizeStationName(station); return train.calls.find((call) => { const value = normalizeStationName(call.name); return value === target || value.includes(target) || target.includes(value); }); }
 function lineMatchesHints(train: MobilithekTrainEvent, lineHints: string[]) { if (!lineHints.length) return true; const line = normalizeLine(train.line); const category = normalizeLine(train.category); return lineHints.some((hint) => { const normalized = normalizeLine(hint); return normalized && (line === normalized || line.includes(normalized) || normalized.includes(line) || category === normalized); }); }
 function ruleAllowsTrain(rule: any, train: MobilithekTrainEvent, lineHints: string[]) { if (lineHints.length) return lineMatchesHints(train, lineHints); const categories = Array.isArray(rule.categories) ? rule.categories.map((v: any) => String(v).toUpperCase()) : []; const legacyLongDistance = categories.length === 3 && categories.includes("ICE") && categories.includes("IC") && categories.includes("EC"); if (legacyLongDistance || !categories.length) return true; return categories.includes(String(train.category || "").toUpperCase()) || categories.some((category: string) => String(train.line || "").toUpperCase().includes(category)); }
 function addCandidate(trainsByKey: Map<string, any>, crossing: any, train: MobilithekTrainEvent, rule: any, stationName: string, crossingTime: Date, now: number, source: string) { const etaSeconds = Math.floor((crossingTime.getTime() - now) / 1000); if (etaSeconds <= 0 || etaSeconds > 3 * 60 * 60) return; const key = `${train.category}-${train.journeyNumber}`; const candidate = { id: `${key}-${rule.observationEva || "observation"}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, delayMinutes: train.delayMinutes, observationStation: stationName, observationEva: rule.observationEva, crossingTime: crossingTime.toISOString(), closeAt: new Date(crossingTime.getTime() - Number(crossing.close_offset_seconds || 80) * 1000).toISOString(), openAt: new Date(crossingTime.getTime() + Number(crossing.open_offset_seconds || 20) * 1000).toISOString(), etaSeconds, direction: rule.direction || "unknown", route: train.route, source, detection: "official-route", isThrough: source === "through-rule", throughObservation: stationName }; const existing = trainsByKey.get(key); if (!existing || candidate.etaSeconds < existing.etaSeconds) trainsByKey.set(key, candidate); }
-
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const cached = await readCrossingForecastCache<any>(id, FORECAST_CACHE_TTL_MS);
@@ -27,7 +35,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
   const requiredRouteStops = jsonArray(crossing.required_route_stops).map((v) => String(v || "").trim()).filter(Boolean);
   const lineHints = Array.from(new Set([...(Array.isArray(osmRoute?.lineRelations) ? osmRoute.lineRelations.flatMap((relation: any) => [relation.ref, relation.name]).filter(Boolean) : []), requiredRouteStops.includes("2530") || String(crossing.name || "").includes("2530") ? "S28" : ""].map(String).filter(Boolean)));
-
   const stationLinks = await db.execute({ sql: `SELECT eva,station_name,role,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }).catch(() => ({ rows: [] as any[] }));
   const stationNameByEva = new Map<string, string>();
   for (const row of stationLinks.rows as any[]) { const eva = String(row.eva || "").trim(); if (eva) stationNameByEva.set(eva, String(row.station_name || eva)); }
@@ -39,7 +46,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const now = Date.now();
   const trainsByKey = new Map<string, any>();
   const stationResults: any[] = [];
-
   if (!crossing.eva && throughRules.length) {
     try {
       const registry = await getMobilithekTrainRegistry();
@@ -69,7 +75,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     }
   }
   for (const eva of contextEvas.slice(0, 2)) if (!throughRules.some((rule: any) => String(rule.observationEva || "") === eva)) stationResults.push({ eva, stationName: stationNameByEva.get(eva) || eva, role: "context", rule: false, ok: true });
-
   const trains = [...trainsByKey.values()].filter((train) => train.etaSeconds > 0).sort((a, b) => a.etaSeconds - b.etaSeconds);
   const closures: any[] = [];
   for (const train of trains) { const start = new Date(train.closeAt); const end = new Date(train.openAt); const last = closures[closures.length - 1]; if (!last || start.getTime() > last.end.getTime() + 30000) closures.push({ start, end, trains: [train] }); else { if (end.getTime() > last.end.getTime()) last.end = end; last.trains.push(train); } }
