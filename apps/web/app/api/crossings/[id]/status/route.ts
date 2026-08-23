@@ -33,12 +33,46 @@ function isDirectObservationTrain(train:any):boolean{return train?.source==="obs
 async function allowTrainForCrossing(crossingId:string,crossing:any,train:any):Promise<boolean>{if(isDirectObservationTrain(train))return true;const route=Array.isArray(train?.route)?train.route.map(String).filter(Boolean):[];if(route.length>=2&&!await isTrainRouteNearCrossing(crossing,route)){console.info("Route geographically unrelated to crossing",{crossingId,journeyNumber:train.journeyNumber,line:train.line});return false;}if(!route.length)return true;const result=await filterTrainByCrossingOsm(crossingId,route);if(result.status==="rejected"){console.info("OSM rejected train for crossing",{crossingId,journeyNumber:train.journeyNumber,line:train.line,score:result.score,railwayWayId:result.railwayWayId,ref:result.ref});return false;}return true;}
 const STATUS_TIMETABLE_HOURS=1;
 const STATUS_CACHE_TTL_MS=30_000;
+
 export async function GET(request:Request,{params}:{params:Promise<{id:string}>}){const{id}=await params;
   const cacheKey=`status:${id}`;
   const cached=await readCrossingForecastCache<any>(cacheKey,STATUS_CACHE_TTL_MS);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   const crossing=(await loadCrossing(id))||staticCrossings.find(c=>c.id===id);if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
   const lineHints=!crossing.eva&&((crossing.requiredRouteStops||[]).includes("2530")||String(crossing.name||"").includes("2530"))?["S28"]:[];
+
+  // Infrastructure crossings have no EVA and must use the same forecast pipeline
+  // as the admin view. This avoids a second, independent timetable calculation
+  // (which previously returned unrelated station data and could briefly show
+  // the last selected crossing's status in the app).
+  if(lineHints.length){
+    const { GET: getInfrastructureForecast } = await import("../../admin/crossings/[id]/forecast/route");
+    const forecastResponse = await getInfrastructureForecast(request,{params:Promise.resolve({id})});
+    if(forecastResponse.ok){
+      const forecast:any = await forecastResponse.json();
+      const next = forecast.nextClosure;
+      const now = Date.now();
+      const closures = Array.isArray(forecast.closures) ? forecast.closures : [];
+      const nextStart = next?.start ? new Date(next.start).getTime() : 0;
+      const nextEnd = next?.end ? new Date(next.end).getTime() : 0;
+      const payload = {
+        crossing: { id: crossing.id, name: crossing.name, lat: crossing.lat, lon: crossing.lon },
+        state: forecast.state || "OPEN",
+        nextCloseIn: next?.closeInSeconds ?? (nextStart > now ? Math.floor((nextStart-now)/1000) : 0),
+        nextOpenIn: next?.openInSeconds ?? (nextEnd > now ? Math.floor((nextEnd-now)/1000) : 0),
+        phase: next ? { start: next.start, end: next.end, durationMinutes: Math.round((nextEnd-nextStart)/60000), trainCount: Array.isArray(next.trains)?next.trains.length:0, trains: next.trains || [] } : null,
+        closureCount: closures.length,
+        closures,
+        trainCount: Array.isArray(forecast.trains)?forecast.trains.length:0,
+        trains: forecast.trains || [],
+        divertedTrains: [],
+        lineHints: forecast.crossing?.lineHints || lineHints,
+      };
+      await writeCrossingForecastCache(cacheKey,payload);
+      return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"infrastructure-forecast"}});
+    }
+  }
+
   const localEventsPromise=crossing.eva?getStationTimetable(crossing.eva,STATUS_TIMETABLE_HOURS).catch(()=>[]):Promise.resolve([]);
   const observationEventsPromise=!crossing.eva&&crossing.observationEvas?.length?Promise.all(crossing.observationEvas.map((eva:string)=>getStationTimetable(eva,STATUS_TIMETABLE_HOURS).catch(()=>[]))).then(sets=>sets.flat()):Promise.resolve([]);
   const throughPromise=withMemoryCache(`through-${crossing.id}`,5000,()=>getThroughTrains(crossing)).catch(()=>[]);
