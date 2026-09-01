@@ -1,5 +1,5 @@
+import type { Client } from "@libsql/client";
 import type { Crossing } from "../../crossing-model/src/types";
-import { db } from "./db";
 
 export type SnapshotThroughTrain = {
   type: "through";
@@ -105,7 +105,7 @@ function snapshotCallsContain(calls: any[], station: string) {
   });
 }
 
-export async function getSnapshotThroughTrains(crossing: Crossing): Promise<SnapshotThroughTrain[] | null> {
+export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): Promise<SnapshotThroughTrain[] | null> {
   try {
     const refresh = await db.execute({
       sql: `SELECT finished_at,status FROM mobilithek_refresh_status WHERE id = 1 LIMIT 1`,
