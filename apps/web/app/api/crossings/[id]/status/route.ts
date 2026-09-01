@@ -1,6 +1,7 @@
 import { db } from "../../../../lib/db";
 import { getStationTimetable } from "../../../../../../../packages/db-api-client/src/getStationTimetable";
 import { getThroughTrains } from "../../../../../../../packages/db-api-client/src/getThroughTrains";
+import { getSnapshotThroughTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotThroughTrains";
 import { getDivertedTrains } from "../../../../../../../packages/db-api-client/src/getDivertedTrains";
 import { getReroutedTrains } from "../../../../../../../packages/db-api-client/src/getReroutedTrains";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
@@ -62,10 +63,6 @@ async function loadCrossing(id: string): Promise<any | null> {
 }
 
 function directTrainBelongsToCrossing(train: any, crossing: any) {
-  // A station timetable is only a valid direct observation when the train's
-  // actual route contains the observation station. This protects the crossing
-  // from a stale/wrong EVA or malformed timetable response. Through trains do
-  // not use this gate; they are checked against OSM topology below.
   const names = Array.isArray(crossing.observationStationNames) ? crossing.observationStationNames : [];
   if (!names.length) return true;
   return names.some((name: string) => routeContainsStation(train?.route, name));
@@ -91,7 +88,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const localEventsPromise = crossing.eva ? getStationTimetable(crossing.eva, STATUS_TIMETABLE_HOURS).catch(() => []) : Promise.resolve([]);
   const observationEventsPromise = !crossing.eva && crossing.observationEvas?.length ? Promise.all(crossing.observationEvas.map((eva: string) => getStationTimetable(eva, STATUS_TIMETABLE_HOURS).catch(() => []))).then((sets) => sets.flat()) : Promise.resolve([]);
-  const throughPromise = withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing)).catch(() => []);
+  const throughPromise = withMemoryCache(`through-${crossing.id}`, 15_000, async () => {
+    const snapshot = await getSnapshotThroughTrains(crossing);
+    return snapshot ?? getThroughTrains(crossing);
+  }).catch(() => []);
   const divertedPromise = withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []);
   const reroutedPromise = withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []);
   const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedPromise]);
