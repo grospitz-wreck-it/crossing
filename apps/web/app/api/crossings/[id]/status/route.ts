@@ -9,6 +9,25 @@ import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
+function normalizeStationName(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+function routeContainsStation(route: unknown, stationName: string) {
+  if (!Array.isArray(route) || !stationName) return false;
+  const target = normalizeStationName(stationName);
+  if (!target) return false;
+  return route.some((stop) => {
+    const value = normalizeStationName(String(stop || ""));
+    return value === target || value.includes(target) || target.includes(value);
+  });
+}
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
   let observationEvas = jsonArray(row.observation_evas).map(String).filter(Boolean);
   if (!observationEvas.length) observationEvas = stationRows.filter((s) => !s.role || s.role === "observation" || s.role === "automatic").map((s) => String(s.eva || "").trim()).filter(Boolean);
@@ -20,9 +39,17 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const rerouteWatchRules = jsonArray(row.reroute_watch_rules);
   const stationNameByEva = new Map<string, string>();
   for (const station of stationRows) { const eva = String(station.eva || "").trim(); if (eva) stationNameByEva.set(eva, String(station.station_name || station.name || eva)); }
+  const observationStationNames = observationEvas.map((eva) => stationNameByEva.get(eva) || "").filter(Boolean);
+  if (!observationStationNames.length) {
+    const fallback = String(row.name || "")
+      .replace(/bahnübergang|bahnuebergang|bue|bü/gi, " ")
+      .split(/[,/;|]+/)[0]
+      .trim();
+    if (fallback) observationStationNames.push(fallback);
+  }
   const sourceRules = throughRules.length ? throughRules : observationEvas.map((eva) => ({ observationEva: eva, observationStation: stationNameByEva.get(eva) || eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }));
   const normalizedThroughRules = sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva);
-  return { id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas, contextEvas, requiredRouteStops, lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [], throughRules: normalizedThroughRules, diversionRules, rerouteWatchRules, confidence: Number(row.confidence || 0.5) };
+  return { id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas, observationStationNames, contextEvas, requiredRouteStops, lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [], throughRules: normalizedThroughRules, diversionRules, rerouteWatchRules, confidence: Number(row.confidence || 0.5) };
 }
 async function loadCrossing(id: string): Promise<any | null> {
   try {
@@ -34,9 +61,17 @@ async function loadCrossing(id: string): Promise<any | null> {
   } catch { return null; }
 }
 
+function directTrainBelongsToCrossing(train: any, crossing: any) {
+  // A station timetable is only a valid direct observation when the train's
+  // actual route contains the observation station. This protects the crossing
+  // from a stale/wrong EVA or malformed timetable response. Through trains do
+  // not use this gate; they are checked against OSM topology below.
+  const names = Array.isArray(crossing.observationStationNames) ? crossing.observationStationNames : [];
+  if (!names.length) return true;
+  return names.some((name: string) => routeContainsStation(train?.route, name));
+}
+
 async function allowTrainForCrossing(crossingId: string, train: any, mode: "direct" | "through"): Promise<boolean> {
-  // Direct station observations are already tied to an explicitly configured observation point.
-  // OSM topology is used for inferred through-train candidates, where it is the proof of passage.
   if (mode === "direct") return true;
   const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
   if (route.length < 2) return false;
@@ -59,9 +94,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const throughPromise = withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing)).catch(() => []);
   const divertedPromise = withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []);
   const reroutedPromise = withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []);
-  const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedPromise]);
+  const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedTrainsPromise]);
 
-  const directEvents = (crossing.eva ? localEvents : observationEvents.map((train: any) => ({ ...train, source: "observation", detection: "station-observation" }))).filter((train: any) => !train.cancelled);
+  const directEvents = (crossing.eva ? localEvents : observationEvents.map((train: any) => ({ ...train, source: "observation", detection: "station-observation" }))).filter((train: any) => !train.cancelled && directTrainBelongsToCrossing(train, crossing));
   const trains: any[] = [];
   for (const train of directEvents) {
     const crossingTime = train.actualTime;
