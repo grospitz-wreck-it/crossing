@@ -94,7 +94,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const throughPromise = withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing)).catch(() => []);
   const divertedPromise = withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []);
   const reroutedPromise = withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []);
-  const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedTrainsPromise]);
+  const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedPromise]);
 
   const directEvents = (crossing.eva ? localEvents : observationEvents.map((train: any) => ({ ...train, source: "observation", detection: "station-observation" }))).filter((train: any) => !train.cancelled && directTrainBelongsToCrossing(train, crossing));
   const trains: any[] = [];
