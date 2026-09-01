@@ -108,9 +108,11 @@ async function loadCrossing(id: string): Promise<any | null> {
 
 async function allowTrainForCrossing(crossingId: string, train: any): Promise<boolean> {
   const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
-  if (!route.length) return true;
+  // A train without a usable route cannot be proven to cross this BÜ.
+  // Unknown is therefore fail-closed instead of allowing false positives.
+  if (route.length < 2) return false;
   const result = await filterTrainByCrossingOsm(crossingId, route);
-  return result.status !== "rejected";
+  return result.status === "matched";
 }
 
 const STATUS_TIMETABLE_HOURS = 1;
