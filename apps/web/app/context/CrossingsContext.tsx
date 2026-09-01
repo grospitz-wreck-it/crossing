@@ -13,25 +13,22 @@ type CrossingsContextValue = {
 };
 
 const STORAGE_KEY_ACTIVE = "crossing-app:active-crossing";
-const DEFAULT_CROSSING: CrossingSummary = { id: "kirchlengern", name: "Kirchlengern" };
 const CrossingsContext = createContext<CrossingsContextValue | null>(null);
 
-function withDefaultCrossing(list: CrossingSummary[]) {
-  return list.some((crossing) => crossing.id === DEFAULT_CROSSING.id)
-    ? list
-    : [DEFAULT_CROSSING, ...list];
-}
-
-function withActiveCrossing(list: CrossingSummary[], activeId: string | null, available: CrossingSummary[]) {
+function withActiveCrossing(
+  list: CrossingSummary[],
+  activeId: string | null,
+  available: CrossingSummary[],
+) {
   if (!activeId || list.some((crossing) => crossing.id === activeId)) return list;
   const availableCrossing = available.find((crossing) => crossing.id === activeId);
   return availableCrossing ? [...list, availableCrossing] : list;
 }
 
 export function CrossingsProvider({ children }: { children: React.ReactNode }) {
-  const [saved, setSaved] = useState<CrossingSummary[]>([DEFAULT_CROSSING]);
+  const [saved, setSaved] = useState<CrossingSummary[]>([]);
   const [available, setAvailable] = useState<CrossingSummary[]>([]);
-  const [activeId, setActiveIdState] = useState<string | null>(DEFAULT_CROSSING.id);
+  const [activeId, setActiveIdState] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -39,8 +36,6 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
 
     async function initialize() {
       const rawActive = localStorage.getItem(STORAGE_KEY_ACTIVE);
-
-      if (!cancelled && rawActive) setActiveIdState(rawActive);
 
       const [crossingsResult, userResult] = await Promise.allSettled([
         fetch("/api/crossings", { cache: "no-store" }),
@@ -67,31 +62,38 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
             .filter((crossing: CrossingSummary) => crossing.id && crossing.name);
 
           if (!cancelled) {
-            // Keep a locally selected crossing usable even if the user list is
-            // temporarily stale or the row was not persisted yet. It is still
-            // required to exist in the active crossings catalogue.
-            const nextSaved = withActiveCrossing(
-              withDefaultCrossing(normalized),
-              rawActive,
-              availableList,
-            );
+            const nextSaved = withActiveCrossing(normalized, rawActive, availableList);
             setSaved(nextSaved);
 
-            const activeExists = nextSaved.some((crossing) => crossing.id === rawActive);
-            if (activeExists && rawActive) {
-              setActiveIdState(rawActive);
-            } else if (!rawActive) {
-              setActiveIdState(nextSaved[0]?.id ?? DEFAULT_CROSSING.id);
-            }
+            const activeIdFromStorage = rawActive &&
+              (nextSaved.some((crossing) => crossing.id === rawActive) ||
+                availableList.some((crossing) => crossing.id === rawActive))
+              ? rawActive
+              : null;
+
+            const fallbackId =
+              activeIdFromStorage ??
+              nextSaved[0]?.id ??
+              availableList[0]?.id ??
+              null;
+
+            setActiveIdState(fallbackId);
           }
         } else if (!cancelled) {
-          const fallbackSaved = withActiveCrossing([DEFAULT_CROSSING], rawActive, availableList);
-          setSaved(fallbackSaved);
+          const fallbackId = rawActive && availableList.some((crossing) => crossing.id === rawActive)
+            ? rawActive
+            : availableList[0]?.id ?? null;
+          setSaved(withActiveCrossing([], fallbackId, availableList));
+          setActiveIdState(fallbackId);
         }
       } catch (error) {
         console.error("Failed to initialize crossings:", error);
         if (!cancelled) {
-          setSaved(withActiveCrossing([DEFAULT_CROSSING], rawActive, availableList));
+          const fallbackId = rawActive && availableList.some((crossing) => crossing.id === rawActive)
+            ? rawActive
+            : availableList[0]?.id ?? null;
+          setSaved(withActiveCrossing([], fallbackId, availableList));
+          setActiveIdState(fallbackId);
         }
       } finally {
         if (!cancelled) setHydrated(true);
@@ -124,7 +126,6 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function removeCrossing(id: string) {
-    if (id === DEFAULT_CROSSING.id) return;
     try {
       const response = await fetch("/api/user/crossings", {
         method: "DELETE",
@@ -133,8 +134,11 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
       });
       if (response.status === 401) return;
       if (!response.ok) throw new Error(`Failed to remove crossing (${response.status})`);
-      setSaved((prev) => withDefaultCrossing(prev.filter((crossing) => crossing.id !== id)));
-      setActiveIdState((current) => current === id ? DEFAULT_CROSSING.id : current);
+      setSaved((prev) => prev.filter((crossing) => crossing.id !== id));
+      setActiveIdState((current) => {
+        if (current !== id) return current;
+        return saved.find((crossing) => crossing.id !== id)?.id ?? available[0]?.id ?? null;
+      });
     } catch (error) {
       console.error("Failed to remove crossing:", error);
     }
