@@ -1993,3 +1993,213 @@ margin-top: 24px;
 .appHeaderDropdownLogout:hover {
   background: rgba(180, 35, 24, 0.06);
 }
+/* ============================================================
+   CROSSING SELECTION
+   ============================================================ */
+
+.crossingSelection {
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 32px 16px 48px;
+}
+
+.crossingSelectionCard {
+  width: 100%;
+  max-width: 620px;
+}
+
+.crossingSelectionEyebrow {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: .14em;
+  opacity: .55;
+  margin-bottom: 10px;
+}
+
+.crossingSelectionCard h1 {
+  margin: 0;
+  font-size: clamp(28px, 7vw, 48px);
+  line-height: 1.02;
+  letter-spacing: -.035em;
+}
+
+.crossingSelectionIntro {
+  margin: 18px 0 12px;
+  opacity: .7;
+  line-height: 1.5;
+}
+
+.crossingSelectionCount {
+  display: inline-flex;
+  margin-bottom: 28px;
+  padding: 7px 11px;
+  border-radius: 999px;
+  background: rgba(127,127,127,.12);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.crossingSelectionLabel {
+  display: block;
+  margin: 18px 0 7px;
+  font-size: 12px;
+  font-weight: 800;
+  opacity: .65;
+}
+
+.crossingSelectionInput {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 48px;
+  border: 1px solid rgba(127,127,127,.25);
+  border-radius: 12px;
+  padding: 0 14px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.crossingSelectionSuggestions {
+  margin-top: 5px;
+  border: 1px solid rgba(127,127,127,.2);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.crossingSelectionSuggestions button {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  border-bottom: 1px solid rgba(127,127,127,.12);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.crossingSelectionSuggestions button:last-child {
+  border-bottom: 0;
+}
+
+.crossingSelectionSuggestions button:hover {
+  background: rgba(127,127,127,.08);
+}
+
+.crossingSelectionList {
+  margin-top: 8px;
+}
+
+.crossingSelectionItem {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 7px;
+  padding: 14px;
+  border: 1px solid rgba(127,127,127,.2);
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.crossingSelectionItem strong {
+  display: block;
+}
+
+.crossingSelectionItem small {
+  display: block;
+  margin-top: 3px;
+  opacity: .55;
+}
+
+.crossingSelectionItemSelected {
+  border-color: currentColor;
+}
+
+.crossingSelectionEmpty,
+.crossingSelectionInfo,
+.crossingSelectionError {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(127,127,127,.1);
+  font-size: 13px;
+}
+
+.crossingSelectionError {
+  background: rgba(220, 60, 60, .1);
+}
+
+.crossingSelectionContinue {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 24px;
+  border: 0;
+  border-radius: 12px;
+  background: currentColor;
+  color: Canvas;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* ============================================================
+   Meine Schranken – Mini-Karte im User-Menü
+   ============================================================ */
+
+.appHeaderMapWrap {
+  margin: 0 0 12px;
+}
+
+.appHeaderDropdownItemMain {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.appHeaderFavorite {
+  flex: 0 0 auto;
+  color: #f4c95d;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.appHeaderDropdownFavorite {
+  flex: 0 0 28px;
+  width: 28px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: rgba(255,255,255,.24);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  border-radius: 7px;
+}
+
+.appHeaderDropdownFavorite:hover {
+  color: #f4c95d;
+  background: rgba(244,201,93,.08);
+}
+
+.appHeaderDropdownFavoriteActive {
+  color: #f4c95d;
+}
+
+.appHeaderDropdownRow {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.appHeaderDropdownRow .appHeaderDropdownItem {
+  flex: 1;
+  min-width: 0;
+}

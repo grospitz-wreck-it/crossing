@@ -41,9 +41,37 @@ async function ensureSchema() {
   await db.batch([
     { sql: `CREATE TABLE IF NOT EXISTS osm_crossings (osm_id INTEGER PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL, tags_json TEXT NOT NULL DEFAULT '{}', osm_version INTEGER, osm_timestamp TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')))` , args: [] },
     { sql: `CREATE TABLE IF NOT EXISTS osm_rail_ways (osm_id INTEGER PRIMARY KEY, tags_json TEXT NOT NULL DEFAULT '{}', node_ids_json TEXT NOT NULL DEFAULT '[]', geometry_json TEXT NOT NULL DEFAULT '[]', osm_version INTEGER, osm_timestamp TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')))` , args: [] },
+    { sql: `CREATE TABLE IF NOT EXISTS osm_rail_way_nodes (
+      node_id INTEGER NOT NULL,
+      railway_way_id INTEGER NOT NULL,
+      node_index INTEGER NOT NULL,
+      PRIMARY KEY (node_id, railway_way_id),
+      FOREIGN KEY (railway_way_id) REFERENCES osm_rail_ways(osm_id)
+    )`, args: [] },
+    { sql: `CREATE INDEX IF NOT EXISTS idx_osm_rail_way_nodes_node
+      ON osm_rail_way_nodes(node_id)`, args: [] },
+    { sql: `CREATE INDEX IF NOT EXISTS idx_osm_rail_way_nodes_way
+      ON osm_rail_way_nodes(railway_way_id)`, args: [] },
     { sql: `CREATE TABLE IF NOT EXISTS osm_crossing_rail_ways (crossing_osm_id INTEGER NOT NULL, railway_way_id INTEGER NOT NULL, crossing_node_index INTEGER, way_direction TEXT NOT NULL DEFAULT 'unknown', updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (crossing_osm_id, railway_way_id), FOREIGN KEY (crossing_osm_id) REFERENCES osm_crossings(osm_id), FOREIGN KEY (railway_way_id) REFERENCES osm_rail_ways(osm_id))`, args: [] },
     { sql: `CREATE TABLE IF NOT EXISTS crossing_osm_links (crossing_id TEXT PRIMARY KEY, osm_crossing_id INTEGER NOT NULL, match_method TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1.0, updated_at TEXT NOT NULL DEFAULT (datetime('now')), FOREIGN KEY (osm_crossing_id) REFERENCES osm_crossings(osm_id))`, args: [] },
+    { sql: `CREATE TABLE IF NOT EXISTS crossing_osm_corridors (
+      crossing_id TEXT PRIMARY KEY,
+      osm_crossing_id INTEGER NOT NULL,
+      railway_way_ids_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (crossing_id) REFERENCES crossings(id),
+      FOREIGN KEY (osm_crossing_id) REFERENCES osm_crossings(osm_id)
+    )`, args: [] },
   ]);
+}
+
+function isOverpassRetryable(error) {
+  const message = String(error?.message || error || "");
+  return (
+    /Overpass 500/i.test(message) ||
+    /Internal Server Error/i.test(message) ||
+    isOverpassTimeout(error)
+  );
 }
 
 function networkQuery(bbox) {
@@ -131,6 +159,40 @@ async function linkCrossingWays(crossing, crossingWays) {
   console.log(`OSM ${crossing.id}: ${crossingWays.length} railway ways`);
 }
 
+
+async function upsertRailWayNodeIndex(ways) {
+  const statements = [];
+
+  for (const way of ways) {
+    if (!Array.isArray(way.nodes) || way.nodes.length < 2) continue;
+
+    for (let nodeIndex = 0; nodeIndex < way.nodes.length; nodeIndex += 1) {
+      statements.push({
+        sql: `
+          INSERT INTO osm_rail_way_nodes
+            (node_id, railway_way_id, node_index)
+          VALUES (?, ?, ?)
+          ON CONFLICT(node_id, railway_way_id) DO UPDATE SET
+            node_index = excluded.node_index
+        `,
+        args: [
+          Number(way.nodes[nodeIndex]),
+          Number(way.id),
+          nodeIndex,
+        ],
+      });
+    }
+  }
+
+  const BATCH_SIZE = 500;
+
+  for (let i = 0; i < statements.length; i += BATCH_SIZE) {
+    await db.batch(statements.slice(i, i + BATCH_SIZE));
+  }
+
+  return statements.length;
+}
+
 async function importNetworkPayload(payload) {
   const elements = payload.elements ?? [];
   const crossings = elements.filter((e) => e.type === "node" && e.tags?.railway === "level_crossing");
@@ -148,12 +210,18 @@ async function importNetworkPayload(payload) {
     }
   }
 
+  const indexedNodes = await upsertRailWayNodeIndex(ways);
+
   for (const crossing of crossings) {
     const crossingWays = waysByNode.get(String(crossing.id)) ?? [];
     await linkCrossingWays(crossing, crossingWays);
   }
 
-  return { crossings: crossings.length, ways: ways.length };
+  return {
+    crossings: crossings.length,
+    ways: ways.length,
+    indexedNodes,
+  };
 }
 
 function distance2(aLat, aLon, bLat, bLon) {
@@ -214,7 +282,7 @@ async function importByBbox(bbox, depth = 0) {
     console.log(`OSM network tile: ${stats.crossings} crossings, ${stats.ways} railway ways`);
     return stats;
   } catch (error) {
-    if (!isOverpassTimeout(error) || depth >= maxDepth) throw error;
+    if (!isOverpassRetryable(error) || depth >= maxDepth) throw error;
 
     const [south, west, north, east] = bbox;
     const midLat = (south + north) / 2;
@@ -238,6 +306,50 @@ async function importByBbox(bbox, depth = 0) {
   }
 }
 
+
+async function saveCrossingCorridor(crossingId, osmCrossingId, ways) {
+  const wayIds = [
+    ...new Set(
+      ways
+        .map((way) => Number(way.id))
+        .filter((id) => Number.isFinite(id)),
+    ),
+  ];
+
+  if (!wayIds.length) {
+    console.warn(`No railway corridor ways for ${crossingId}`);
+    return [];
+  }
+
+  await db.execute({
+    sql: `
+      INSERT INTO crossing_osm_corridors
+        (
+          crossing_id,
+          osm_crossing_id,
+          railway_way_ids_json,
+          updated_at
+        )
+      VALUES (?, ?, ?, datetime('now'))
+      ON CONFLICT(crossing_id) DO UPDATE SET
+        osm_crossing_id = excluded.osm_crossing_id,
+        railway_way_ids_json = excluded.railway_way_ids_json,
+        updated_at = excluded.updated_at
+    `,
+    args: [
+      crossingId,
+      Number(osmCrossingId),
+      JSON.stringify(wayIds),
+    ],
+  });
+
+  console.log(
+    `OSM CORRIDOR ${crossingId}: ${wayIds.length} railway ways`,
+  );
+
+  return wayIds;
+}
+
 async function importSingleCrossing(crossingId) {
   const result = await db.execute({ sql: `SELECT id, name, lat, lon FROM crossings WHERE id = ?`, args: [crossingId] });
   const crossing = result.rows[0];
@@ -253,6 +365,7 @@ async function importSingleCrossing(crossingId) {
     if (!osmCrossing) throw new Error(`OSM node ${linkedOsmId} was not returned by Overpass`);
     const ways = (detail.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
     await linkCrossingWays(osmCrossing, ways);
+    await saveCrossingCorridor(crossingId, linkedOsmId, ways);
     console.log(`OSM candidate for ${crossing.name}: ${linkedOsmId}`);
     return;
   }
@@ -265,6 +378,7 @@ async function importSingleCrossing(crossingId) {
   const osmCrossing = osmCrossings[0];
   const ways = (detail.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
   await linkCrossingWays(osmCrossing, ways);
+  await saveCrossingCorridor(crossingId, osmCrossing.id, ways);
   console.log(`OSM candidate for ${crossing.name}: ${osmCrossing.id}`);
 }
 

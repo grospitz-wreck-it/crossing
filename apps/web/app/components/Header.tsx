@@ -3,13 +3,16 @@
 import { useState, useRef, useEffect } from "react";
 import { signOut } from "next-auth/react";
 import { useCrossings } from "../context/CrossingsContext";
+import MyCrossingsMap from "./MyCrossingsMap";
 
 export default function Header() {
   const {
     saved,
     available,
     activeId,
+    favoriteId,
     setActiveId,
+    setFavorite,
     addCrossing,
     removeCrossing,
   } = useCrossings();
@@ -64,6 +67,19 @@ export default function Header() {
               Meine Schranken
             </div>
 
+            {saved.length > 0 && (
+              <div className="appHeaderMapWrap">
+                <MyCrossingsMap
+                  crossings={saved}
+                  activeId={activeId}
+                  favoriteId={favoriteId}
+                  onSelect={(id) => {
+                    setActiveId(id);
+                  }}
+                />
+              </div>
+            )}
+
             {saved.map((crossing) => (
               <div
                 key={crossing.id}
@@ -80,8 +96,37 @@ export default function Header() {
                     setOpen(false);
                   }}
                 >
-                  {crossing.name}
+                  <span className="appHeaderDropdownItemMain">
+                    {favoriteId === crossing.id && (
+                      <span
+                        className="appHeaderFavorite"
+                        aria-label="Favorit"
+                      >
+                        ★
+                      </span>
+                    )}
+                    <span>{crossing.name}</span>
+                  </span>
                 </button>
+
+                {saved.length > 0 && (
+                  <button
+                    type="button"
+                    className={`appHeaderDropdownFavorite ${
+                      favoriteId === crossing.id
+                        ? "appHeaderDropdownFavoriteActive"
+                        : ""
+                    }`}
+                    aria-label={
+                      favoriteId === crossing.id
+                        ? `${crossing.name} ist Favorit`
+                        : `${crossing.name} als Favorit setzen`
+                    }
+                    onClick={() => setFavorite(crossing.id)}
+                  >
+                    ★
+                  </button>
+                )}
 
                 {saved.length > 1 && (
                   <button

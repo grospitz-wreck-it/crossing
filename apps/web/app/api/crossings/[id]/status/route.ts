@@ -45,37 +45,93 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
 }
 async function loadCrossing(id: string): Promise<any | null> {
   try {
-    const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+    const [result, stations] = await Promise.all([
+      db.execute({
+        sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`,
+        args: [id],
+      }),
+      db.execute({
+        sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`,
+        args: [id],
+      }),
+    ]);
+
     const row: any = result.rows[0];
     if (!row) return null;
-    let stationRows: any[] = [];
-    try {
-      const stations = await db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] });
-      stationRows = stations.rows as any[];
-    } catch {}
+
+    const stationRows = stations.rows as any[];
+
     return buildCrossingFromDb(row, stationRows);
-  } catch { return null; }
+  } catch (error) {
+    console.error("[STATUS] loadCrossing failed:", error);
+    return null;
+  }
 }
+
 function isDirectObservationTrain(train: any): boolean { return train?.source === "observation" || train?.detection === "station-observation"; }
 
-async function allowTrainForCrossing(crossingId: string, crossing: any, train: any, timing?: TimingState): Promise<boolean> {
-  if (isDirectObservationTrain(train)) return true;
-  const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
-  if (route.length >= 2) {
-    const started = performance.now();
-    const near = await isTrainRouteNearCrossing(crossing, route);
-    const elapsed = performance.now() - started;
-    timing && (timing.routeProximityMs += elapsed);
-    if (timing?.debug) console.log(`[STATUS TIMING] routeProximity journey=${train?.journeyNumber ?? train?.id ?? "?"} ${elapsed.toFixed(1)}ms result=${near}`);
-    if (!near) return false;
+async function allowTrainForCrossing(
+  crossingId: string,
+  crossing: any,
+  train: any,
+  timing?: TimingState,
+): Promise<boolean> {
+  const journey = train?.journeyNumber ?? train?.id ?? "?";
+  const line = train?.line ?? "?";
+  const route = Array.isArray(train?.route)
+    ? train.route.map(String).filter(Boolean)
+    : [];
+
+  if (String(journey) === "241" || String(line) === "ICE 241") {
+    console.log(
+      "[ICE 241 ROUTE]",
+      JSON.stringify({
+        journey,
+        line,
+        origin: train?.origin,
+        destination: train?.destination,
+        route,
+      }),
+    );
   }
-  if (!route.length) return true;
+
+  if (!route.length) {
+    if (timing?.debug) {
+      console.log(
+        `[CROSSING DECISION] journey=${journey} line=${line} ` +
+        `FINAL=ACCEPT reason=no-route`
+      );
+    }
+    return true;
+  }
+
   const started = performance.now();
   const result = await filterTrainByCrossingOsm(crossingId, route);
   const elapsed = performance.now() - started;
+
   timing && (timing.osmFilterMs += elapsed);
-  if (timing?.debug) console.log(`[STATUS TIMING] osmFilter journey=${train?.journeyNumber ?? train?.id ?? "?"} ${elapsed.toFixed(1)}ms result=${result.status}`);
-  return result.status !== "rejected";
+
+  if (timing?.debug) {
+    console.log(
+      `[CROSSING DECISION] journey=${journey} line=${line} ` +
+      `OSM=${result.status} ` +
+      `way=${result.railwayWayId ?? "?"} ` +
+      `score=${result.score?.toFixed(3) ?? "?"} ` +
+      `${elapsed.toFixed(1)}ms`
+    );
+  }
+
+  const allowed = result.status !== "rejected";
+
+  if (timing?.debug) {
+    console.log(
+      `[CROSSING DECISION] journey=${journey} line=${line} ` +
+      `FINAL=${allowed ? "ACCEPT" : "REJECT"} ` +
+      `reason=osm-${result.status}`
+    );
+  }
+
+  return allowed;
 }
 
 const STATUS_TIMETABLE_HOURS = 1;
@@ -159,31 +215,142 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   counts.divertedCandidates = divertedTrains.length;
   counts.reroutedCandidates = reroutedTrains.length;
   const trains: any[] = [];
-  const directBase = crossing.eva ? localEvents : observationEvents.map((train: any) => ({ ...train, source: "observation", detection: "station-observation" }));
-  const directEvents = directBase.filter((train: any) => !train.cancelled && lineMatchesHints(train, lineHints));
+
+  const directBase = crossing.eva
+    ? localEvents
+    : observationEvents.map((train: any) => ({
+        ...train,
+        source: "observation",
+        detection: "station-observation",
+      }));
+
+  const directEvents = directBase.filter(
+    (train: any) => !train.cancelled && lineMatchesHints(train, lineHints),
+  );
+
+  const ice241 = directEvents.filter(
+    (train: any) =>
+      String(train?.journeyNumber ?? train?.id ?? "") === "241"
+      || String(train?.line ?? "").includes("ICE 241"),
+  );
+
+  if (ice241.length) {
+    console.log(
+      "[ICE 241 DEBUG]",
+      ice241.map((train: any) => ({
+        journeyNumber: train?.journeyNumber,
+        line: train?.line,
+        origin: train?.origin,
+        destination: train?.destination,
+        route: train?.route,
+      })),
+    );
+  }
+
   counts.directFiltered = directEvents.length;
-  for (const train of directEvents) {
-    counts.allowCalls++;
-    const started = performance.now();
-    const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing);
-    timing.filterDirectMs += performance.now() - started;
-    if (!allowed) { counts.rejected++; continue; }
+
+  const directResults = await Promise.all(
+    directEvents.map(async (train: any) => {
+      counts.allowCalls++;
+
+      const started = performance.now();
+      const allowed = await allowTrainForCrossing(
+        crossing.id,
+        crossing,
+        train,
+        timing,
+      );
+      timing.filterDirectMs += performance.now() - started;
+
+      return { train, allowed };
+    }),
+  );
+
+  for (const { train, allowed } of directResults) {
+    if (!allowed) {
+      counts.rejected++;
+      continue;
+    }
+
     counts.accepted++;
+
     const crossingTime = train.actualTime;
-    trains.push({ id: `${train.category}-${train.journeyNumber}-${train.id}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, isStoppingTrain: train.platform === "1" || train.platform === "2", direction: getCrossingDirection(train.route), directionLabel: train.destination ? `Richtung ${train.destination}` : null, delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000) });
+
+    trains.push({
+      id: `${train.category}-${train.journeyNumber}-${train.id}`,
+      line: train.line,
+      category: train.category,
+      journeyNumber: train.journeyNumber,
+      origin: train.origin,
+      destination: train.destination,
+      platform: train.platform,
+      isStoppingTrain: train.platform === "1" || train.platform === "2",
+      direction: getCrossingDirection(train.route),
+      directionLabel: train.destination
+        ? `Richtung ${train.destination}`
+        : null,
+      delayMinutes: train.delayMinutes,
+      crossingTime: crossingTime.toISOString(),
+      arrival: crossingTime.toISOString(),
+      etaSeconds: Math.floor(
+        (crossingTime.getTime() - Date.now()) / 1000,
+      ),
+    });
   }
-  const throughFiltered = throughTrains.filter((train: any) => lineMatchesHints(train, lineHints));
+
+  const throughFiltered = throughTrains.filter(
+    (train: any) => lineMatchesHints(train, lineHints),
+  );
+
   counts.throughFiltered = throughFiltered.length;
-  for (const train of throughFiltered) {
-    counts.allowCalls++;
-    const started = performance.now();
-    const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing);
-    timing.filterThroughMs += performance.now() - started;
-    if (!allowed) { counts.rejected++; continue; }
+
+  const throughResults = await Promise.all(
+    throughFiltered.map(async (train: any) => {
+      counts.allowCalls++;
+
+      const started = performance.now();
+      const allowed = await allowTrainForCrossing(
+        crossing.id,
+        crossing,
+        train,
+        timing,
+      );
+      timing.filterThroughMs += performance.now() - started;
+
+      return { train, allowed };
+    }),
+  );
+
+  for (const { train, allowed } of throughResults) {
+    if (!allowed) {
+      counts.rejected++;
+      continue;
+    }
+
     counts.accepted++;
+
     const crossingTime = new Date(train.crossingTime);
-    trains.push({ id: `${train.category}-${train.journeyNumber}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Durchfahrt", delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000) });
+
+    trains.push({
+      id: `${train.category}-${train.journeyNumber}`,
+      line: train.line,
+      category: train.category,
+      journeyNumber: train.journeyNumber,
+      origin: train.origin,
+      destination: train.destination,
+      platform: undefined,
+      isStoppingTrain: false,
+      direction: train.direction,
+      directionLabel: "Durchfahrt",
+      delayMinutes: train.delayMinutes,
+      crossingTime: crossingTime.toISOString(),
+      arrival: crossingTime.toISOString(),
+      etaSeconds: Math.floor(
+        (crossingTime.getTime() - Date.now()) / 1000,
+      ),
+    });
   }
+
   trains.sort((a, b) => new Date(a.crossingTime).getTime() - new Date(b.crossingTime).getTime());
   const closureStarted = performance.now();
   const closures: any[] = [];

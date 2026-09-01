@@ -4,12 +4,14 @@ let schemaPromise: Promise<void> | null = null;
 
 async function ensureSchema() {
   if (schemaPromise) return schemaPromise;
+
   schemaPromise = (async () => {
     try {
       await db.execute("ALTER TABLE crossings ADD COLUMN osm_route_json TEXT");
     } catch {
       // Column already exists on installations that have been migrated.
     }
+
     await db.execute(`
       CREATE TABLE IF NOT EXISTS crossing_forecast_cache (
         crossing_id TEXT PRIMARY KEY,
@@ -21,11 +23,24 @@ async function ensureSchema() {
     schemaPromise = null;
     throw error;
   });
+
   return schemaPromise;
 }
 
+/*
+ * Write-blocked development environment:
+ *
+ * During the Turso write-limit period, cache reads must not trigger
+ * schema creation/migration writes. The actual cache table will be
+ * created normally again once writes are available.
+ */
+const TURSO_WRITES_BLOCKED =
+  process.env.TURSO_WRITES_BLOCKED === "true";
+
 export async function readCrossingForecastCache<T>(crossingId: string, maxAgeMs: number): Promise<T | null> {
   try {
+    if (TURSO_WRITES_BLOCKED) return null;
+
     await ensureSchema();
     const result = await db.execute({
       sql: `SELECT payload, generated_at FROM crossing_forecast_cache WHERE crossing_id = ? LIMIT 1`,
