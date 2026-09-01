@@ -10,6 +10,7 @@
     "dev": "cd apps/web && npm run dev",
     "build": "cd apps/web && npm run build",
     "start": "cd apps/web && npm run start",
-    "osm:import": "node scripts/osm/import-level-crossings.mjs"
+    "osm:import": "node scripts/osm/import-level-crossings.mjs",
+    "osm:backfill:corridor": "node scripts/osm/backfill-corridor-rail-way-nodes.mjs"
   }
 }
