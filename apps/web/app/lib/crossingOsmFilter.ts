@@ -1,4 +1,5 @@
 import { db } from "./db";
+import { getDbStations, normalizeStation } from "./dbStationCatalog";
 import { buildRailGraph, distanceMeters, nearestNode, shortestRailPath, type RailGraph, type RailWayRow } from "./railGraph";
 import type { RouteStation } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
 
@@ -32,8 +33,7 @@ const ROUTE_CORRIDOR_STATION_WINDOW = 3;
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const corridorCache = new Map<string, { expiresAt: number; value: CorridorGraph }>();
 const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
-let stationCatalogCache: { expiresAt: number; value: Map<string, RouteStation> } | null = null;
-let stationCatalogPromise: Promise<Map<string, RouteStation>> | null = null;
+let stationCatalogCache: Map<string, RouteStation> | null = null;
 
 function normalizeStationName(value: string) {
   return String(value || "")
@@ -46,46 +46,30 @@ function normalizeStationName(value: string) {
     .trim();
 }
 
-async function loadStationCatalog() {
-  if (stationCatalogCache && stationCatalogCache.expiresAt > Date.now()) return stationCatalogCache.value;
-  if (stationCatalogPromise) return stationCatalogPromise;
+function loadStationCatalog(): Map<string, RouteStation> {
+  if (stationCatalogCache) return stationCatalogCache;
 
-  stationCatalogPromise = (async () => {
-    try {
-      const result = await db.execute({
-        sql: `SELECT name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`,
-        args: [],
-      });
-      const byName = new Map<string, RouteStation>();
-      for (const row of result.rows as any[]) {
-        const name = String(row.name || "");
-        const normalized = normalizeStationName(name);
-        if (!normalized || byName.has(normalized)) continue;
-        byName.set(normalized, { name, lat: Number(row.lat), lon: Number(row.lon) });
-      }
-      stationCatalogCache = { expiresAt: Date.now() + CACHE_TTL_MS, value: byName };
-      return byName;
-    } finally {
-      stationCatalogPromise = null;
-    }
-  })();
-
-  return stationCatalogPromise;
+  const byName = new Map<string, RouteStation>();
+  for (const station of getDbStations()) {
+    const normalized = normalizeStation(station);
+    if (normalized.lat == null || normalized.lon == null) continue;
+    const key = normalizeStationName(normalized.name);
+    if (!key || byName.has(key)) continue;
+    byName.set(key, { name: normalized.name, lat: normalized.lat, lon: normalized.lon });
+  }
+  stationCatalogCache = byName;
+  return byName;
 }
 
-async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
+function routeToCoordinates(route: string[]): RouteStation[] {
   const key = route.join("|");
   const cached = stationCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-  try {
-    const byName = await loadStationCatalog();
-    const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
-    stationCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
-    return value;
-  } catch (error) {
-    console.error("Failed to resolve route stations:", error);
-    return route.map((name) => ({ name }));
-  }
+
+  const byName = loadStationCatalog();
+  const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
+  stationCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+  return value;
 }
 
 function placeholders(count: number) {
@@ -178,9 +162,7 @@ function routeCorridorStations(mapping: Mapping, route: RouteStation[]) {
 
   const start = Math.max(0, nearest.index - ROUTE_CORRIDOR_STATION_WINDOW);
   const end = Math.min(route.length - 1, nearest.index + ROUTE_CORRIDOR_STATION_WINDOW);
-  return route
-    .slice(start, end + 1)
-    .filter((station): station is CorridorTarget => station.lat != null && station.lon != null);
+  return route.slice(start, end + 1).filter((station): station is CorridorTarget => station.lat != null && station.lon != null);
 }
 
 function pointToSegmentDistanceMeters(point: GeoCoordinate, a: GeoCoordinate, b: GeoCoordinate) {
@@ -282,18 +264,19 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
   if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
 
   try {
-    const coordinateRoute = await routeToCoordinates(route);
+    const coordinateRoute = routeToCoordinates(route);
     const stations = coordinateRoute.filter((s): s is CorridorTarget => s.lat != null && s.lon != null);
     if (stations.length < 2) return { status: "unknown" };
 
     const corridor = await loadCorridorGraph(crossingId, coordinateRoute);
     if (!corridor) return { status: "unknown" };
     const { graph, refs, mapping } = corridor;
+    const localStations = routeCorridorStations(mapping, coordinateRoute);
     const candidateHits: Array<{ distance: number; wayId?: string; ref?: string }> = [];
 
-    for (let i = 1; i < stations.length; i += 1) {
-      const from = nearestNode(graph, stations[i - 1], 5000);
-      const to = nearestNode(graph, stations[i], 5000);
+    for (let i = 1; i < localStations.length; i += 1) {
+      const from = nearestNode(graph, localStations[i - 1], 5000);
+      const to = nearestNode(graph, localStations[i], 5000);
       if (!from || !to) continue;
       const path = shortestRailPath(graph, from.nodeId, to.nodeId, 75000);
       if (!path) continue;
