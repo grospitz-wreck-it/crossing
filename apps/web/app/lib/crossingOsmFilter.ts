@@ -75,7 +75,6 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
   const key = route.join("|");
   const cached = stationCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-
   try {
     const byName = await loadStationCatalog();
     const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
@@ -105,9 +104,7 @@ async function loadWayRows(wayIds: string[]): Promise<RailWayRow[]> {
         const geometry = JSON.parse(String(row.geometry_json || "[]"));
         let tags: Record<string, string> = {};
         try { tags = JSON.parse(String(row.tags_json || "{}")); } catch {}
-        if (nodeIds.length >= 2 && geometry.length >= 2) {
-          rows.push({ osmId: String(row.osm_id), nodeIds, geometry, ref: tags.ref });
-        }
+        if (nodeIds.length >= 2 && geometry.length >= 2) rows.push({ osmId: String(row.osm_id), nodeIds, geometry, ref: tags.ref });
       } catch {}
     }
   }
@@ -152,22 +149,10 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
     } catch {}
   }
 
-  return {
-    crossingId,
-    osmCrossingId,
-    confidence: Number(link.confidence ?? 0),
-    crossingLat: Number(crossingRow.lat),
-    crossingLon: Number(crossingRow.lon),
-    crossingNodeIds,
-    railwayWayIds,
-  };
+  return { crossingId, osmCrossingId, confidence: Number(link.confidence ?? 0), crossingLat: Number(crossingRow.lat), crossingLon: Number(crossingRow.lon), crossingNodeIds, railwayWayIds };
 }
 
-type CorridorGraph = {
-  graph: RailGraph;
-  refs: Map<string, string>;
-  mapping: Mapping;
-};
+type CorridorGraph = { graph: RailGraph; refs: Map<string, string>; mapping: Mapping };
 
 async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
   const key = `${crossingId}|${route.map((station) => station.name).join("|")}`;
@@ -180,34 +165,32 @@ async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Pro
   const loadedWayIds = new Set<string>();
   const rows: RailWayRow[] = [];
   const refs = new Map<string, string>();
-
   const addWays = async (ids: string[]) => {
     const missing = ids.filter((id) => !loadedWayIds.has(id));
-    if (!missing.length || loadedWayIds.size >= MAX_GRAPH_WAYS) return [];
-    const allowed = missing.slice(0, MAX_GRAPH_WAYS - loadedWayIds.size);
-    const newRows = await loadWayRows(allowed);
+    if (!missing.length || loadedWayIds.size >= MAX_GRAPH_WAYS) return;
+    const newRows = await loadWayRows(missing.slice(0, MAX_GRAPH_WAYS - loadedWayIds.size));
     for (const row of newRows) {
       if (loadedWayIds.has(row.osmId)) continue;
       loadedWayIds.add(row.osmId);
       rows.push(row);
       if (row.ref) refs.set(row.osmId, row.ref);
     }
-    return newRows;
   };
 
   await addWays(mapping.railwayWayIds);
-
   let graph = buildRailGraph(rows);
-  const targets = route.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
-  const hasAllTargets = () => targets.length >= 2 && targets.every((station) => nearestNode(graph, station, 5000));
+  const targets = route
+    .filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null)
+    .sort((a, b) => distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, a) - distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, b))
+    .slice(0, 2);
+  const hasTargets = () => targets.length === 2 && targets.every((station) => nearestNode(graph, station, 5000));
 
-  for (let round = 0; round < MAX_EXPANSION_ROUNDS && !hasAllTargets(); round += 1) {
+  for (let round = 0; round < MAX_EXPANSION_ROUNDS && !hasTargets(); round += 1) {
     if (graph.nodePoints.size >= MAX_GRAPH_NODES || loadedWayIds.size >= MAX_GRAPH_WAYS) break;
-
     const nodeIds = [...graph.nodePoints.keys()];
     const adjacentWayIds = new Set<string>();
     for (let i = 0; i < nodeIds.length; i += NODE_BATCH_SIZE) {
-      const batch = nodeIds.slice(i, i + NODE_BATCH_SIZE).map((id) => Number(id)).filter(Number.isSafeInteger);
+      const batch = nodeIds.slice(i, i + NODE_BATCH_SIZE).map(Number).filter(Number.isSafeInteger);
       if (!batch.length) continue;
       const result = await db.execute({
         sql: `SELECT DISTINCT railway_way_id FROM osm_rail_way_nodes WHERE node_id IN (${placeholders(batch.length)})`,
@@ -218,7 +201,6 @@ async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Pro
         if (!loadedWayIds.has(id)) adjacentWayIds.add(id);
       }
     }
-
     if (!adjacentWayIds.size) break;
     await addWays([...adjacentWayIds]);
     graph = buildRailGraph(rows);
@@ -229,59 +211,46 @@ async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Pro
   return value;
 }
 
-export async function filterTrainByCrossingOsm(
-  crossingId: string,
-  route: string[] | undefined,
-): Promise<CrossingOsmFilterResult> {
+export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined): Promise<CrossingOsmFilterResult> {
   if (!route?.length) return { status: "unknown" };
-
   const resultKey = `${crossingId}|${route.join("|")}`;
   const cachedResult = resultCache.get(resultKey);
   if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
 
   try {
     const coordinateRoute = await routeToCoordinates(route);
-    const stations = coordinateRoute.filter(
-      (s): s is RouteStation & { lat: number; lon: number } => s.lat != null && s.lon != null,
-    );
+    const stations = coordinateRoute.filter((s): s is RouteStation & { lat: number; lon: number } => s.lat != null && s.lon != null);
     if (stations.length < 2) return { status: "unknown" };
 
     const corridor = await loadCorridorGraph(crossingId, coordinateRoute);
     if (!corridor) return { status: "unknown" };
-
     const { graph, refs, mapping } = corridor;
-    const candidateNodes = mapping.crossingNodeIds;
     const candidateHits: Array<{ distance: number; wayId?: string; ref?: string }> = [];
 
     for (let i = 1; i < stations.length; i += 1) {
       const from = nearestNode(graph, stations[i - 1], 5000);
       const to = nearestNode(graph, stations[i], 5000);
       if (!from || !to) continue;
-
       const path = shortestRailPath(graph, from.nodeId, to.nodeId, 75000);
       if (!path) continue;
 
-      for (const nodeId of candidateNodes) {
+      for (const nodeId of mapping.crossingNodeIds) {
         const hitIndex = path.nodes.indexOf(nodeId);
         if (hitIndex < 0) continue;
-        const hitWayIds = new Set<string>();
+        const adjacentWayIds = new Set<string>();
         if (hitIndex > 0) {
-          const incoming = graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [];
-          const edge = incoming.find((candidate) => candidate.to === nodeId);
-          if (edge) hitWayIds.add(edge.wayId);
+          const edge = (graph.adjacency.get(path.nodes[hitIndex - 1]) ?? []).find((candidate) => candidate.to === nodeId);
+          if (edge) adjacentWayIds.add(edge.wayId);
         }
-        const outgoing = graph.adjacency.get(nodeId) ?? [];
         const nextNode = path.nodes[hitIndex + 1];
-        const edge = outgoing.find((candidate) => candidate.to === nextNode);
-        if (edge) hitWayIds.add(edge.wayId);
-
-        const matchedWayId = [...hitWayIds].find((wayId) => mapping.railwayWayIds.includes(wayId));
+        if (nextNode) {
+          const edge = (graph.adjacency.get(nodeId) ?? []).find((candidate) => candidate.to === nextNode);
+          if (edge) adjacentWayIds.add(edge.wayId);
+        }
+        const matchedWayId = [...adjacentWayIds].find((wayId) => mapping.railwayWayIds.includes(wayId));
         if (!matchedWayId) continue;
-
         const nodePoint = graph.nodePoints.get(nodeId);
-        const distance = nodePoint
-          ? distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, nodePoint)
-          : 9999;
+        const distance = nodePoint ? distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, nodePoint) : 9999;
         candidateHits.push({ distance, wayId: matchedWayId, ref: refs.get(matchedWayId) });
       }
     }
@@ -290,7 +259,6 @@ export async function filterTrainByCrossingOsm(
     const result: CrossingOsmFilterResult = own
       ? { status: "matched", score: Math.max(0, 1 - own.distance / 100), railwayWayId: own.wayId, ref: own.ref }
       : { status: "rejected" };
-
     resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
     return result;
   } catch (error) {
