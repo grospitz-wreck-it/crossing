@@ -28,7 +28,6 @@ const MAX_EXPANSION_ROUNDS = 100;
 const WAY_BATCH_SIZE = 200;
 const NODE_BATCH_SIZE = 500;
 const ROUTE_CORRIDOR_RADIUS_METERS = 3000;
-const ROUTE_CORRIDOR_STATION_WINDOW = 3;
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const corridorCache = new Map<string, { expiresAt: number; value: CorridorGraph }>();
@@ -128,22 +127,19 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
         sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
         args: [osmCrossingId],
       });
-      const railwayWayIds = (tracksResult.rows as any[]).map((row) => String(row.railway_way_id)).filter(Boolean);
+      const tracks = tracksResult.rows as any[];
+      const railwayWayIds = tracks.map((row) => String(row.railway_way_id)).filter(Boolean);
       if (!railwayWayIds.length) return null;
 
+      // Avoid one Turso round-trip per track way.
+      const wayRows = await loadWayRows([...new Set(railwayWayIds)]);
+      const wayById = new Map(wayRows.map((row) => [row.osmId, row]));
       const crossingNodeIds = new Set<string>();
-      for (const track of tracksResult.rows as any[]) {
-        const wayResult = await db.execute({
-          sql: `SELECT node_ids_json FROM osm_rail_ways WHERE osm_id = ? LIMIT 1`,
-          args: [String(track.railway_way_id)],
-        });
-        const wayRow: any = wayResult.rows[0];
+      for (const track of tracks) {
+        const wayRow = wayById.get(String(track.railway_way_id));
         if (!wayRow) continue;
-        try {
-          const nodes = JSON.parse(String(wayRow.node_ids_json || "[]")).map(String);
-          const index = Number(track.crossing_node_index);
-          if (Number.isInteger(index) && nodes[index]) crossingNodeIds.add(nodes[index]);
-        } catch {}
+        const index = Number(track.crossing_node_index);
+        if (Number.isInteger(index) && wayRow.nodeIds[index]) crossingNodeIds.add(wayRow.nodeIds[index]);
       }
 
       return {
@@ -176,28 +172,6 @@ type CorridorTarget = RouteStation & { lat: number; lon: number };
 type RouteSegment = { from: CorridorTarget; to: CorridorTarget };
 type GeoCoordinate = { lat: number; lon: number };
 
-function routeCorridorStations(mapping: Mapping, route: RouteStation[]) {
-  const resolved = route
-    .map((station, index) => ({ station, index }))
-    .filter((entry): entry is { station: CorridorTarget; index: number } => entry.station.lat != null && entry.station.lon != null);
-  if (resolved.length < 2) return [] as CorridorTarget[];
-
-  const crossing = { lat: mapping.crossingLat, lon: mapping.crossingLon };
-  let nearest = resolved[0];
-  let nearestDistance = distanceMeters(crossing, nearest.station);
-  for (let i = 1; i < resolved.length; i += 1) {
-    const distance = distanceMeters(crossing, resolved[i].station);
-    if (distance < nearestDistance) {
-      nearest = resolved[i];
-      nearestDistance = distance;
-    }
-  }
-
-  const start = Math.max(0, nearest.index - ROUTE_CORRIDOR_STATION_WINDOW);
-  const end = Math.min(route.length - 1, nearest.index + ROUTE_CORRIDOR_STATION_WINDOW);
-  return route.slice(start, end + 1).filter((station): station is CorridorTarget => station.lat != null && station.lon != null);
-}
-
 function pointToSegmentDistanceMeters(point: GeoCoordinate, a: GeoCoordinate, b: GeoCoordinate) {
   const latScale = Math.cos((point.lat * Math.PI) / 180);
   const scaleX = 111320 * latScale;
@@ -214,6 +188,28 @@ function pointToSegmentDistanceMeters(point: GeoCoordinate, a: GeoCoordinate, b:
   if (lengthSquared === 0) return Math.hypot(px - ax, py - ay);
   const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared));
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function routeCorridorStations(mapping: Mapping, route: RouteStation[]) {
+  const resolved = route
+    .map((station, index) => ({ station, index }))
+    .filter((entry): entry is { station: CorridorTarget; index: number } => entry.station.lat != null && entry.station.lon != null);
+  if (resolved.length < 2) return [] as CorridorTarget[];
+
+  const crossing = { lat: mapping.crossingLat, lon: mapping.crossingLon };
+  let best: { distance: number; from: CorridorTarget; to: CorridorTarget } | null = null;
+  for (let i = 1; i < resolved.length; i += 1) {
+    const from = resolved[i - 1].station;
+    const to = resolved[i].station;
+    const distance = pointToSegmentDistanceMeters(crossing, from, to);
+    if (!best || distance < best.distance) best = { distance, from, to };
+  }
+
+  // This is a geometric pre-filter, not a stopping-distance rule. A through ICE
+  // is valid when the rail corridor between two stops crosses the BÜ, regardless
+  // of how far apart those stops are.
+  if (!best || best.distance > ROUTE_CORRIDOR_RADIUS_METERS) return [] as CorridorTarget[];
+  return [best.from, best.to];
 }
 
 function wayNearRouteSegments(way: RailWayRow, segments: RouteSegment[]) {
@@ -243,29 +239,33 @@ async function buildCorridorGraph(crossingId: string, route: RouteStation[]): Pr
   const rows: RailWayRow[] = [];
   const refs = new Map<string, string>();
   const addWays = async (ids: string[], constrainToRoute = false) => {
-    const missing = ids.filter((id) => !loadedWayIds.has(id));
-    if (!missing.length || loadedWayIds.size >= MAX_GRAPH_WAYS) return;
+    const missing = [...new Set(ids)].filter((id) => !loadedWayIds.has(id));
+    if (!missing.length || loadedWayIds.size >= MAX_GRAPH_WAYS) return [] as string[];
     const candidates = await loadWayRows(missing.slice(0, MAX_GRAPH_WAYS - loadedWayIds.size));
+    const newNodeIds = new Set<string>();
     for (const row of candidates) {
       if (loadedWayIds.has(row.osmId)) continue;
       if (constrainToRoute && !wayNearRouteSegments(row, segments)) continue;
       loadedWayIds.add(row.osmId);
       rows.push(row);
       if (row.ref) refs.set(row.osmId, row.ref);
+      for (const nodeId of row.nodeIds) newNodeIds.add(nodeId);
     }
+    return [...newNodeIds];
   };
 
-  await addWays(mapping.railwayWayIds);
+  let frontierNodeIds = await addWays(mapping.railwayWayIds);
   let graph = buildRailGraph(rows);
-  const targets = [corridorStations[0], corridorStations[corridorStations.length - 1]];
-  const hasTargets = () => targets.every((station) => nearestNode(graph, station, 5000));
+  const targets = [corridorStations[0], corridorStations[1]];
 
-  for (let round = 0; round < MAX_EXPANSION_ROUNDS && !hasTargets(); round += 1) {
+  for (let round = 0; round < MAX_EXPANSION_ROUNDS; round += 1) {
     if (graph.nodePoints.size >= MAX_GRAPH_NODES || loadedWayIds.size >= MAX_GRAPH_WAYS) break;
-    const nodeIds = [...graph.nodePoints.keys()];
+    if (targets.every((station) => nearestNode(graph, station, 5000))) break;
+    if (!frontierNodeIds.length) break;
+
     const adjacentWayIds = new Set<string>();
-    for (let i = 0; i < nodeIds.length; i += NODE_BATCH_SIZE) {
-      const batch = nodeIds.slice(i, i + NODE_BATCH_SIZE).map(Number).filter(Number.isSafeInteger);
+    for (let i = 0; i < frontierNodeIds.length; i += NODE_BATCH_SIZE) {
+      const batch = frontierNodeIds.slice(i, i + NODE_BATCH_SIZE).map(Number).filter(Number.isSafeInteger);
       if (!batch.length) continue;
       const result = await db.execute({
         sql: `SELECT DISTINCT railway_way_id FROM osm_rail_way_nodes WHERE node_id IN (${placeholders(batch.length)})`,
@@ -277,15 +277,22 @@ async function buildCorridorGraph(crossingId: string, route: RouteStation[]): Pr
       }
     }
     if (!adjacentWayIds.size) break;
-    await addWays([...adjacentWayIds], true);
+
+    frontierNodeIds = await addWays([...adjacentWayIds], true);
+    const previousNodeCount = graph.nodePoints.size;
     graph = buildRailGraph(rows);
+    if (graph.nodePoints.size === previousNodeCount) break;
   }
 
   return { graph, refs, mapping };
 }
 
 async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
-  const key = `${crossingId}|${route.map((station) => station.name).join("|")}`;
+  const mapping = await loadMapping(crossingId);
+  if (!mapping) return null;
+  const corridorStations = routeCorridorStations(mapping, route);
+  if (corridorStations.length < 2) return null;
+  const key = `${crossingId}|${corridorStations[0].name}|${corridorStations[1].name}`;
   const cached = corridorCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
@@ -314,46 +321,61 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
 
   try {
     const coordinateRoute = routeToCoordinates(route);
-    const stations = coordinateRoute.filter((s): s is CorridorTarget => s.lat != null && s.lon != null);
-    if (stations.length < 2) return { status: "unknown" };
+    const resolved = coordinateRoute.filter((s): s is CorridorTarget => s.lat != null && s.lon != null);
+    if (resolved.length < 2) return { status: "unknown" };
+
+    // Cheap geometric gate before any corridor graph work. This keeps unrelated
+    // lines out of Turso while still allowing long-distance through services.
+    const mapping = await loadMapping(crossingId);
+    if (!mapping || !mapping.crossingNodeIds.size) return { status: "unknown" };
+    const localStations = routeCorridorStations(mapping, coordinateRoute);
+    if (localStations.length < 2) {
+      const rejected = { status: "rejected" } as CrossingOsmFilterResult;
+      resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: rejected });
+      return rejected;
+    }
 
     const corridor = await loadCorridorGraph(crossingId, coordinateRoute);
     if (!corridor) return { status: "unknown" };
-    const { graph, refs, mapping } = corridor;
-    const localStations = routeCorridorStations(mapping, coordinateRoute);
-    const candidateHits: Array<{ distance: number; wayId?: string; ref?: string }> = [];
-
-    for (let i = 1; i < localStations.length; i += 1) {
-      const from = nearestNode(graph, localStations[i - 1], 5000);
-      const to = nearestNode(graph, localStations[i], 5000);
-      if (!from || !to) continue;
-      const path = shortestRailPath(graph, from.nodeId, to.nodeId, 75000);
-      if (!path) continue;
-
-      for (const nodeId of mapping.crossingNodeIds) {
-        const hitIndex = path.nodes.indexOf(nodeId);
-        if (hitIndex < 0) continue;
-        const adjacentWayIds = new Set<string>();
-        if (hitIndex > 0) {
-          const edge = (graph.adjacency.get(path.nodes[hitIndex - 1]) ?? []).find((candidate) => candidate.to === nodeId);
-          if (edge) adjacentWayIds.add(edge.wayId);
-        }
-        const nextNode = path.nodes[hitIndex + 1];
-        if (nextNode) {
-          const edge = (graph.adjacency.get(nodeId) ?? []).find((candidate) => candidate.to === nextNode);
-          if (edge) adjacentWayIds.add(edge.wayId);
-        }
-        const matchedWayId = [...adjacentWayIds].find((wayId) => mapping.railwayWayIds.includes(wayId));
-        if (!matchedWayId) continue;
-        const nodePoint = graph.nodePoints.get(nodeId);
-        const distance = nodePoint ? distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, nodePoint) : 9999;
-        candidateHits.push({ distance, wayId: matchedWayId, ref: refs.get(matchedWayId) });
-      }
+    const { graph, refs } = corridor;
+    const from = nearestNode(graph, localStations[0], 5000);
+    const to = nearestNode(graph, localStations[1], 5000);
+    if (!from || !to) {
+      const rejected = { status: "rejected" } as CrossingOsmFilterResult;
+      resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: rejected });
+      return rejected;
     }
 
-    const own = candidateHits.sort((a, b) => a.distance - b.distance)[0];
-    const result: CrossingOsmFilterResult = own
-      ? { status: "matched", score: Math.max(0, 1 - own.distance / 100), railwayWayId: own.wayId, ref: own.ref }
+    const path = shortestRailPath(graph, from.nodeId, to.nodeId, 150000);
+    if (!path) {
+      const rejected = { status: "rejected" } as CrossingOsmFilterResult;
+      resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: rejected });
+      return rejected;
+    }
+
+    let best: { distance: number; wayId?: string; ref?: string } | null = null;
+    for (const nodeId of mapping.crossingNodeIds) {
+      const hitIndex = path.nodes.indexOf(nodeId);
+      if (hitIndex < 0) continue;
+      const adjacentWayIds = new Set<string>();
+      if (hitIndex > 0) {
+        const edge = (graph.adjacency.get(path.nodes[hitIndex - 1]) ?? []).find((candidate) => candidate.to === nodeId);
+        if (edge) adjacentWayIds.add(edge.wayId);
+      }
+      const nextNode = path.nodes[hitIndex + 1];
+      if (nextNode) {
+        const edge = (graph.adjacency.get(nodeId) ?? []).find((candidate) => candidate.to === nextNode);
+        if (edge) adjacentWayIds.add(edge.wayId);
+      }
+      const matchedWayId = [...adjacentWayIds].find((wayId) => mapping.railwayWayIds.includes(wayId));
+      if (!matchedWayId) continue;
+      const nodePoint = graph.nodePoints.get(nodeId);
+      const distance = nodePoint ? distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, nodePoint) : 9999;
+      if (!best || distance < best.distance) best = { distance, wayId: matchedWayId, ref: refs.get(matchedWayId) };
+    }
+
+    const result: CrossingOsmFilterResult = best
+      ? { status: "matched", score: Math.max(0, 1 - best.distance / 100), railwayWayId: best.wayId, ref: best.ref }
       : { status: "rejected" };
     resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
     return result;
