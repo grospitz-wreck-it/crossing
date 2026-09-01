@@ -26,6 +26,8 @@ const MAX_GRAPH_NODES = 150000;
 const MAX_EXPANSION_ROUNDS = 100;
 const WAY_BATCH_SIZE = 200;
 const NODE_BATCH_SIZE = 500;
+const ROUTE_CORRIDOR_RADIUS_METERS = 3000;
+const ROUTE_CORRIDOR_STATION_WINDOW = 3;
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const corridorCache = new Map<string, { expiresAt: number; value: CorridorGraph }>();
@@ -154,41 +156,58 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
 
 type CorridorGraph = { graph: RailGraph; refs: Map<string, string>; mapping: Mapping };
 
-function corridorTargets(mapping: Mapping, route: RouteStation[]) {
-  const stations = route
+type CorridorTarget = RouteStation & { lat: number; lon: number };
+
+function routeCorridorStations(mapping: Mapping, route: RouteStation[]) {
+  const resolved = route
     .map((station, index) => ({ station, index }))
-    .filter((entry): entry is { station: RouteStation & { lat: number; lon: number }; index: number } => entry.station.lat != null && entry.station.lon != null);
-  if (stations.length < 2) return [] as Array<RouteStation & { lat: number; lon: number }>;
+    .filter((entry): entry is { station: CorridorTarget; index: number } => entry.station.lat != null && entry.station.lon != null);
+  if (resolved.length < 2) return [] as CorridorTarget[];
 
   const crossing = { lat: mapping.crossingLat, lon: mapping.crossingLon };
-  let nearest = stations[0];
+  let nearest = resolved[0];
   let nearestDistance = distanceMeters(crossing, nearest.station);
-  for (let i = 1; i < stations.length; i += 1) {
-    const distance = distanceMeters(crossing, stations[i].station);
+  for (let i = 1; i < resolved.length; i += 1) {
+    const distance = distanceMeters(crossing, resolved[i].station);
     if (distance < nearestDistance) {
-      nearest = stations[i];
+      nearest = resolved[i];
       nearestDistance = distance;
     }
   }
 
-  // Keep the corridor anchored to the train's actual route order. Prefer one
-  // station before and one after the crossing-nearest station so a junction
-  // cannot be selected merely because another station happens to be nearby.
-  const before = stations.filter((entry) => entry.index < nearest.index).at(-1)?.station;
-  const after = stations.find((entry) => entry.index > nearest.index)?.station;
-  if (before && after) return [before, after];
+  const start = Math.max(0, nearest.index - ROUTE_CORRIDOR_STATION_WINDOW);
+  const end = Math.min(route.length - 1, nearest.index + ROUTE_CORRIDOR_STATION_WINDOW);
+  return route
+    .slice(start, end + 1)
+    .filter((station): station is CorridorTarget => station.lat != null && station.lon != null);
+}
 
-  if (before) {
-    const before2 = stations.filter((entry) => entry.index < nearest.index).at(-2)?.station;
-    return before2 ? [before2, before] : [before, nearest.station];
+function pointToSegmentDistanceMeters(point: CorridorTarget, a: CorridorTarget, b: CorridorTarget) {
+  const latScale = Math.cos((point.lat * Math.PI) / 180);
+  const scaleX = 111320 * latScale;
+  const scaleY = 111320;
+  const px = point.lon * scaleX;
+  const py = point.lat * scaleY;
+  const ax = a.lon * scaleX;
+  const ay = a.lat * scaleY;
+  const bx = b.lon * scaleX;
+  const by = b.lat * scaleY;
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function wayNearRouteCorridor(way: RailWayRow, stations: CorridorTarget[]) {
+  if (stations.length < 2) return false;
+  for (const point of way.geometry) {
+    for (let i = 1; i < stations.length; i += 1) {
+      if (pointToSegmentDistanceMeters(point, stations[i - 1], stations[i]) <= ROUTE_CORRIDOR_RADIUS_METERS) return true;
+    }
   }
-
-  if (after) {
-    const after2 = stations.find((entry) => entry.index > nearest.index + 1)?.station;
-    return after2 ? [after, after2] : [nearest.station, after];
-  }
-
-  return [stations[0].station, stations[1].station];
+  return false;
 }
 
 async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
@@ -199,25 +218,33 @@ async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Pro
   const mapping = await loadMapping(crossingId);
   if (!mapping || !mapping.crossingNodeIds.size) return null;
 
+  const corridorStations = routeCorridorStations(mapping, route);
+  if (corridorStations.length < 2) return null;
+
   const loadedWayIds = new Set<string>();
   const rows: RailWayRow[] = [];
   const refs = new Map<string, string>();
-  const addWays = async (ids: string[]) => {
+
+  const addWays = async (ids: string[], constrainToRoute = false) => {
     const missing = ids.filter((id) => !loadedWayIds.has(id));
     if (!missing.length || loadedWayIds.size >= MAX_GRAPH_WAYS) return;
-    const newRows = await loadWayRows(missing.slice(0, MAX_GRAPH_WAYS - loadedWayIds.size));
-    for (const row of newRows) {
+    const candidates = await loadWayRows(missing.slice(0, MAX_GRAPH_WAYS - loadedWayIds.size));
+    for (const row of candidates) {
       if (loadedWayIds.has(row.osmId)) continue;
+      if (constrainToRoute && !wayNearRouteCorridor(row, corridorStations)) continue;
       loadedWayIds.add(row.osmId);
       rows.push(row);
       if (row.ref) refs.set(row.osmId, row.ref);
     }
   };
 
+  // The crossing's own mapped ways are always the seeds. From there on every
+  // expansion step is spatially constrained to the train's actual route
+  // corridor, preventing topology branches at junctions from taking over.
   await addWays(mapping.railwayWayIds);
   let graph = buildRailGraph(rows);
-  const targets = corridorTargets(mapping, route);
-  const hasTargets = () => targets.length === 2 && targets.every((station) => nearestNode(graph, station, 5000));
+  const targets = [corridorStations[0], corridorStations[corridorStations.length - 1]];
+  const hasTargets = () => targets.every((station) => nearestNode(graph, station, 5000));
 
   for (let round = 0; round < MAX_EXPANSION_ROUNDS && !hasTargets(); round += 1) {
     if (graph.nodePoints.size >= MAX_GRAPH_NODES || loadedWayIds.size >= MAX_GRAPH_WAYS) break;
@@ -236,7 +263,7 @@ async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Pro
       }
     }
     if (!adjacentWayIds.size) break;
-    await addWays([...adjacentWayIds]);
+    await addWays([...adjacentWayIds], true);
     graph = buildRailGraph(rows);
   }
 
