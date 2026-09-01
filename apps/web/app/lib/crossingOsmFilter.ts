@@ -32,6 +32,9 @@ const ROUTE_CORRIDOR_STATION_WINDOW = 3;
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const corridorCache = new Map<string, { expiresAt: number; value: CorridorGraph }>();
+const corridorInFlight = new Map<string, Promise<CorridorGraph | null>>();
+const mappingCache = new Map<string, { expiresAt: number; value: Mapping | null }>();
+const mappingInFlight = new Map<string, Promise<Mapping | null>>();
 const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
 let stationCatalogCache: Map<string, RouteStation> | null = null;
 
@@ -98,44 +101,74 @@ async function loadWayRows(wayIds: string[]): Promise<RailWayRow[]> {
 }
 
 async function loadMapping(crossingId: string): Promise<Mapping | null> {
-  const links = await db.execute({
-    sql: `SELECT osm_crossing_id, confidence FROM crossing_osm_links WHERE crossing_id = ? AND confidence >= 0.8 ORDER BY confidence DESC LIMIT 1`,
-    args: [crossingId],
-  });
-  const link: any = links.rows[0];
-  if (!link) return null;
+  const cached = mappingCache.get(crossingId);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
 
-  const osmCrossingId = Number(link.osm_crossing_id);
-  const crossingResult = await db.execute({
-    sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
-    args: [osmCrossingId],
-  });
-  const crossingRow: any = crossingResult.rows[0];
-  if (!crossingRow) return null;
+  const existing = mappingInFlight.get(crossingId);
+  if (existing) return existing;
 
-  const tracksResult = await db.execute({
-    sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
-    args: [osmCrossingId],
-  });
-  const railwayWayIds = (tracksResult.rows as any[]).map((row) => String(row.railway_way_id)).filter(Boolean);
-  if (!railwayWayIds.length) return null;
-
-  const crossingNodeIds = new Set<string>();
-  for (const track of tracksResult.rows as any[]) {
-    const wayResult = await db.execute({
-      sql: `SELECT node_ids_json FROM osm_rail_ways WHERE osm_id = ? LIMIT 1`,
-      args: [String(track.railway_way_id)],
-    });
-    const wayRow: any = wayResult.rows[0];
-    if (!wayRow) continue;
+  const request = (async () => {
     try {
-      const nodes = JSON.parse(String(wayRow.node_ids_json || "[]")).map(String);
-      const index = Number(track.crossing_node_index);
-      if (Number.isInteger(index) && nodes[index]) crossingNodeIds.add(nodes[index]);
-    } catch {}
-  }
+      const links = await db.execute({
+        sql: `SELECT osm_crossing_id, confidence FROM crossing_osm_links WHERE crossing_id = ? AND confidence >= 0.8 ORDER BY confidence DESC LIMIT 1`,
+        args: [crossingId],
+      });
+      const link: any = links.rows[0];
+      if (!link) return null;
 
-  return { crossingId, osmCrossingId, confidence: Number(link.confidence ?? 0), crossingLat: Number(crossingRow.lat), crossingLon: Number(crossingRow.lon), crossingNodeIds, railwayWayIds };
+      const osmCrossingId = Number(link.osm_crossing_id);
+      const crossingResult = await db.execute({
+        sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
+        args: [osmCrossingId],
+      });
+      const crossingRow: any = crossingResult.rows[0];
+      if (!crossingRow) return null;
+
+      const tracksResult = await db.execute({
+        sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
+        args: [osmCrossingId],
+      });
+      const railwayWayIds = (tracksResult.rows as any[]).map((row) => String(row.railway_way_id)).filter(Boolean);
+      if (!railwayWayIds.length) return null;
+
+      const crossingNodeIds = new Set<string>();
+      for (const track of tracksResult.rows as any[]) {
+        const wayResult = await db.execute({
+          sql: `SELECT node_ids_json FROM osm_rail_ways WHERE osm_id = ? LIMIT 1`,
+          args: [String(track.railway_way_id)],
+        });
+        const wayRow: any = wayResult.rows[0];
+        if (!wayRow) continue;
+        try {
+          const nodes = JSON.parse(String(wayRow.node_ids_json || "[]")).map(String);
+          const index = Number(track.crossing_node_index);
+          if (Number.isInteger(index) && nodes[index]) crossingNodeIds.add(nodes[index]);
+        } catch {}
+      }
+
+      return {
+        crossingId,
+        osmCrossingId,
+        confidence: Number(link.confidence ?? 0),
+        crossingLat: Number(crossingRow.lat),
+        crossingLon: Number(crossingRow.lon),
+        crossingNodeIds,
+        railwayWayIds,
+      };
+    } catch (error) {
+      console.error("Failed to load OSM crossing mapping:", error);
+      return null;
+    }
+  })();
+
+  mappingInFlight.set(crossingId, request);
+  try {
+    const value = await request;
+    mappingCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+    return value;
+  } finally {
+    mappingInFlight.delete(crossingId);
+  }
 }
 
 type CorridorGraph = { graph: RailGraph; refs: Map<string, string>; mapping: Mapping };
@@ -198,11 +231,7 @@ function routeSegments(stations: CorridorTarget[]): RouteSegment[] {
   return segments;
 }
 
-async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
-  const key = `${crossingId}|${route.map((station) => station.name).join("|")}`;
-  const cached = corridorCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-
+async function buildCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
   const mapping = await loadMapping(crossingId);
   if (!mapping || !mapping.crossingNodeIds.size) return null;
 
@@ -252,9 +281,29 @@ async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Pro
     graph = buildRailGraph(rows);
   }
 
-  const value = { graph, refs, mapping };
-  corridorCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
-  return value;
+  return { graph, refs, mapping };
+}
+
+async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
+  const key = `${crossingId}|${route.map((station) => station.name).join("|")}`;
+  const cached = corridorCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const existing = corridorInFlight.get(key);
+  if (existing) return existing;
+
+  const request = (async () => {
+    try {
+      const value = await buildCorridorGraph(crossingId, route);
+      if (value) corridorCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+      return value;
+    } finally {
+      corridorInFlight.delete(key);
+    }
+  })();
+
+  corridorInFlight.set(key, request);
+  return request;
 }
 
 export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined): Promise<CrossingOsmFilterResult> {
