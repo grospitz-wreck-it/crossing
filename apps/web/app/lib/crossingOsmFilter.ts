@@ -156,8 +156,8 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
 
 type CorridorGraph = { graph: RailGraph; refs: Map<string, string>; mapping: Mapping };
 type CorridorTarget = RouteStation & { lat: number; lon: number };
-
 type RouteSegment = { from: CorridorTarget; to: CorridorTarget };
+type GeoCoordinate = { lat: number; lon: number };
 
 function routeCorridorStations(mapping: Mapping, route: RouteStation[]) {
   const resolved = route
@@ -183,7 +183,7 @@ function routeCorridorStations(mapping: Mapping, route: RouteStation[]) {
     .filter((station): station is CorridorTarget => station.lat != null && station.lon != null);
 }
 
-function pointToSegmentDistanceMeters(point: { lat: number; lon: number }, a: CorridorTarget, b: CorridorTarget) {
+function pointToSegmentDistanceMeters(point: GeoCoordinate, a: GeoCoordinate, b: GeoCoordinate) {
   const latScale = Math.cos((point.lat * Math.PI) / 180);
   const scaleX = 111320 * latScale;
   const scaleY = 111320;
@@ -201,11 +201,10 @@ function pointToSegmentDistanceMeters(point: { lat: number; lon: number }, a: Co
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-function wayNearRouteCorridor(way: RailWayRow, stations: CorridorTarget[]) {
-  if (stations.length < 2) return false;
+function wayNearRouteSegments(way: RailWayRow, segments: RouteSegment[]) {
   for (const point of way.geometry) {
-    for (let i = 1; i < stations.length; i += 1) {
-      if (pointToSegmentDistanceMeters(point, stations[i - 1], stations[i]) <= ROUTE_CORRIDOR_RADIUS_METERS) return true;
+    for (const segment of segments) {
+      if (pointToSegmentDistanceMeters(point, segment.from, segment.to) <= ROUTE_CORRIDOR_RADIUS_METERS) return true;
     }
   }
   return false;
@@ -215,15 +214,6 @@ function routeSegments(stations: CorridorTarget[]): RouteSegment[] {
   const segments: RouteSegment[] = [];
   for (let i = 1; i < stations.length; i += 1) segments.push({ from: stations[i - 1], to: stations[i] });
   return segments;
-}
-
-function wayNearRouteSegments(way: RailWayRow, segments: RouteSegment[]) {
-  for (const point of way.geometry) {
-    for (const segment of segments) {
-      if (pointToSegmentDistanceMeters(point, segment.from, segment.to) <= ROUTE_CORRIDOR_RADIUS_METERS) return true;
-    }
-  }
-  return false;
 }
 
 async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
@@ -241,7 +231,6 @@ async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Pro
   const loadedWayIds = new Set<string>();
   const rows: RailWayRow[] = [];
   const refs = new Map<string, string>();
-
   const addWays = async (ids: string[], constrainToRoute = false) => {
     const missing = ids.filter((id) => !loadedWayIds.has(id));
     if (!missing.length || loadedWayIds.size >= MAX_GRAPH_WAYS) return;
