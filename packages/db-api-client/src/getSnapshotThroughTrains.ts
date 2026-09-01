@@ -40,13 +40,7 @@ function routeIndex(route: string[], station: string) {
   });
 }
 
-function isLocalTransitTrain(train: { line?: string; category?: string }) {
-  const line = String(train.line || "").trim().toUpperCase();
-  const category = String(train.category || "").trim().toUpperCase();
-  return /^U\s*\d/.test(line) || /^(TRAM|STADTBAHN|LIGHT_RAIL|LIGHT RAIL|METRO|SUBWAY|STRAB|STB)/.test(category);
-}
-
-function matchesRoute(trainRoute: string[], observationStation: string, requiredRouteStops: string[], transit = false) {
+function matchesRoute(trainRoute: string[], observationStation: string, requiredRouteStops: string[]) {
   if (!trainRoute.length) return false;
   const infrastructureRefs = requiredRouteStops.filter((stop) => /^\d{2,6}$/.test(String(stop).trim()));
   if (infrastructureRefs.length) return routeIndex(trainRoute, observationStation) >= 0;
@@ -54,7 +48,12 @@ function matchesRoute(trainRoute: string[], observationStation: string, required
   const anchors = requiredRouteStops
     .map((stop, order) => ({ stop, order, index: routeIndex(trainRoute, stop) }))
     .filter((entry) => entry.index >= 0);
-  if (anchors.length < 2) return transit && routeIndex(trainRoute, observationStation) >= 0;
+
+  if (anchors.length < 2) {
+    // Without two configured anchors the observation station is still a hard
+    // route gate. The OSM matcher performs the final crossing-path check.
+    return routeIndex(trainRoute, observationStation) >= 0;
+  }
 
   const ordered = [...anchors].sort((a, b) => a.order - b.order);
   for (let i = 1; i < ordered.length; i += 1) {
@@ -107,14 +106,6 @@ function snapshotCallsContain(calls: any[], station: string) {
 
 export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): Promise<SnapshotThroughTrain[] | null> {
   try {
-    const refresh = await db.execute({
-      sql: `SELECT finished_at,status FROM mobilithek_refresh_status WHERE id = 1 LIMIT 1`,
-      args: [],
-    });
-    const refreshRow: any = refresh.rows[0];
-    const refreshedAt = Date.parse(String(refreshRow?.finished_at || ""));
-    if (refreshRow?.status !== "success" || !Number.isFinite(refreshedAt) || Date.now() - refreshedAt > 180_000) return null;
-
     const rules = (crossing.throughRules?.length
       ? crossing.throughRules
       : crossing.observationEvas.map((eva: string) => ({ observationEva: eva, observationStation: eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }))) as any[];
@@ -133,12 +124,13 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       const route = parseJson(row.route_json, []).map(String).filter(Boolean);
       const calls = parseJson(row.calls_json, []);
       if (route.length < 2) continue;
-      const train = { line: String(row.line || ""), category: String(row.category || ""), route };
-      const transit = isLocalTransitTrain(train);
+      const train = { line: String(row.line || ""), category: String(row.category || "") };
+
       for (const rule of rules) {
         if (!ruleAllowsTrain(rule, train)) continue;
-        if (!matchesRoute(route, String(rule.observationStation || ""), crossing.requiredRouteStops || [], transit)) continue;
         const observationStation = String(rule.observationStation || "");
+        if (!matchesRoute(route, observationStation, crossing.requiredRouteStops || [])) continue;
+
         const observationCall = snapshotCallsContain(calls, observationStation);
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
         const parsedObservation = new Date(observationTime);
@@ -149,6 +141,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
 
         const crossingTime = new Date(parsedObservation.getTime() + Number(rule.fallbackOffsetSeconds || 300) * 1000);
         if (crossingTime.getTime() < now - 60_000 || crossingTime.getTime() > now + 3 * 60 * 60_000) continue;
+
         candidates.push({
           type: "through",
           line: String(row.line || ""),
@@ -173,7 +166,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
 
     return Array.from(new Map(candidates.map((train) => [`${train.category}-${train.journeyNumber}`, train])).values());
   } catch (error) {
-    console.warn("Mobilithek snapshot unavailable; falling back to raw registry", error);
+    console.warn("Mobilithek snapshot unavailable", error);
     return null;
   }
 }
