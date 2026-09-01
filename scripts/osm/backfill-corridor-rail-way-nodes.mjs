@@ -13,31 +13,32 @@ function placeholders(count) {
 }
 
 async function main() {
-  const corridors = await db.execute(`SELECT railway_way_ids FROM crossing_osm_corridors`);
-  const wayIds = new Set();
-  for (const row of corridors.rows) {
-    try {
-      for (const id of JSON.parse(String(row.railway_way_ids || "[]"))) wayIds.add(Number(id));
-    } catch {}
-  }
+  const result = await db.execute(`
+    SELECT DISTINCT r.railway_way_id
+    FROM osm_crossing_rail_ways r
+    INNER JOIN crossing_osm_links l ON l.osm_crossing_id = r.crossing_osm_id
+    WHERE l.confidence >= 0.8
+  `);
+  const wayIds = new Set(result.rows.map((row) => Number(row.railway_way_id)).filter(Number.isSafeInteger));
 
   if (!wayIds.size) {
-    console.log("No corridor railway ways found.");
+    console.log("No mapped crossing railway ways found.");
     return;
   }
 
   const existing = new Set();
-  for (let i = 0; i < [...wayIds].length; i += WAY_BATCH_SIZE) {
-    const batch = [...wayIds].slice(i, i + WAY_BATCH_SIZE);
-    const result = await db.execute({
+  const ids = [...wayIds];
+  for (let i = 0; i < ids.length; i += WAY_BATCH_SIZE) {
+    const batch = ids.slice(i, i + WAY_BATCH_SIZE);
+    const indexed = await db.execute({
       sql: `SELECT DISTINCT railway_way_id FROM osm_rail_way_nodes WHERE railway_way_id IN (${placeholders(batch.length)})`,
       args: batch,
     });
-    for (const row of result.rows) existing.add(Number(row.railway_way_id));
+    for (const row of indexed.rows) existing.add(Number(row.railway_way_id));
   }
 
-  const missing = [...wayIds].filter((id) => !existing.has(id));
-  console.log(`Corridor ways: ${wayIds.size}; already indexed: ${existing.size}; missing: ${missing.length}`);
+  const missing = ids.filter((id) => !existing.has(id));
+  console.log(`Mapped crossing ways: ${wayIds.size}; already indexed: ${existing.size}; missing: ${missing.length}`);
 
   let inserted = 0;
   for (let i = 0; i < missing.length; i += WAY_BATCH_SIZE) {
