@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { buildRailGraph, distanceMeters, nearestNode, shortestRailPath, type RailWayRow } from "./railGraph";
+import { buildRailGraph, distanceMeters, nearestNode, shortestRailPath, type RailGraph, type RailWayRow } from "./railGraph";
 import type { RouteStation } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
 
 export type CrossingOsmFilterResult = {
@@ -21,14 +21,17 @@ type Mapping = {
 
 const CACHE_TTL_MS = 300_000;
 const RESULT_CACHE_TTL_MS = 300_000;
+const MAX_GRAPH_WAYS = 5000;
+const MAX_GRAPH_NODES = 150000;
+const MAX_EXPANSION_ROUNDS = 100;
+const WAY_BATCH_SIZE = 200;
+const NODE_BATCH_SIZE = 500;
+
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
-const graphCache = new Map<string, { expiresAt: number; value: ReturnType<typeof buildRailGraph> }>();
+const corridorCache = new Map<string, { expiresAt: number; value: CorridorGraph }>();
 const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
 let stationCatalogCache: { expiresAt: number; value: Map<string, RouteStation> } | null = null;
 let stationCatalogPromise: Promise<Map<string, RouteStation>> | null = null;
-let graphPromise: Promise<ReturnType<typeof buildRailGraph>> | null = null;
-let mappingsCache: { expiresAt: number; value: Mapping[] } | null = null;
-let mappingsPromise: Promise<Mapping[]> | null = null;
 
 function normalizeStationName(value: string) {
   return String(value || "")
@@ -84,100 +87,146 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
   }
 }
 
-async function loadGraph() {
-  const cached = graphCache.get("rail");
-  if (cached && cached.expiresAt > Date.now()) return cached.value;
-  if (graphPromise) return graphPromise;
-
-  graphPromise = (async () => {
-    try {
-      const result = await db.execute({
-        sql: `SELECT osm_id, node_ids_json, geometry_json, tags_json FROM osm_rail_ways`,
-        args: [],
-      });
-      const rows: RailWayRow[] = [];
-      for (const row of result.rows as any[]) {
-        try {
-          const nodeIds = JSON.parse(String(row.node_ids_json || "[]")).map(String);
-          const geometry = JSON.parse(String(row.geometry_json || "[]"));
-          let tags: Record<string, string> = {};
-          try { tags = JSON.parse(String(row.tags_json || "{}")); } catch {}
-          if (nodeIds.length >= 2 && geometry.length >= 2) rows.push({ osmId: String(row.osm_id), nodeIds, geometry, ref: tags.ref });
-        } catch {}
-      }
-      const graph = buildRailGraph(rows);
-      graphCache.set("rail", { expiresAt: Date.now() + CACHE_TTL_MS, value: graph });
-      return graph;
-    } finally {
-      graphPromise = null;
-    }
-  })();
-
-  return graphPromise;
+function placeholders(count: number) {
+  return Array.from({ length: count }, () => "?").join(",");
 }
 
-async function loadMappings(): Promise<Mapping[]> {
-  if (mappingsCache && mappingsCache.expiresAt > Date.now()) return mappingsCache.value;
-  if (mappingsPromise) return mappingsPromise;
-
-  mappingsPromise = (async () => {
-    try {
-      const links = await db.execute({
-        sql: `SELECT crossing_id, osm_crossing_id, confidence FROM crossing_osm_links WHERE confidence >= 0.8`,
-        args: [],
-      });
-      const mappings: Mapping[] = [];
-
-      for (const link of links.rows as any[]) {
-        const osmCrossingId = Number(link.osm_crossing_id);
-        const crossingResult = await db.execute({
-          sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
-          args: [osmCrossingId],
-        });
-        const crossingRow: any = crossingResult.rows[0];
-        if (!crossingRow) continue;
-
-        const tracksResult = await db.execute({
-          sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
-          args: [osmCrossingId],
-        });
-        const railwayWayIds = (tracksResult.rows as any[]).map((row) => String(row.railway_way_id)).filter(Boolean);
-        if (!railwayWayIds.length) continue;
-
-        const crossingNodeIds = new Set<string>();
-        for (const track of tracksResult.rows as any[]) {
-          const wayResult = await db.execute({
-            sql: `SELECT node_ids_json FROM osm_rail_ways WHERE osm_id = ? LIMIT 1`,
-            args: [String(track.railway_way_id)],
-          });
-          const wayRow: any = wayResult.rows[0];
-          if (!wayRow) continue;
-          try {
-            const nodes = JSON.parse(String(wayRow.node_ids_json || "[]")).map(String);
-            const index = Number(track.crossing_node_index);
-            if (Number.isInteger(index) && nodes[index]) crossingNodeIds.add(nodes[index]);
-          } catch {}
+async function loadWayRows(wayIds: string[]): Promise<RailWayRow[]> {
+  const rows: RailWayRow[] = [];
+  for (let i = 0; i < wayIds.length; i += WAY_BATCH_SIZE) {
+    const batch = wayIds.slice(i, i + WAY_BATCH_SIZE);
+    const result = await db.execute({
+      sql: `SELECT osm_id, node_ids_json, geometry_json, tags_json FROM osm_rail_ways WHERE osm_id IN (${placeholders(batch.length)})`,
+      args: batch,
+    });
+    for (const row of result.rows as any[]) {
+      try {
+        const nodeIds = JSON.parse(String(row.node_ids_json || "[]")).map(String);
+        const geometry = JSON.parse(String(row.geometry_json || "[]"));
+        let tags: Record<string, string> = {};
+        try { tags = JSON.parse(String(row.tags_json || "{}")); } catch {}
+        if (nodeIds.length >= 2 && geometry.length >= 2) {
+          rows.push({ osmId: String(row.osm_id), nodeIds, geometry, ref: tags.ref });
         }
-
-        mappings.push({
-          crossingId: String(link.crossing_id),
-          osmCrossingId,
-          confidence: Number(link.confidence ?? 0),
-          crossingLat: Number(crossingRow.lat),
-          crossingLon: Number(crossingRow.lon),
-          crossingNodeIds,
-          railwayWayIds,
-        });
-      }
-
-      mappingsCache = { expiresAt: Date.now() + CACHE_TTL_MS, value: mappings };
-      return mappings;
-    } finally {
-      mappingsPromise = null;
+      } catch {}
     }
-  })();
+  }
+  return rows;
+}
 
-  return mappingsPromise;
+async function loadMapping(crossingId: string): Promise<Mapping | null> {
+  const links = await db.execute({
+    sql: `SELECT osm_crossing_id, confidence FROM crossing_osm_links WHERE crossing_id = ? AND confidence >= 0.8 ORDER BY confidence DESC LIMIT 1`,
+    args: [crossingId],
+  });
+  const link: any = links.rows[0];
+  if (!link) return null;
+
+  const osmCrossingId = Number(link.osm_crossing_id);
+  const crossingResult = await db.execute({
+    sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
+    args: [osmCrossingId],
+  });
+  const crossingRow: any = crossingResult.rows[0];
+  if (!crossingRow) return null;
+
+  const tracksResult = await db.execute({
+    sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
+    args: [osmCrossingId],
+  });
+  const railwayWayIds = (tracksResult.rows as any[]).map((row) => String(row.railway_way_id)).filter(Boolean);
+  if (!railwayWayIds.length) return null;
+
+  const crossingNodeIds = new Set<string>();
+  for (const track of tracksResult.rows as any[]) {
+    const wayResult = await db.execute({
+      sql: `SELECT node_ids_json FROM osm_rail_ways WHERE osm_id = ? LIMIT 1`,
+      args: [String(track.railway_way_id)],
+    });
+    const wayRow: any = wayResult.rows[0];
+    if (!wayRow) continue;
+    try {
+      const nodes = JSON.parse(String(wayRow.node_ids_json || "[]")).map(String);
+      const index = Number(track.crossing_node_index);
+      if (Number.isInteger(index) && nodes[index]) crossingNodeIds.add(nodes[index]);
+    } catch {}
+  }
+
+  return {
+    crossingId,
+    osmCrossingId,
+    confidence: Number(link.confidence ?? 0),
+    crossingLat: Number(crossingRow.lat),
+    crossingLon: Number(crossingRow.lon),
+    crossingNodeIds,
+    railwayWayIds,
+  };
+}
+
+type CorridorGraph = {
+  graph: RailGraph;
+  refs: Map<string, string>;
+  mapping: Mapping;
+};
+
+async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
+  const key = `${crossingId}|${route.map((station) => station.name).join("|")}`;
+  const cached = corridorCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  const mapping = await loadMapping(crossingId);
+  if (!mapping || !mapping.crossingNodeIds.size) return null;
+
+  const loadedWayIds = new Set<string>();
+  const rows: RailWayRow[] = [];
+  const refs = new Map<string, string>();
+
+  const addWays = async (ids: string[]) => {
+    const missing = ids.filter((id) => !loadedWayIds.has(id));
+    if (!missing.length || loadedWayIds.size >= MAX_GRAPH_WAYS) return [];
+    const allowed = missing.slice(0, MAX_GRAPH_WAYS - loadedWayIds.size);
+    const newRows = await loadWayRows(allowed);
+    for (const row of newRows) {
+      if (loadedWayIds.has(row.osmId)) continue;
+      loadedWayIds.add(row.osmId);
+      rows.push(row);
+      if (row.ref) refs.set(row.osmId, row.ref);
+    }
+    return newRows;
+  };
+
+  await addWays(mapping.railwayWayIds);
+
+  let graph = buildRailGraph(rows);
+  const targets = route.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
+  const hasAllTargets = () => targets.length >= 2 && targets.every((station) => nearestNode(graph, station, 5000));
+
+  for (let round = 0; round < MAX_EXPANSION_ROUNDS && !hasAllTargets(); round += 1) {
+    if (graph.nodePoints.size >= MAX_GRAPH_NODES || loadedWayIds.size >= MAX_GRAPH_WAYS) break;
+
+    const nodeIds = [...graph.nodePoints.keys()];
+    const adjacentWayIds = new Set<string>();
+    for (let i = 0; i < nodeIds.length; i += NODE_BATCH_SIZE) {
+      const batch = nodeIds.slice(i, i + NODE_BATCH_SIZE).map((id) => Number(id)).filter(Number.isSafeInteger);
+      if (!batch.length) continue;
+      const result = await db.execute({
+        sql: `SELECT DISTINCT railway_way_id FROM osm_rail_way_nodes WHERE node_id IN (${placeholders(batch.length)})`,
+        args: batch,
+      });
+      for (const row of result.rows as any[]) {
+        const id = String(row.railway_way_id);
+        if (!loadedWayIds.has(id)) adjacentWayIds.add(id);
+      }
+    }
+
+    if (!adjacentWayIds.size) break;
+    await addWays([...adjacentWayIds]);
+    graph = buildRailGraph(rows);
+  }
+
+  const value = { graph, refs, mapping };
+  corridorCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+  return value;
 }
 
 export async function filterTrainByCrossingOsm(
@@ -197,73 +246,50 @@ export async function filterTrainByCrossingOsm(
     );
     if (stations.length < 2) return { status: "unknown" };
 
-    const [graph, mappings] = await Promise.all([loadGraph(), loadMappings()]);
-    const requested = mappings.find((m) => m.crossingId === crossingId);
-    if (!requested || requested.crossingNodeIds.size === 0) return { status: "unknown" };
+    const corridor = await loadCorridorGraph(crossingId, coordinateRoute);
+    if (!corridor) return { status: "unknown" };
 
-    const candidateHits = new Map<string, { wayId?: string; ref?: string; distance: number }>();
+    const { graph, refs, mapping } = corridor;
+    const candidateNodes = mapping.crossingNodeIds;
+    const candidateHits: Array<{ distance: number; wayId?: string; ref?: string }> = [];
 
     for (let i = 1; i < stations.length; i += 1) {
-      const from = stations[i - 1];
-      const to = stations[i];
-      const start = nearestNode(graph, from, 5000);
-      const target = nearestNode(graph, to, 5000);
-      if (!start || !target) continue;
+      const from = nearestNode(graph, stations[i - 1], 5000);
+      const to = nearestNode(graph, stations[i], 5000);
+      if (!from || !to) continue;
 
-      const nearbyMappings = mappings.filter((mapping) => {
-        const d = Math.min(
-          distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, from),
-          distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, to),
-        );
-        return d <= 12000;
-      });
-      if (!nearbyMappings.length) continue;
-
-      const path = shortestRailPath(graph, start.nodeId, target.nodeId);
+      const path = shortestRailPath(graph, from.nodeId, to.nodeId, 75000);
       if (!path) continue;
 
-      for (const mapping of nearbyMappings) {
-        const allowedWays = new Set(mapping.railwayWayIds);
-        const hitNode = [...mapping.crossingNodeIds].find((nodeId) => {
-          const hitIndex = path.nodes.indexOf(nodeId);
-          if (hitIndex < 0) return false;
-          const adjacentEdges = [
-            ...(hitIndex > 0 ? graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [] : []),
-            ...(graph.adjacency.get(nodeId) ?? []),
-          ];
-          return adjacentEdges.some((edge) => allowedWays.has(edge.wayId));
-        });
+      for (const nodeId of candidateNodes) {
+        const hitIndex = path.nodes.indexOf(nodeId);
+        if (hitIndex < 0) continue;
+        const hitWayIds = new Set<string>();
+        if (hitIndex > 0) {
+          const incoming = graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [];
+          const edge = incoming.find((candidate) => candidate.to === nodeId);
+          if (edge) hitWayIds.add(edge.wayId);
+        }
+        const outgoing = graph.adjacency.get(nodeId) ?? [];
+        const nextNode = path.nodes[hitIndex + 1];
+        const edge = outgoing.find((candidate) => candidate.to === nextNode);
+        if (edge) hitWayIds.add(edge.wayId);
 
-        if (!hitNode) continue;
+        const matchedWayId = [...hitWayIds].find((wayId) => mapping.railwayWayIds.includes(wayId));
+        if (!matchedWayId) continue;
 
-        const hitIndex = path.nodes.indexOf(hitNode);
-        const incomingEdge = hitIndex > 0
-          ? [...(graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [])].find((edge) => edge.to === hitNode)
-          : undefined;
-        const outgoingEdge = [...(graph.adjacency.get(hitNode) ?? [])].find((edge) => path.nodes[hitIndex + 1] === edge.to);
-        const matchedWayId = [incomingEdge?.wayId, outgoingEdge?.wayId].find((wayId) => wayId != null && allowedWays.has(wayId));
-        const distanceToCrossing = distanceMeters(
-          { lat: mapping.crossingLat, lon: mapping.crossingLon },
-          graph.nodePoints.get(hitNode) ?? { lat: mapping.crossingLat, lon: mapping.crossingLon },
-        );
-        candidateHits.set(mapping.crossingId, {
-          wayId: matchedWayId || mapping.railwayWayIds[0],
-          ref: undefined,
-          distance: distanceToCrossing,
-        });
+        const nodePoint = graph.nodePoints.get(nodeId);
+        const distance = nodePoint
+          ? distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, nodePoint)
+          : 9999;
+        candidateHits.push({ distance, wayId: matchedWayId, ref: refs.get(matchedWayId) });
       }
     }
 
-    const own = candidateHits.get(crossingId);
-    let result: CrossingOsmFilterResult;
-    if (own) {
-      result = { status: "matched", score: Math.max(0, 1 - own.distance / 100), railwayWayId: own.wayId, ref: own.ref };
-    } else {
-      const other = [...candidateHits.entries()].find(([id]) => id !== crossingId);
-      result = other
-        ? { status: "rejected", railwayWayId: other[1].wayId, ref: other[1].ref }
-        : { status: "unknown" };
-    }
+    const own = candidateHits.sort((a, b) => a.distance - b.distance)[0];
+    const result: CrossingOsmFilterResult = own
+      ? { status: "matched", score: Math.max(0, 1 - own.distance / 100), railwayWayId: own.wayId, ref: own.ref }
+      : { status: "rejected" };
 
     resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
     return result;
