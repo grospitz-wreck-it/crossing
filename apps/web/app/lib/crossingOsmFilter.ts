@@ -22,10 +22,10 @@ type Mapping = {
 
 const CACHE_TTL_MS = 300_000;
 const RESULT_CACHE_TTL_MS = 300_000;
-const MAX_GRAPH_WAYS = 5000;
-const MAX_GRAPH_NODES = 150000;
-const MAX_EXPANSION_ROUNDS = 100;
-const WAY_BATCH_SIZE = 200;
+const MAX_CORRIDOR_WAYS = 800;
+const MAX_CORRIDOR_NODES = 50000;
+const CORRIDOR_EXPANSION_ROUNDS = 9;
+const WAY_BATCH_SIZE = 100;
 const NODE_BATCH_SIZE = 500;
 const ROUTE_CORRIDOR_RADIUS_METERS = 3000;
 
@@ -50,7 +50,6 @@ function normalizeStationName(value: string) {
 
 function loadStationCatalog(): Map<string, RouteStation> {
   if (stationCatalogCache) return stationCatalogCache;
-
   const byName = new Map<string, RouteStation>();
   for (const station of getDbStations()) {
     const normalized = normalizeStation(station);
@@ -67,16 +66,13 @@ function routeToCoordinates(route: string[]): RouteStation[] {
   const key = route.join("|");
   const cached = stationCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-
   const byName = loadStationCatalog();
   const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
   stationCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
   return value;
 }
 
-function placeholders(count: number) {
-  return Array.from({ length: count }, () => "?").join(",");
-}
+function placeholders(count: number) { return Array.from({ length: count }, () => "?").join(","); }
 
 async function loadWayRows(wayIds: string[]): Promise<RailWayRow[]> {
   const rows: RailWayRow[] = [];
@@ -102,36 +98,21 @@ async function loadWayRows(wayIds: string[]): Promise<RailWayRow[]> {
 async function loadMapping(crossingId: string): Promise<Mapping | null> {
   const cached = mappingCache.get(crossingId);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-
   const existing = mappingInFlight.get(crossingId);
   if (existing) return existing;
-
   const request = (async () => {
     try {
-      const links = await db.execute({
-        sql: `SELECT osm_crossing_id, confidence FROM crossing_osm_links WHERE crossing_id = ? AND confidence >= 0.8 ORDER BY confidence DESC LIMIT 1`,
-        args: [crossingId],
-      });
+      const links = await db.execute({ sql: `SELECT osm_crossing_id, confidence FROM crossing_osm_links WHERE crossing_id = ? AND confidence >= 0.8 ORDER BY confidence DESC LIMIT 1`, args: [crossingId] });
       const link: any = links.rows[0];
       if (!link) return null;
-
       const osmCrossingId = Number(link.osm_crossing_id);
-      const crossingResult = await db.execute({
-        sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
-        args: [osmCrossingId],
-      });
+      const crossingResult = await db.execute({ sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`, args: [osmCrossingId] });
       const crossingRow: any = crossingResult.rows[0];
       if (!crossingRow) return null;
-
-      const tracksResult = await db.execute({
-        sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
-        args: [osmCrossingId],
-      });
+      const tracksResult = await db.execute({ sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`, args: [osmCrossingId] });
       const tracks = tracksResult.rows as any[];
       const railwayWayIds = tracks.map((row) => String(row.railway_way_id)).filter(Boolean);
       if (!railwayWayIds.length) return null;
-
-      // Avoid one Turso round-trip per track way.
       const wayRows = await loadWayRows([...new Set(railwayWayIds)]);
       const wayById = new Map(wayRows.map((row) => [row.osmId, row]));
       const crossingNodeIds = new Set<string>();
@@ -141,30 +122,18 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
         const index = Number(track.crossing_node_index);
         if (Number.isInteger(index) && wayRow.nodeIds[index]) crossingNodeIds.add(wayRow.nodeIds[index]);
       }
-
-      return {
-        crossingId,
-        osmCrossingId,
-        confidence: Number(link.confidence ?? 0),
-        crossingLat: Number(crossingRow.lat),
-        crossingLon: Number(crossingRow.lon),
-        crossingNodeIds,
-        railwayWayIds,
-      };
+      return { crossingId, osmCrossingId, confidence: Number(link.confidence ?? 0), crossingLat: Number(crossingRow.lat), crossingLon: Number(crossingRow.lon), crossingNodeIds, railwayWayIds };
     } catch (error) {
       console.error("Failed to load OSM crossing mapping:", error);
       return null;
     }
   })();
-
   mappingInFlight.set(crossingId, request);
   try {
     const value = await request;
     mappingCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value });
     return value;
-  } finally {
-    mappingInFlight.delete(crossingId);
-  }
+  } finally { mappingInFlight.delete(crossingId); }
 }
 
 type CorridorGraph = { graph: RailGraph; refs: Map<string, string>; mapping: Mapping };
@@ -191,11 +160,8 @@ function pointToSegmentDistanceMeters(point: GeoCoordinate, a: GeoCoordinate, b:
 }
 
 function routeCorridorStations(mapping: Mapping, route: RouteStation[]) {
-  const resolved = route
-    .map((station, index) => ({ station, index }))
-    .filter((entry): entry is { station: CorridorTarget; index: number } => entry.station.lat != null && entry.station.lon != null);
+  const resolved = route.map((station) => ({ station })).filter((entry): entry is { station: CorridorTarget } => entry.station.lat != null && entry.station.lon != null);
   if (resolved.length < 2) return [] as CorridorTarget[];
-
   const crossing = { lat: mapping.crossingLat, lon: mapping.crossingLon };
   let best: { distance: number; from: CorridorTarget; to: CorridorTarget } | null = null;
   for (let i = 1; i < resolved.length; i += 1) {
@@ -204,20 +170,12 @@ function routeCorridorStations(mapping: Mapping, route: RouteStation[]) {
     const distance = pointToSegmentDistanceMeters(crossing, from, to);
     if (!best || distance < best.distance) best = { distance, from, to };
   }
-
-  // This is a geometric pre-filter, not a stopping-distance rule. A through ICE
-  // is valid when the rail corridor between two stops crosses the BÜ, regardless
-  // of how far apart those stops are.
   if (!best || best.distance > ROUTE_CORRIDOR_RADIUS_METERS) return [] as CorridorTarget[];
   return [best.from, best.to];
 }
 
 function wayNearRouteSegments(way: RailWayRow, segments: RouteSegment[]) {
-  for (const point of way.geometry) {
-    for (const segment of segments) {
-      if (pointToSegmentDistanceMeters(point, segment.from, segment.to) <= ROUTE_CORRIDOR_RADIUS_METERS) return true;
-    }
-  }
+  for (const point of way.geometry) for (const segment of segments) if (pointToSegmentDistanceMeters(point, segment.from, segment.to) <= ROUTE_CORRIDOR_RADIUS_METERS) return true;
   return false;
 }
 
@@ -230,18 +188,16 @@ function routeSegments(stations: CorridorTarget[]): RouteSegment[] {
 async function buildCorridorGraph(crossingId: string, route: RouteStation[]): Promise<CorridorGraph | null> {
   const mapping = await loadMapping(crossingId);
   if (!mapping || !mapping.crossingNodeIds.size) return null;
-
   const corridorStations = routeCorridorStations(mapping, route);
   if (corridorStations.length < 2) return null;
   const segments = routeSegments(corridorStations);
-
   const loadedWayIds = new Set<string>();
   const rows: RailWayRow[] = [];
   const refs = new Map<string, string>();
   const addWays = async (ids: string[], constrainToRoute = false) => {
     const missing = [...new Set(ids)].filter((id) => !loadedWayIds.has(id));
-    if (!missing.length || loadedWayIds.size >= MAX_GRAPH_WAYS) return [] as string[];
-    const candidates = await loadWayRows(missing.slice(0, MAX_GRAPH_WAYS - loadedWayIds.size));
+    if (!missing.length || loadedWayIds.size >= MAX_CORRIDOR_WAYS) return [] as string[];
+    const candidates = await loadWayRows(missing.slice(0, MAX_CORRIDOR_WAYS - loadedWayIds.size));
     const newNodeIds = new Set<string>();
     for (const row of candidates) {
       if (loadedWayIds.has(row.osmId)) continue;
@@ -253,37 +209,29 @@ async function buildCorridorGraph(crossingId: string, route: RouteStation[]): Pr
     }
     return [...newNodeIds];
   };
-
   let frontierNodeIds = await addWays(mapping.railwayWayIds);
   let graph = buildRailGraph(rows);
   const targets = [corridorStations[0], corridorStations[1]];
-
-  for (let round = 0; round < MAX_EXPANSION_ROUNDS; round += 1) {
-    if (graph.nodePoints.size >= MAX_GRAPH_NODES || loadedWayIds.size >= MAX_GRAPH_WAYS) break;
+  for (let round = 0; round < CORRIDOR_EXPANSION_ROUNDS; round += 1) {
+    if (graph.nodePoints.size >= MAX_CORRIDOR_NODES || loadedWayIds.size >= MAX_CORRIDOR_WAYS) break;
     if (targets.every((station) => nearestNode(graph, station, 5000))) break;
     if (!frontierNodeIds.length) break;
-
     const adjacentWayIds = new Set<string>();
     for (let i = 0; i < frontierNodeIds.length; i += NODE_BATCH_SIZE) {
       const batch = frontierNodeIds.slice(i, i + NODE_BATCH_SIZE).map(Number).filter(Number.isSafeInteger);
       if (!batch.length) continue;
-      const result = await db.execute({
-        sql: `SELECT DISTINCT railway_way_id FROM osm_rail_way_nodes WHERE node_id IN (${placeholders(batch.length)})`,
-        args: batch,
-      });
+      const result = await db.execute({ sql: `SELECT DISTINCT railway_way_id FROM osm_rail_way_nodes WHERE node_id IN (${placeholders(batch.length)})`, args: batch });
       for (const row of result.rows as any[]) {
         const id = String(row.railway_way_id);
         if (!loadedWayIds.has(id)) adjacentWayIds.add(id);
       }
     }
     if (!adjacentWayIds.size) break;
-
     frontierNodeIds = await addWays([...adjacentWayIds], true);
     const previousNodeCount = graph.nodePoints.size;
     graph = buildRailGraph(rows);
     if (graph.nodePoints.size === previousNodeCount) break;
   }
-
   return { graph, refs, mapping };
 }
 
@@ -295,20 +243,15 @@ async function loadCorridorGraph(crossingId: string, route: RouteStation[]): Pro
   const key = `${crossingId}|${corridorStations[0].name}|${corridorStations[1].name}`;
   const cached = corridorCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
-
   const existing = corridorInFlight.get(key);
   if (existing) return existing;
-
   const request = (async () => {
     try {
       const value = await buildCorridorGraph(crossingId, route);
       if (value) corridorCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
       return value;
-    } finally {
-      corridorInFlight.delete(key);
-    }
+    } finally { corridorInFlight.delete(key); }
   })();
-
   corridorInFlight.set(key, request);
   return request;
 }
@@ -318,14 +261,10 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
   const resultKey = `${crossingId}|${route.join("|")}`;
   const cachedResult = resultCache.get(resultKey);
   if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
-
   try {
     const coordinateRoute = routeToCoordinates(route);
     const resolved = coordinateRoute.filter((s): s is CorridorTarget => s.lat != null && s.lon != null);
     if (resolved.length < 2) return { status: "unknown" };
-
-    // Cheap geometric gate before any corridor graph work. This keeps unrelated
-    // lines out of Turso while still allowing long-distance through services.
     const mapping = await loadMapping(crossingId);
     if (!mapping || !mapping.crossingNodeIds.size) return { status: "unknown" };
     const localStations = routeCorridorStations(mapping, coordinateRoute);
@@ -334,7 +273,6 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: rejected });
       return rejected;
     }
-
     const corridor = await loadCorridorGraph(crossingId, coordinateRoute);
     if (!corridor) return { status: "unknown" };
     const { graph, refs } = corridor;
@@ -345,14 +283,12 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: rejected });
       return rejected;
     }
-
     const path = shortestRailPath(graph, from.nodeId, to.nodeId, 150000);
     if (!path) {
       const rejected = { status: "rejected" } as CrossingOsmFilterResult;
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: rejected });
       return rejected;
     }
-
     let best: { distance: number; wayId?: string; ref?: string } | null = null;
     for (const nodeId of mapping.crossingNodeIds) {
       const hitIndex = path.nodes.indexOf(nodeId);
@@ -373,10 +309,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       const distance = nodePoint ? distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, nodePoint) : 9999;
       if (!best || distance < best.distance) best = { distance, wayId: matchedWayId, ref: refs.get(matchedWayId) };
     }
-
-    const result: CrossingOsmFilterResult = best
-      ? { status: "matched", score: Math.max(0, 1 - best.distance / 100), railwayWayId: best.wayId, ref: best.ref }
-      : { status: "rejected" };
+    const result: CrossingOsmFilterResult = best ? { status: "matched", score: Math.max(0, 1 - best.distance / 100), railwayWayId: best.wayId, ref: best.ref } : { status: "rejected" };
     resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
     return result;
   } catch (error) {
