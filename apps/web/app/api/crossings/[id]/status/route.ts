@@ -46,22 +46,12 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
 async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
-      db.execute({
-        sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`,
-        args: [id],
-      }),
-      db.execute({
-        sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`,
-        args: [id],
-      }),
+      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
+      db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }),
     ]);
-
     const row: any = result.rows[0];
     if (!row) return null;
-
-    const stationRows = stations.rows as any[];
-
-    return buildCrossingFromDb(row, stationRows);
+    return buildCrossingFromDb(row, stations.rows as any[]);
   } catch (error) {
     console.error("[STATUS] loadCrossing failed:", error);
     return null;
@@ -70,67 +60,29 @@ async function loadCrossing(id: string): Promise<any | null> {
 
 function isDirectObservationTrain(train: any): boolean { return train?.source === "observation" || train?.detection === "station-observation"; }
 
-async function allowTrainForCrossing(
-  crossingId: string,
-  crossing: any,
-  train: any,
-  timing?: TimingState,
-): Promise<boolean> {
+async function allowTrainForCrossing(crossingId: string, crossing: any, train: any, timing?: TimingState): Promise<boolean> {
   const journey = train?.journeyNumber ?? train?.id ?? "?";
   const line = train?.line ?? "?";
-  const route = Array.isArray(train?.route)
-    ? train.route.map(String).filter(Boolean)
-    : [];
+  const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
 
   if (String(journey) === "241" || String(line) === "ICE 241") {
-    console.log(
-      "[ICE 241 ROUTE]",
-      JSON.stringify({
-        journey,
-        line,
-        origin: train?.origin,
-        destination: train?.destination,
-        route,
-      }),
-    );
+    console.log("[ICE 241 ROUTE]", JSON.stringify({ journey, line, origin: train?.origin, destination: train?.destination, route }));
   }
 
   if (!route.length) {
-    if (timing?.debug) {
-      console.log(
-        `[CROSSING DECISION] journey=${journey} line=${line} ` +
-        `FINAL=ACCEPT reason=no-route`
-      );
-    }
-    return true;
+    if (timing?.debug) console.log(`[CROSSING DECISION] journey=${journey} line=${line} FINAL=REJECT reason=no-route`);
+    return false;
   }
 
   const started = performance.now();
   const result = await filterTrainByCrossingOsm(crossingId, route);
   const elapsed = performance.now() - started;
+  if (timing) timing.osmFilterMs += elapsed;
 
-  timing && (timing.osmFilterMs += elapsed);
+  if (timing?.debug) console.log(`[CROSSING DECISION] journey=${journey} line=${line} OSM=${result.status} way=${result.railwayWayId ?? "?"} score=${result.score?.toFixed(3) ?? "?"} ${elapsed.toFixed(1)}ms`);
 
-  if (timing?.debug) {
-    console.log(
-      `[CROSSING DECISION] journey=${journey} line=${line} ` +
-      `OSM=${result.status} ` +
-      `way=${result.railwayWayId ?? "?"} ` +
-      `score=${result.score?.toFixed(3) ?? "?"} ` +
-      `${elapsed.toFixed(1)}ms`
-    );
-  }
-
-  const allowed = result.status !== "rejected";
-
-  if (timing?.debug) {
-    console.log(
-      `[CROSSING DECISION] journey=${journey} line=${line} ` +
-      `FINAL=${allowed ? "ACCEPT" : "REJECT"} ` +
-      `reason=osm-${result.status}`
-    );
-  }
-
+  const allowed = result.status === "matched";
+  if (timing?.debug) console.log(`[CROSSING DECISION] journey=${journey} line=${line} FINAL=${allowed ? "ACCEPT" : "REJECT"} reason=osm-${result.status}`);
   return allowed;
 }
 
@@ -138,24 +90,7 @@ const STATUS_TIMETABLE_HOURS = 1;
 const STATUS_CACHE_TTL_MS = 30_000;
 const STATUS_TIMING_DEBUG = process.env.STATUS_TIMING_DEBUG !== "false";
 
-type TimingState = {
-  debug: boolean;
-  startedAt: number;
-  cacheReadMs: number;
-  loadCrossingMs: number;
-  localEventsMs: number;
-  observationEventsMs: number;
-  throughTrainsMs: number;
-  divertedTrainsMs: number;
-  reroutedTrainsMs: number;
-  infrastructureForecastMs: number;
-  filterDirectMs: number;
-  filterThroughMs: number;
-  routeProximityMs: number;
-  osmFilterMs: number;
-  closuresMs: number;
-  cacheWriteMs: number;
-};
+type TimingState = { debug: boolean; startedAt: number; cacheReadMs: number; loadCrossingMs: number; localEventsMs: number; observationEventsMs: number; throughTrainsMs: number; divertedTrainsMs: number; reroutedTrainsMs: number; infrastructureForecastMs: number; filterDirectMs: number; filterThroughMs: number; routeProximityMs: number; osmFilterMs: number; closuresMs: number; cacheWriteMs: number; };
 
 function logTimingSummary(id: string, timing: TimingState, counts: Record<string, number>) {
   if (!timing.debug) return;
@@ -170,10 +105,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const cacheStarted = performance.now();
   const cached = await readCrossingForecastCache<any>(cacheKey, STATUS_CACHE_TTL_MS);
   timing.cacheReadMs = performance.now() - cacheStarted;
-  if (cached) {
-    if (timing.debug) console.log(`[STATUS TIMING ${id}] CACHE HIT ${timing.cacheReadMs.toFixed(1)}ms`);
-    return Response.json(cached, { headers: { "X-Crossing-Status-Cache": "HIT" } });
-  }
+  if (cached) { if (timing.debug) console.log(`[STATUS TIMING ${id}] CACHE HIT ${timing.cacheReadMs.toFixed(1)}ms`); return Response.json(cached, { headers: { "X-Crossing-Status-Cache": "HIT" } }); }
   const loadStarted = performance.now();
   const crossing = (await loadCrossing(id)) || staticCrossings.find(c => c.id === id);
   timing.loadCrossingMs = performance.now() - loadStarted;
@@ -184,20 +116,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const started = performance.now();
     const { GET: getInfrastructureForecast } = await import("../../../admin/crossings/[id]/forecast/route");
     const forecastResponse = await getInfrastructureForecast(request, { params: Promise.resolve({ id }) });
-    const forecastElapsed = performance.now() - started;
-    timing.infrastructureForecastMs = forecastElapsed;
-    if (timing.debug) console.log(`[STATUS TIMING ${id}] infrastructureForecast ${forecastElapsed.toFixed(1)}ms ok=${forecastResponse.ok}`);
+    timing.infrastructureForecastMs = performance.now() - started;
+    if (timing.debug) console.log(`[STATUS TIMING ${id}] infrastructureForecast ${timing.infrastructureForecastMs.toFixed(1)}ms ok=${forecastResponse.ok}`);
     if (forecastResponse.ok) {
       const forecast: any = await forecastResponse.json();
-      const next = forecast.nextClosure;
-      const now = Date.now();
-      const closures = Array.isArray(forecast.closures) ? forecast.closures : [];
-      const nextStart = next?.start ? new Date(next.start).getTime() : 0;
-      const nextEnd = next?.end ? new Date(next.end).getTime() : 0;
+      const next = forecast.nextClosure; const now = Date.now(); const closures = Array.isArray(forecast.closures) ? forecast.closures : [];
+      const nextStart = next?.start ? new Date(next.start).getTime() : 0; const nextEnd = next?.end ? new Date(next.end).getTime() : 0;
       const payload = { crossing: { id: crossing.id, name: crossing.name, lat: crossing.lat, lon: crossing.lon }, state: forecast.state || "OPEN", nextCloseIn: next?.closeInSeconds ?? (nextStart > now ? Math.floor((nextStart - now) / 1000) : 0), nextOpenIn: next?.openInSeconds ?? (nextEnd > now ? Math.floor((nextEnd - now) / 1000) : 0), phase: next ? { start: next.start, end: next.end, durationMinutes: Math.round((nextEnd - nextStart) / 60000), trainCount: Array.isArray(next.trains) ? next.trains.length : 0, trains: next.trains || [] } : null, closureCount: closures.length, closures, trainCount: Array.isArray(forecast.trains) ? forecast.trains.length : 0, trains: forecast.trains || [], divertedTrains: [], lineHints: forecast.crossing?.lineHints || lineHints };
-      const writeStarted = performance.now();
-      await writeCrossingForecastCache(cacheKey, payload);
-      timing.cacheWriteMs = performance.now() - writeStarted;
+      const writeStarted = performance.now(); await writeCrossingForecastCache(cacheKey, payload); timing.cacheWriteMs = performance.now() - writeStarted;
       logTimingSummary(id, timing, { ...counts, finalTrains: payload.trainCount, finalClosures: payload.closureCount });
       return Response.json(payload, { headers: { "X-Crossing-Status-Cache": "MISS", "X-Crossing-Status-Source": "infrastructure-forecast" } });
     }
@@ -209,166 +135,40 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const divertedPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []); timing.divertedTrainsMs = performance.now() - started; return value; })();
   const reroutedPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []); timing.reroutedTrainsMs = performance.now() - started; return value; })();
   const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedPromise]);
-  counts.localCandidates = localEvents.length;
-  counts.observationCandidates = observationEvents.length;
-  counts.throughCandidates = throughTrains.length;
-  counts.divertedCandidates = divertedTrains.length;
-  counts.reroutedCandidates = reroutedTrains.length;
+  counts.localCandidates = localEvents.length; counts.observationCandidates = observationEvents.length; counts.throughCandidates = throughTrains.length; counts.divertedCandidates = divertedTrains.length; counts.reroutedCandidates = reroutedTrains.length;
   const trains: any[] = [];
-
-  const directBase = crossing.eva
-    ? localEvents
-    : observationEvents.map((train: any) => ({
-        ...train,
-        source: "observation",
-        detection: "station-observation",
-      }));
-
-  const directEvents = directBase.filter(
-    (train: any) => !train.cancelled && lineMatchesHints(train, lineHints),
-  );
-
-  const ice241 = directEvents.filter(
-    (train: any) =>
-      String(train?.journeyNumber ?? train?.id ?? "") === "241"
-      || String(train?.line ?? "").includes("ICE 241"),
-  );
-
-  if (ice241.length) {
-    console.log(
-      "[ICE 241 DEBUG]",
-      ice241.map((train: any) => ({
-        journeyNumber: train?.journeyNumber,
-        line: train?.line,
-        origin: train?.origin,
-        destination: train?.destination,
-        route: train?.route,
-      })),
-    );
-  }
-
+  const directBase = crossing.eva ? localEvents : observationEvents.map((train: any) => ({ ...train, source: "observation", detection: "station-observation" }));
+  const directEvents = directBase.filter((train: any) => !train.cancelled && lineMatchesHints(train, lineHints));
+  const ice241 = directEvents.filter((train: any) => String(train?.journeyNumber ?? train?.id ?? "") === "241" || String(train?.line ?? "").includes("ICE 241"));
+  if (ice241.length) console.log("[ICE 241 DEBUG]", ice241.map((train: any) => ({ journeyNumber: train?.journeyNumber, line: train?.line, origin: train?.origin, destination: train?.destination, route: train?.route })));
   counts.directFiltered = directEvents.length;
 
-  const directResults = await Promise.all(
-    directEvents.map(async (train: any) => {
-      counts.allowCalls++;
-
-      const started = performance.now();
-      const allowed = await allowTrainForCrossing(
-        crossing.id,
-        crossing,
-        train,
-        timing,
-      );
-      timing.filterDirectMs += performance.now() - started;
-
-      return { train, allowed };
-    }),
-  );
-
+  const directResults = await Promise.all(directEvents.map(async (train: any) => { counts.allowCalls++; const started = performance.now(); const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing); timing.filterDirectMs += performance.now() - started; return { train, allowed }; }));
   for (const { train, allowed } of directResults) {
-    if (!allowed) {
-      counts.rejected++;
-      continue;
-    }
-
-    counts.accepted++;
-
-    const crossingTime = train.actualTime;
-
-    trains.push({
-      id: `${train.category}-${train.journeyNumber}-${train.id}`,
-      line: train.line,
-      category: train.category,
-      journeyNumber: train.journeyNumber,
-      origin: train.origin,
-      destination: train.destination,
-      platform: train.platform,
-      isStoppingTrain: train.platform === "1" || train.platform === "2",
-      direction: getCrossingDirection(train.route),
-      directionLabel: train.destination
-        ? `Richtung ${train.destination}`
-        : null,
-      delayMinutes: train.delayMinutes,
-      crossingTime: crossingTime.toISOString(),
-      arrival: crossingTime.toISOString(),
-      etaSeconds: Math.floor(
-        (crossingTime.getTime() - Date.now()) / 1000,
-      ),
-    });
+    if (!allowed) { counts.rejected++; continue; }
+    counts.accepted++; const crossingTime = train.actualTime;
+    trains.push({ id: `${train.category}-${train.journeyNumber}-${train.id}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, isStoppingTrain: train.platform === "1" || train.platform === "2", direction: getCrossingDirection(train.route), directionLabel: train.destination ? `Richtung ${train.destination}` : null, delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000) });
   }
 
-  const throughFiltered = throughTrains.filter(
-    (train: any) => lineMatchesHints(train, lineHints),
-  );
-
+  const throughFiltered = throughTrains.filter((train: any) => lineMatchesHints(train, lineHints));
   counts.throughFiltered = throughFiltered.length;
-
-  const throughResults = await Promise.all(
-    throughFiltered.map(async (train: any) => {
-      counts.allowCalls++;
-
-      const started = performance.now();
-      const allowed = await allowTrainForCrossing(
-        crossing.id,
-        crossing,
-        train,
-        timing,
-      );
-      timing.filterThroughMs += performance.now() - started;
-
-      return { train, allowed };
-    }),
-  );
-
+  const throughResults = await Promise.all(throughFiltered.map(async (train: any) => { counts.allowCalls++; const started = performance.now(); const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing); timing.filterThroughMs += performance.now() - started; return { train, allowed }; }));
   for (const { train, allowed } of throughResults) {
-    if (!allowed) {
-      counts.rejected++;
-      continue;
-    }
-
-    counts.accepted++;
-
-    const crossingTime = new Date(train.crossingTime);
-
-    trains.push({
-      id: `${train.category}-${train.journeyNumber}`,
-      line: train.line,
-      category: train.category,
-      journeyNumber: train.journeyNumber,
-      origin: train.origin,
-      destination: train.destination,
-      platform: undefined,
-      isStoppingTrain: false,
-      direction: train.direction,
-      directionLabel: "Durchfahrt",
-      delayMinutes: train.delayMinutes,
-      crossingTime: crossingTime.toISOString(),
-      arrival: crossingTime.toISOString(),
-      etaSeconds: Math.floor(
-        (crossingTime.getTime() - Date.now()) / 1000,
-      ),
-    });
+    if (!allowed) { counts.rejected++; continue; }
+    counts.accepted++; const crossingTime = new Date(train.crossingTime);
+    trains.push({ id: `${train.category}-${train.journeyNumber}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Durchfahrt", delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000) });
   }
 
   trains.sort((a, b) => new Date(a.crossingTime).getTime() - new Date(b.crossingTime).getTime());
-  const closureStarted = performance.now();
-  const closures: any[] = [];
+  const closureStarted = performance.now(); const closures: any[] = [];
   for (const train of trains.filter(t => t.etaSeconds > 0)) {
-    const crossingTime = new Date(train.crossingTime);
-    const closeAt = new Date(crossingTime.getTime() - crossing.closeOffsetSeconds * 1000), openAt = new Date(crossingTime.getTime() + crossing.openOffsetSeconds * 1000), last = closures[closures.length - 1];
-    if (!last || closeAt.getTime() > last.end.getTime() + 30000) closures.push({ start: closeAt, end: openAt, trains: [train] });
-    else { if (openAt.getTime() > last.end.getTime()) last.end = openAt; last.trains.push(train); }
+    const crossingTime = new Date(train.crossingTime); const closeAt = new Date(crossingTime.getTime() - crossing.closeOffsetSeconds * 1000), openAt = new Date(crossingTime.getTime() + crossing.openOffsetSeconds * 1000), last = closures[closures.length - 1];
+    if (!last || closeAt.getTime() > last.end.getTime() + 30000) closures.push({ start: closeAt, end: openAt, trains: [train] }); else { if (openAt.getTime() > last.end.getTime()) last.end = openAt; last.trains.push(train); }
   }
   timing.closuresMs = performance.now() - closureStarted;
-  const visibleClosures = closures.filter(c => c.start.getTime() <= Date.now() + 30 * 60 * 1000);
-  const nextClosure = closures.find(c => c.end.getTime() > Date.now()) || null;
+  const visibleClosures = closures.filter(c => c.start.getTime() <= Date.now() + 30 * 60 * 1000); const nextClosure = closures.find(c => c.end.getTime() > Date.now()) || null;
   const payload = { crossing: { id: crossing.id, name: crossing.name, lat: crossing.lat, lon: crossing.lon }, state: nextClosure && Date.now() >= nextClosure.start.getTime() ? "CLOSED" : "OPEN", nextCloseIn: nextClosure ? Math.max(0, Math.floor((nextClosure.start.getTime() - Date.now()) / 1000)) : 0, nextOpenIn: nextClosure ? Math.max(0, Math.floor((nextClosure.end.getTime() - Date.now()) / 1000)) : 0, phase: nextClosure ? { start: nextClosure.start.toISOString(), end: nextClosure.end.toISOString(), durationMinutes: Math.round((nextClosure.end.getTime() - nextClosure.start.getTime()) / 60000), trainCount: nextClosure.trains.length, trains: nextClosure.trains } : null, closureCount: visibleClosures.length, closures: visibleClosures.map(c => ({ start: c.start.toISOString(), end: c.end.toISOString(), durationMinutes: Math.round((c.end.getTime() - c.start.getTime()) / 60000), trainCount: c.trains.length, trains: c.trains })), trainCount: trains.length, trains, divertedTrains, lineHints };
-  const writeStarted = performance.now();
-  await writeCrossingForecastCache(cacheKey, payload);
-  timing.cacheWriteMs = performance.now() - writeStarted;
-  counts.finalTrains = trains.length;
-  counts.finalClosures = visibleClosures.length;
-  logTimingSummary(id, timing, counts);
+  const writeStarted = performance.now(); await writeCrossingForecastCache(cacheKey, payload); timing.cacheWriteMs = performance.now() - writeStarted;
+  counts.finalTrains = trains.length; counts.finalClosures = visibleClosures.length; logTimingSummary(id, timing, counts);
   return Response.json(payload, { headers: { "X-Crossing-Status-Cache": "MISS" } });
 }
