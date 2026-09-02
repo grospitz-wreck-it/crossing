@@ -41,6 +41,9 @@ async function ensureSchema() {
   await db.batch([
     { sql: `CREATE TABLE IF NOT EXISTS osm_crossings (osm_id INTEGER PRIMARY KEY, lat REAL NOT NULL, lon REAL NOT NULL, tags_json TEXT NOT NULL DEFAULT '{}', osm_version INTEGER, osm_timestamp TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')))` , args: [] },
     { sql: `CREATE TABLE IF NOT EXISTS osm_rail_ways (osm_id INTEGER PRIMARY KEY, tags_json TEXT NOT NULL DEFAULT '{}', node_ids_json TEXT NOT NULL DEFAULT '[]', geometry_json TEXT NOT NULL DEFAULT '[]', osm_version INTEGER, osm_timestamp TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')))` , args: [] },
+    { sql: `CREATE TABLE IF NOT EXISTS osm_rail_way_nodes (railway_way_id INTEGER NOT NULL, node_id INTEGER NOT NULL, node_index INTEGER NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (railway_way_id, node_id, node_index), FOREIGN KEY (railway_way_id) REFERENCES osm_rail_ways(osm_id))`, args: [] },
+    { sql: `CREATE INDEX IF NOT EXISTS idx_osm_rail_way_nodes_node_id ON osm_rail_way_nodes (node_id)`, args: [] },
+    { sql: `CREATE INDEX IF NOT EXISTS idx_osm_rail_way_nodes_way_id ON osm_rail_way_nodes (railway_way_id)`, args: [] },
     { sql: `CREATE TABLE IF NOT EXISTS osm_crossing_rail_ways (crossing_osm_id INTEGER NOT NULL, railway_way_id INTEGER NOT NULL, crossing_node_index INTEGER, way_direction TEXT NOT NULL DEFAULT 'unknown', updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (crossing_osm_id, railway_way_id), FOREIGN KEY (crossing_osm_id) REFERENCES osm_crossings(osm_id), FOREIGN KEY (railway_way_id) REFERENCES osm_rail_ways(osm_id))`, args: [] },
     { sql: `CREATE TABLE IF NOT EXISTS crossing_osm_links (crossing_id TEXT PRIMARY KEY, osm_crossing_id INTEGER NOT NULL, match_method TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1.0, updated_at TEXT NOT NULL DEFAULT (datetime('now')), FOREIGN KEY (osm_crossing_id) REFERENCES osm_crossings(osm_id))`, args: [] },
   ]);
@@ -100,15 +103,22 @@ async function upsertCrossing(crossing) {
 
 async function upsertRailWay(way) {
   if (!Array.isArray(way.nodes) || way.nodes.length < 2 || !Array.isArray(way.geometry) || way.geometry.length < 2) return;
-  await db.execute({
-    sql: `INSERT INTO osm_rail_ways (osm_id, tags_json, node_ids_json, geometry_json, osm_version, osm_timestamp, updated_at)
+  await db.batch([
+    {
+      sql: `INSERT INTO osm_rail_ways (osm_id, tags_json, node_ids_json, geometry_json, osm_version, osm_timestamp, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
       ON CONFLICT(osm_id) DO UPDATE SET tags_json=excluded.tags_json,
       node_ids_json=excluded.node_ids_json, geometry_json=excluded.geometry_json,
       osm_version=excluded.osm_version, osm_timestamp=excluded.osm_timestamp,
       updated_at=datetime('now')`,
-    args: [way.id, JSON.stringify(way.tags ?? {}), JSON.stringify(way.nodes), JSON.stringify(way.geometry), way.version ?? null, way.timestamp ?? null],
-  });
+      args: [way.id, JSON.stringify(way.tags ?? {}), JSON.stringify(way.nodes), JSON.stringify(way.geometry), way.version ?? null, way.timestamp ?? null],
+    },
+    { sql: `DELETE FROM osm_rail_way_nodes WHERE railway_way_id = ?`, args: [way.id] },
+    ...way.nodes.map((nodeId, index) => ({
+      sql: `INSERT INTO osm_rail_way_nodes (railway_way_id, node_id, node_index, updated_at) VALUES (?, ?, ?, datetime('now'))`,
+      args: [way.id, nodeId, index],
+    })),
+  ]);
 }
 
 async function linkCrossingWays(crossing, crossingWays) {
