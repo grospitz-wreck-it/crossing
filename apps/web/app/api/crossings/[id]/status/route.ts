@@ -7,6 +7,7 @@ import { getCrossingDirection } from "../../../../../../../packages/prediction-e
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { withMemoryCache } from "../../../../../../../packages/db-api-client/src/memoryCache";
 import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
+import { isTrainRouteNearCrossing } from "../../../../lib/crossingRouteProximity";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
 
 function jsonArray(value: unknown): any[] {
@@ -57,13 +58,22 @@ async function loadCrossing(id: string): Promise<any | null> {
   }
 }
 
-async function allowTrainForCrossing(crossingId: string, train: any, timing?: TimingState): Promise<boolean> {
+async function allowTrainForCrossing(crossingId: string, crossing: any, train: any, timing?: TimingState): Promise<boolean> {
   const journey = train?.journeyNumber ?? train?.id ?? "?";
   const line = train?.line ?? "?";
   const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
 
   if (!route.length) {
     timing?.osmDecisions.push(`[CROSSING DECISION] journey=${journey} line=${line} FINAL=REJECT reason=no-route`);
+    return false;
+  }
+
+  const proximityStarted = performance.now();
+  const routeNearCrossing = isTrainRouteNearCrossing(crossing, route as any);
+  const proximityElapsed = performance.now() - proximityStarted;
+  if (timing) timing.routeProximityMs += proximityElapsed;
+  if (!routeNearCrossing) {
+    timing?.osmDecisions.push(`[CROSSING DECISION] journey=${journey} line=${line} FINAL=REJECT reason=route-proximity`);
     return false;
   }
 
@@ -133,7 +143,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const directEvents = directBase.filter((train: any) => !train.cancelled && lineMatchesHints(train, lineHints));
   counts.directFiltered = directEvents.length;
 
-  const directResults = await Promise.all(directEvents.map(async (train: any) => { counts.allowCalls++; const started = performance.now(); const allowed = await allowTrainForCrossing(crossing.id, train, timing); timing.filterDirectMs += performance.now() - started; return { train, allowed }; }));
+  const directResults = await Promise.all(directEvents.map(async (train: any) => { counts.allowCalls++; const started = performance.now(); const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing); timing.filterDirectMs += performance.now() - started; return { train, allowed }; }));
   for (const { train, allowed } of directResults) {
     if (!allowed) { counts.rejected++; continue; }
     counts.accepted++; const crossingTime = train.actualTime;
@@ -142,7 +152,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const throughFiltered = throughTrains.filter((train: any) => lineMatchesHints(train, lineHints));
   counts.throughFiltered = throughFiltered.length;
-  const throughResults = await Promise.all(throughFiltered.map(async (train: any) => { counts.allowCalls++; const started = performance.now(); const allowed = await allowTrainForCrossing(crossing.id, train, timing); timing.filterThroughMs += performance.now() - started; return { train, allowed }; }));
+  const throughResults = await Promise.all(throughFiltered.map(async (train: any) => { counts.allowCalls++; const started = performance.now(); const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing); timing.filterThroughMs += performance.now() - started; return { train, allowed }; }));
   for (const { train, allowed } of throughResults) {
     if (!allowed) { counts.rejected++; continue; }
     counts.accepted++; const crossingTime = new Date(train.crossingTime);
