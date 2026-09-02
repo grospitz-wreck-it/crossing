@@ -50,8 +50,6 @@ function matchesRoute(trainRoute: string[], observationStation: string, required
     .filter((entry) => entry.index >= 0);
 
   if (anchors.length < 2) {
-    // Without two configured anchors the observation station is still a hard
-    // route gate. The OSM matcher performs the final crossing-path check.
     return routeIndex(trainRoute, observationStation) >= 0;
   }
 
@@ -109,7 +107,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
     const rules = (crossing.throughRules?.length
       ? crossing.throughRules
       : crossing.observationEvas.map((eva: string) => ({ observationEva: eva, observationStation: eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }))) as any[];
-    if (!rules.length) return [];
+    if (!rules.length) return null;
 
     const now = Date.now();
     const from = new Date(now - 5 * 60_000).toISOString();
@@ -164,7 +162,8 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       }
     }
 
-    return Array.from(new Map(candidates.map((train) => [`${train.category}-${train.journeyNumber}`, train])).values());
+    const uniqueCandidates = Array.from(new Map(candidates.map((train) => [`${train.category}-${train.journeyNumber}`, train])).values());
+    return uniqueCandidates.length ? uniqueCandidates : null;
   } catch (error) {
     console.warn("Mobilithek snapshot unavailable", error);
     return null;
