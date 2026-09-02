@@ -1,6 +1,6 @@
 import { db } from "./db";
 
-const MAX_ROUTE_PROXIMITY_KM = 20;
+const MAX_ROUTE_PROXIMITY_KM = 8;
 const cache = new Map<string, { expiresAt: number; value: Map<string, { lat: number; lon: number }> }>();
 
 function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
@@ -64,10 +64,9 @@ export async function isTrainRouteNearCrossing(
       .map((stop) => catalog.get(normalize(stop)))
       .filter((point): point is { lat: number; lon: number } => Boolean(point));
 
-    // 0 resolved stops means this route has nothing in common with the DB
-// long-distance catalog (e.g. a pure U-Bahn/Tram/S-Bahn route) — treat as
-// not near any crossing rather than fail-open.
-if (!resolved.length) return false;
+    // If the route has no catalog-resolvable stops, do not let it into the
+    // crossing-specific OSM graph. This avoids expensive false positives.
+    if (!resolved.length) return false;
     return resolved.some((point) => distanceKm({ lat, lon }, point) <= MAX_ROUTE_PROXIMITY_KM);
   } catch {
     return true;
