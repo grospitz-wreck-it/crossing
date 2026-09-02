@@ -7,6 +7,7 @@ import { getReroutedTrains } from "../../../../../../../packages/db-api-client/s
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { withMemoryCache } from "../../../../../../../packages/db-api-client/src/memoryCache";
 import { filterTrainByCrossingOsm, type CrossingOsmFilterResult } from "../../../../lib/crossingOsmFilter";
+import { isTrainRouteNearCrossing } from "../../../../lib/crossingRouteProximity";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
@@ -29,9 +30,6 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
 }
 async function loadCrossing(id: string): Promise<any | null> { try { const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }); const row: any = result.rows[0]; if (!row) return null; let stationRows: any[] = []; try { const stations = await db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }); stationRows = stations.rows as any[]; } catch {} return buildCrossingFromDb(row, stationRows); } catch { return null; } }
 
-// A timetable result belongs to the observation station from which it was fetched.
-// Do not match against any observation station of the crossing: otherwise events
-// from another linked EVA can leak into this crossing's direct candidates.
 function directTrainBelongsToCrossing(train: any, crossing: any) {
   const sourceEva = String(train?._observationEva || train?.eva || "").trim();
   const observationEvas = Array.isArray(crossing.observationEvas) ? crossing.observationEvas.map(String) : [];
@@ -41,9 +39,21 @@ function directTrainBelongsToCrossing(train: any, crossing: any) {
   return Boolean(stationName && routeContainsStation(train?.route, stationName));
 }
 
-async function allowTrainForCrossing(crossingId: string, train: any, mode: "direct" | "through"): Promise<CrossingOsmFilterResult> {
+async function allowTrainForCrossing(crossingId: string, crossing: any, train: any, mode: "direct" | "through"): Promise<CrossingOsmFilterResult> {
   const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
   if (route.length < 2) return { status: "unknown" };
+  if (!await isTrainRouteNearCrossing(crossing, route)) {
+    console.info("Route geographically unrelated to crossing", {
+      crossingId,
+      line: train?.line,
+      category: train?.category,
+      journeyNumber: train?.journeyNumber,
+      mode,
+      decision: "rejected",
+      reason: "route-proximity",
+    });
+    return { status: "rejected" };
+  }
   return filterTrainByCrossingOsm(crossingId, route);
 }
 
@@ -84,7 +94,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const allow = (train: any, mode: "direct" | "through") => {
     const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
     const key = `${mode}|${route.join("|")}`;
-    if (!osmAllowCache.has(key)) osmAllowCache.set(key, allowTrainForCrossing(crossing.id, train, mode));
+    if (!osmAllowCache.has(key)) osmAllowCache.set(key, allowTrainForCrossing(crossing.id, crossing, train, mode));
     return osmAllowCache.get(key)!;
   };
 
