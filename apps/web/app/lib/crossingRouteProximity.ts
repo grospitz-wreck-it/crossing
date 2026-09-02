@@ -1,6 +1,6 @@
 import type { RouteStation } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
 
-const MAX_ROUTE_PROXIMITY_KM = 20;
+const MAX_ROUTE_PROXIMITY_KM = 8;
 
 function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
   const r = 6371;
