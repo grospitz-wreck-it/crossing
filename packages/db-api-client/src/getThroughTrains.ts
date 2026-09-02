@@ -34,14 +34,12 @@ function isLocalTransitTrain(train: { line?: string; category?: string }) {
   const category = String(train.category || "").trim().toUpperCase();
   return /^U\s*\d/.test(line) || /^(TRAM|STADTBAHN|LIGHT_RAIL|LIGHT RAIL|METRO|SUBWAY|STRAB|STB)/.test(category);
 }
-
 function routeHasCorridorEvidence(trainRoute: string[], observationStation: string, requiredRouteStops: string[]) {
   if (!trainRoute.length) return false;
   if (routeIndex(trainRoute, observationStation) >= 0) return true;
   const matched = requiredRouteStops.map((stop) => routeIndex(trainRoute, stop)).filter((index) => index >= 0);
   return new Set(matched).size >= 2;
 }
-
 function matchesOsmCorridor(trainRoute: string[], observationStation: string, requiredRouteStops: string[], transit = false) {
   if (!trainRoute.length) return false;
   const observationIndex = routeIndex(trainRoute, observationStation);
@@ -50,7 +48,6 @@ function matchesOsmCorridor(trainRoute: string[], observationStation: string, re
   if (new Set(anchorIndexes).size >= 2) return true;
   return transit && observationIndex >= 0;
 }
-
 function trainKey(train: { category: string; journeyNumber: number; id?: string }) { return `${train.category}-${train.journeyNumber}-${train.id || ""}`; }
 function directionForRoute(route: string[], observationStation: string, requiredRouteStops: string[]): "eastbound" | "westbound" | "unknown" {
   if (!route.length) return "unknown";
@@ -96,7 +93,7 @@ function buildMobilithekCandidates(events: MobilithekTrainEvent[], crossing: Cro
       if (!transit && rule.observationEva.startsWith("transit:")) continue;
       if (!matchesOsmCorridor(train.route, rule.observationStation, requiredRouteStops, transit)) continue;
       const observationCall = mobilithekCallForStation(train, rule.observationStation);
-      const observationTime = observationCall?.actual;
+      const observationTime = observationCall?.actual || observationCall?.planned;
       if (!observationTime) continue;
       const expectedDirection = directionForRoute(train.route, rule.observationStation, requiredRouteStops);
       if (rule.direction !== "unknown" && expectedDirection !== "unknown" && rule.direction !== expectedDirection) continue;
