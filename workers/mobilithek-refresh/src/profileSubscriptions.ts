@@ -10,6 +10,22 @@ import {
 
 import { config, validateConfig } from "./config.js";
 
+const TARGETS = [
+  "Bünde (Westf)",
+  "Bünde",
+  "Osnabrück Hbf",
+  "Osnabrück",
+  "Hannover Hbf",
+  "Hannover",
+  "Bielefeld Hbf",
+  "Bielefeld",
+  "8003288",
+  "8000059",
+  "8000036",
+  "8000152",
+  "8000294",
+];
+
 async function fetchFeed(subscriptionId: string): Promise<{
   bytes: Buffer;
   kind: ReturnType<typeof classifyFeed>;
@@ -71,15 +87,33 @@ function unique(values: string[]): string[] {
   return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b, "de"));
 }
 
-function textValues(xml: string, tag: string): string[] {
-  const escaped = tag.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&");
-  const regex = new RegExp(
-    `<(?:[\\w-]+:)?${escaped}(?:\\s[^>]*)?>([\\s\\S]*?)</(?:[\\w-]+:)?${escaped}>`,
-    "gi",
-  );
-  return [...xml.matchAll(regex)].map((match) =>
-    match[1].replace(/<[^>]+>/g, " ").replace(/\\s+/g, " ").trim(),
-  ).filter(Boolean);
+function normalize(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function targetMatchesValue(value: string | undefined, target: string): boolean {
+  if (!value) return false;
+  const needle = normalize(target);
+  const normalized = normalize(value);
+  if (!needle || !normalized) return false;
+  return normalized === needle || normalized.includes(needle) || needle.includes(normalized);
+}
+
+function targetMatchesEvent(event: MobilithekTrainEvent, target: string): boolean {
+  const values = [
+    event.origin,
+    event.destination,
+    ...event.route,
+    ...event.calls.flatMap((call) => [call.name]),
+  ];
+  return values.some((value) => targetMatchesValue(value, target));
 }
 
 function profileEvents(events: MobilithekTrainEvent[]) {
@@ -91,15 +125,33 @@ function profileEvents(events: MobilithekTrainEvent[]) {
     ...event.route,
     ...event.calls.map((call) => call.name),
   ]));
-  const times = events.map((event) => event.actualTime).filter((value) => value instanceof Date && !Number.isNaN(value.getTime()));
+  const targetMatches = TARGETS.filter((target) =>
+    stations.some((station) => targetMatchesValue(station, target)),
+  );
+  const targetEventCounts = Object.fromEntries(
+    TARGETS.map((target) => [
+      target,
+      events.filter((event) => targetMatchesEvent(event, target)).length,
+    ]),
+  );
+
+  const times = events
+    .map((event) => event.actualTime)
+    .filter((value) => value instanceof Date && !Number.isNaN(value.getTime()));
 
   return {
     parsedEvents: events.length,
     lines,
     categories,
     stations,
-    minActualTime: times.length ? new Date(Math.min(...times.map((d) => d.getTime()))).toISOString() : null,
-    maxActualTime: times.length ? new Date(Math.max(...times.map((d) => d.getTime()))).toISOString() : null,
+    targetMatches,
+    targetEventCounts,
+    minActualTime: times.length
+      ? new Date(Math.min(...times.map((d) => d.getTime()))).toISOString()
+      : null,
+    maxActualTime: times.length
+      ? new Date(Math.max(...times.map((d) => d.getTime()))).toISOString()
+      : null,
   };
 }
 
@@ -110,6 +162,7 @@ async function main() {
   console.log(" EINMALIGE INVENTUR – KEIN SNAPSHOT-WRITE");
   console.log("==============================================\n");
   console.log(`Subscriptions: ${config.subscriptionIds.length}\n`);
+  console.log(`Targets: ${TARGETS.join(" | ")}\n`);
 
   const profiles: unknown[] = [];
 
@@ -145,6 +198,10 @@ async function main() {
       console.log(`  categories: ${profile.categories.length}`);
       console.log(`  stations:   ${profile.stations.length}`);
       console.log(`  actualTime: ${profile.minActualTime ?? "-"} → ${profile.maxActualTime ?? "-"}`);
+      console.log(`  TARGET MATCHES: ${profile.targetMatches.length ? profile.targetMatches.join(" | ") : "NONE"}`);
+      for (const [target, count] of Object.entries(profile.targetEventCounts)) {
+        if (count > 0) console.log(`    ${target}: ${count} events`);
+      }
       console.log(`  line sample: ${profile.lines.slice(0, 40).join(", ")}`);
       console.log(`  category sample: ${profile.categories.slice(0, 20).join(", ")}`);
       console.log(`  station sample: ${profile.stations.slice(0, 40).join(" | ")}`);
