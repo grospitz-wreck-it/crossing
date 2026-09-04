@@ -13,11 +13,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   try {
     const client = requireDb();
-    const result = await client.execute({ sql: `SELECT id,name,eva,lat,lon,confidence,status,source,observation_evas,context_evas,required_route_stops,reference_lines,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,created_at,updated_at FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+    const result = await client.execute({ sql: `SELECT id,name,eva,lat,lon,confidence,status,source,observation_evas,context_evas,required_route_stops,reference_lines,reference_stations,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,created_at,updated_at FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
     const crossing: any = result.rows[0];
     if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
     const links = await client.execute({ sql: `SELECT id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }).catch(() => ({ rows: [] as any[] }));
-    return Response.json({ crossing: { ...crossing, observationEvas: jsonArray(crossing.observation_evas), contextEvas: jsonArray(crossing.context_evas), requiredRouteStops: jsonArray(crossing.required_route_stops), referenceLines: referenceLines(jsonArray(crossing.reference_lines)), rules: jsonArray(crossing.rules), throughRules: jsonArray(crossing.through_rules), diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules) }, stationLinks: links.rows });
+    return Response.json({ crossing: { ...crossing, observationEvas: jsonArray(crossing.observation_evas), contextEvas: jsonArray(crossing.context_evas), requiredRouteStops: jsonArray(crossing.required_route_stops), referenceLines: referenceLines(jsonArray(crossing.reference_lines)), referenceStations: jsonArray(crossing.reference_stations), rules: jsonArray(crossing.rules), throughRules: jsonArray(crossing.through_rules), diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules) }, stationLinks: links.rows });
   } catch (error) { console.error("Failed to load crossing:", error); return Response.json({ error: error instanceof Error ? error.message : "Übergang konnte nicht geladen werden." }, { status: 500 }); }
 }
 
@@ -54,5 +54,5 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       for (let index=0; index<body.stationLinks.length; index+=1) { const link=body.stationLinks[index], linkEva=String(link.eva||"").trim(); if(!linkEva) continue; await client.execute({ sql:`INSERT INTO crossing_station_links (id,crossing_id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order) VALUES (?,?,?,?,?,?,?,?,?,?)`, args:[String(link.id||`${id}-${linkEva}-${index}`),id,linkEva,String(link.station_name||link.stationName||linkEva),["primary","observation","anchor"].includes(link.role)?link.role:"observation",JSON.stringify(categories(link.categories)),["eastbound","westbound","unknown"].includes(link.direction)?link.direction:"unknown",Number(link.fallback_offset_seconds??link.fallbackOffsetSeconds??0),Number(link.track_distance_meters??link.trackDistanceMeters??0),index] }).catch((error)=>console.error("crossing station link update failed",error)); }
     }
     return Response.json({ ok:true, id });
-  } catch (error) { console.error("Failed to update crossing:",error); return Response.json({ error:error instanceof Error?error.message:"Speichern fehlgeschlagen." },{status:500}); }
+  } catch (error) { console.error("Failed to update crossing:", error); return Response.json({ error:error instanceof Error?error.message:"Speichern fehlgeschlagen." },{status:500}); }
 }
