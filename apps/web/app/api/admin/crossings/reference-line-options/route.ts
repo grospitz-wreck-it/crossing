@@ -1,4 +1,4 @@
-import { db } from "../../../../../lib/db";
+import { db } from "../../../../../app/lib/db";
 import { getStationTimetable } from "../../../../../../../packages/db-api-client/src/getStationTimetable";
 
 function normalize(value: unknown) {
