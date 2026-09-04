@@ -9,32 +9,25 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const crossingId = String(searchParams.get("crossingId") || "").trim();
   const requestedEvas = searchParams.getAll("eva").map((value) => String(value).trim()).filter(Boolean);
+  const selectedLine = normalize(searchParams.get("line") || "");
 
   try {
     let stations: { eva: string; name: string; role: string }[] = [];
-
     if (crossingId) {
       const result = await db.execute({
-        sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC LIMIT 8`,
+        sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? AND role IN ('primary','observation') ORDER BY sort_order ASC LIMIT 8`,
         args: [crossingId],
       });
-      stations = (result.rows as any[]).map((row) => ({
-        eva: String(row.eva || "").trim(),
-        name: String(row.station_name || row.eva || "").trim(),
-        role: String(row.role || "observation"),
-      })).filter((station) => station.eva);
+      stations = (result.rows as any[]).map((row) => ({ eva: String(row.eva || "").trim(), name: String(row.station_name || row.eva || "").trim(), role: String(row.role || "observation") })).filter((station) => station.eva);
     } else {
-      const uniqueEvas = Array.from(new Set(requestedEvas)).slice(0, 6);
+      const uniqueEvas = Array.from(new Set(requestedEvas)).slice(0, 8);
       if (!uniqueEvas.length) return Response.json({ options: [], stations: [] });
-      const result = await db.execute({
-        sql: `SELECT eva,name FROM railway_station_catalog WHERE eva IN (${uniqueEvas.map(() => "?").join(",")})`,
-        args: uniqueEvas,
-      });
+      const result = await db.execute({ sql: `SELECT eva,name FROM railway_station_catalog WHERE eva IN (${uniqueEvas.map(() => "?").join(",")})`, args: uniqueEvas });
       const names = new Map((result.rows as any[]).map((row) => [String(row.eva), String(row.name || row.eva)]));
       stations = uniqueEvas.map((eva) => ({ eva, name: names.get(eva) || eva, role: "observation" }));
     }
 
-    const results = await Promise.all(stations.slice(0, 8).map(async (station) => {
+    const results = await Promise.all(stations.map(async (station) => {
       try {
         const events = await getStationTimetable(station.eva, 1);
         const lines = new Set<string>();
@@ -59,9 +52,14 @@ export async function GET(request: Request) {
       }
     }
 
+    const lineStations = selectedLine
+      ? results.filter((station) => station.lines.includes(selectedLine)).map((station) => ({ eva: station.eva, name: station.name, role: station.role }))
+      : [];
+
     return Response.json({
       options: [...byLine.values()].sort((a, b) => a.line.localeCompare(b.line, "de", { numeric: true })),
       stations: results,
+      referenceStations: lineStations,
     }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("Failed to load reference line options:", error);
