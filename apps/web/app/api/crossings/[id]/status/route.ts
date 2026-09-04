@@ -30,7 +30,6 @@ async function loadCrossing(id: string): Promise<any | null> { try { const resul
 function directTrainBelongsToCrossing(train: any, crossing: any) { const names = Array.isArray(crossing.observationStationNames) ? crossing.observationStationNames : []; if (!names.length) return true; return names.some((name: string) => routeContainsStation(train?.route, name)); }
 async function allowTrainForCrossing(crossingId: string, train: any, mode: "direct" | "through"): Promise<boolean> {
   const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
-  if (mode === "direct") return true;
   if (route.length < 2) return false;
   const result = await filterTrainByCrossingOsm(crossingId, route);
   return result.status === "matched";
