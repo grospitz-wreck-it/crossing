@@ -1,5 +1,5 @@
 import { db } from "../../../../../lib/db";
-import { getStationTimetable } from "../../../../../../packages/db-api-client/src/getStationTimetable";
+import { getStationTimetable } from "../../../../../../../packages/db-api-client/src/getStationTimetable";
 
 function normalize(value: unknown) {
   return String(value || "").trim().toUpperCase().replace(/\s+/g, " ");
