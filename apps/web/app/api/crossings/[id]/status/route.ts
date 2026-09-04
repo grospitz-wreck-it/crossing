@@ -13,7 +13,13 @@ function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return val
 function normalizeStationName(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function routeContainsStation(route: unknown, stationName: string) { if (!Array.isArray(route) || !stationName) return false; const target = normalizeStationName(stationName); if (!target) return false; return route.some((stop) => { const value = normalizeStationName(String(stop || "")); return value === target || value.includes(target) || target.includes(value); }); }
 function normalizeLine(value: unknown) { return String(value || "").toUpperCase().replace(/\s+/g, "").trim(); }
-function lineMatchesReference(train: any, crossing: any) { const references = Array.isArray(crossing.referenceLines) ? crossing.referenceLines.map(normalizeLine).filter(Boolean) : []; if (!references.length) return true; const line = normalizeLine(train?.line); if (!line) return true; return references.includes(line); }
+function lineMatchesReference(train: any, crossing: any) {
+  const references = Array.isArray(crossing.referenceLines) ? crossing.referenceLines.map(normalizeLine).filter(Boolean) : [];
+  if (!references.length) return true;
+  const line = normalizeLine(train?.line);
+  if (!line) return true;
+  return references.includes(line);
+}
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const linkedEvas = stationRows.filter((s) => !s.role || s.role === "observation" || s.role === "automatic").map((s) => String(s.eva || "").trim()).filter(Boolean);
   let observationEvas = linkedEvas.length ? linkedEvas : jsonArray(row.observation_evas).map(String).filter(Boolean);
@@ -34,6 +40,8 @@ function directTrainBelongsToCrossing(train: any, crossing: any) { const names =
 async function allowTrainForCrossing(crossingId: string, train: any, mode: "direct" | "through", crossing: any): Promise<boolean> {
   if (!lineMatchesReference(train, crossing)) return false;
   if (mode === "direct") return true;
+  const references = Array.isArray(crossing.referenceLines) ? crossing.referenceLines.map(normalizeLine).filter(Boolean) : [];
+  if (references.length && normalizeLine(train?.line)) return true;
   const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
   if (route.length < 2) return false;
   const result = await filterTrainByCrossingOsm(crossingId, route);
