@@ -13,11 +13,20 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   try {
     const client = requireDb();
-    const result = await client.execute({ sql: `SELECT id,name,eva,lat,lon,confidence,status,source,observation_evas,context_evas,required_route_stops,reference_lines,reference_stations,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,created_at,updated_at FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+    // reference_stations was added by migration 008. Keep the main crossing
+    // endpoint compatible with databases where that migration has not landed yet.
+    const result = await client.execute({ sql: `SELECT id,name,eva,lat,lon,confidence,status,source,observation_evas,context_evas,required_route_stops,reference_lines,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,created_at,updated_at FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
     const crossing: any = result.rows[0];
     if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
     const links = await client.execute({ sql: `SELECT id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }).catch(() => ({ rows: [] as any[] }));
-    return Response.json({ crossing: { ...crossing, observationEvas: jsonArray(crossing.observation_evas), contextEvas: jsonArray(crossing.context_evas), requiredRouteStops: jsonArray(crossing.required_route_stops), referenceLines: referenceLines(jsonArray(crossing.reference_lines)), referenceStations: jsonArray(crossing.reference_stations), rules: jsonArray(crossing.rules), throughRules: jsonArray(crossing.through_rules), diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules) }, stationLinks: links.rows });
+    let storedReferenceStations: any[] = [];
+    try {
+      const referenceResult = await client.execute({ sql: `SELECT reference_stations FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+      storedReferenceStations = jsonArray((referenceResult.rows[0] as any)?.reference_stations);
+    } catch {
+      // Migration 008 not applied yet; the dedicated endpoint can add it on save.
+    }
+    return Response.json({ crossing: { ...crossing, observationEvas: jsonArray(crossing.observation_evas), contextEvas: jsonArray(crossing.context_evas), requiredRouteStops: jsonArray(crossing.required_route_stops), referenceLines: referenceLines(jsonArray(crossing.reference_lines)), referenceStations: storedReferenceStations, rules: jsonArray(crossing.rules), throughRules: jsonArray(crossing.through_rules), diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules) }, stationLinks: links.rows });
   } catch (error) { console.error("Failed to load crossing:", error); return Response.json({ error: error instanceof Error ? error.message : "Übergang konnte nicht geladen werden." }, { status: 500 }); }
 }
 
