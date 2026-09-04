@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import styles from "./CrossingSwipeNav.module.css";
+import { useCrossings } from "../context/CrossingsContext";
 
 const SWIPE_THRESHOLD = 48;
 const SWIPE_ANIMATION_MS = 220;
@@ -43,12 +44,9 @@ export default function CrossingSwipeNav({ children }: Props) {
 
   function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
     if (animating || startX.current === null || startY.current === null || pointerId.current !== event.pointerId) return;
-
     const deltaX = event.clientX - startX.current;
     const deltaY = event.clientY - startY.current;
-
     if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 8) return;
-
     const atStart = activeIndex <= 0 && deltaX > 0;
     const atEnd = activeIndex >= saved.length - 1 && deltaX < 0;
     const resistance = atStart || atEnd ? 0.28 : 1;
@@ -57,37 +55,27 @@ export default function CrossingSwipeNav({ children }: Props) {
 
   function handlePointerUp(event: React.PointerEvent<HTMLDivElement>) {
     if (startX.current === null || startY.current === null || pointerId.current !== event.pointerId) return;
-
     const deltaX = event.clientX - startX.current;
     const deltaY = event.clientY - startY.current;
     resetGesture();
 
     if (Math.abs(deltaX) < SWIPE_THRESHOLD || Math.abs(deltaX) <= Math.abs(deltaY)) {
-      setAnimating(true);
-      setDragX(0);
-      window.setTimeout(() => setAnimating(false), 160);
-      return;
+      setAnimating(true); setDragX(0); window.setTimeout(() => setAnimating(false), 160); return;
     }
 
     const direction = deltaX < 0 ? -1 : 1;
     const nextIndex = activeIndex + (direction < 0 ? 1 : -1);
-
     if (nextIndex < 0 || nextIndex >= saved.length) {
-      setAnimating(true);
-      setDragX(0);
-      window.setTimeout(() => setAnimating(false), 160);
-      return;
+      setAnimating(true); setDragX(0); window.setTimeout(() => setAnimating(false), 160); return;
     }
 
     setAnimating(true);
     setDragX(direction * window.innerWidth * -1);
-
     animationTimer.current = window.setTimeout(() => {
       const nextId = saved[nextIndex].id;
       setActiveId(nextId);
       setAnimating(false);
       setDragX(direction * window.innerWidth);
-
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           setAnimating(true);
@@ -99,16 +87,11 @@ export default function CrossingSwipeNav({ children }: Props) {
   }
 
   function handlePointerCancel() {
-    resetGesture();
-    setAnimating(true);
-    setDragX(0);
-    window.setTimeout(() => setAnimating(false), 160);
+    resetGesture(); setAnimating(true); setDragX(0); window.setTimeout(() => setAnimating(false), 160);
   }
 
-  useEffect(() => {
-    return () => {
-      if (animationTimer.current !== null) window.clearTimeout(animationTimer.current);
-    };
+  useEffect(() => () => {
+    if (animationTimer.current !== null) window.clearTimeout(animationTimer.current);
   }, []);
 
   return (
@@ -117,32 +100,12 @@ export default function CrossingSwipeNav({ children }: Props) {
         <nav className={styles.nav} aria-label="Meine Bahnübergänge">
           <div className={styles.dots}>
             {saved.map((crossing, index) => (
-              <button
-                key={crossing.id}
-                type="button"
-                className={`${styles.dot} ${index === activeIndex ? styles.active : ""}`}
-                onClick={() => selectIndex(index)}
-                aria-label={`${crossing.name} auswählen`}
-                aria-current={index === activeIndex ? "true" : undefined}
-              />
+              <button key={crossing.id} type="button" className={`${styles.dot} ${index === activeIndex ? styles.active : ""}`} onClick={() => selectIndex(index)} aria-label={`${crossing.name} auswählen`} aria-current={index === activeIndex ? "true" : undefined} />
             ))}
           </div>
         </nav>
       )}
-
-      <div
-        className={styles.gestureStage}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
-        style={{
-          transform: `translate3d(${dragX}px, 0, 0)`,
-          transition: animating
-            ? `transform ${SWIPE_ANIMATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
-            : "none",
-        }}
-      >
+      <div className={styles.gestureStage} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerCancel} style={{ transform: `translate3d(${dragX}px, 0, 0)`, transition: animating ? `transform ${SWIPE_ANIMATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)` : "none" }}>
         {children}
       </div>
     </>
