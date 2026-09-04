@@ -9,8 +9,11 @@ import {
 } from "@crossing/db-api-client";
 
 import { config, validateConfig } from "./config.js";
+import { loadDemandCrossings } from "./demand.js";
 
-const TARGETS = [
+type DemandCrossing = Awaited<ReturnType<typeof loadDemandCrossings>>[number];
+
+const DEFAULT_TARGETS = [
   "Bünde (Westf)",
   "Bünde",
   "Osnabrück Hbf",
@@ -111,12 +114,12 @@ function targetMatchesEvent(event: MobilithekTrainEvent, target: string): boolea
     event.origin,
     event.destination,
     ...event.route,
-    ...event.calls.flatMap((call) => [call.name]),
+    ...event.calls.map((call) => call.name),
   ];
   return values.some((value) => targetMatchesValue(value, target));
 }
 
-function profileEvents(events: MobilithekTrainEvent[]) {
+function profileEvents(events: MobilithekTrainEvent[], targets: string[]) {
   const lines = unique(events.flatMap((event) => [event.line, ...event.route]));
   const categories = unique(events.map((event) => event.category));
   const stations = unique(events.flatMap((event) => [
@@ -125,11 +128,11 @@ function profileEvents(events: MobilithekTrainEvent[]) {
     ...event.route,
     ...event.calls.map((call) => call.name),
   ]));
-  const targetMatches = TARGETS.filter((target) =>
+  const targetMatches = targets.filter((target) =>
     stations.some((station) => targetMatchesValue(station, target)),
   );
   const targetEventCounts = Object.fromEntries(
-    TARGETS.map((target) => [
+    targets.map((target) => [
       target,
       events.filter((event) => targetMatchesEvent(event, target)).length,
     ]),
@@ -155,14 +158,39 @@ function profileEvents(events: MobilithekTrainEvent[]) {
   };
 }
 
+async function loadTargetsFromDemand(): Promise<{ targets: string[]; demand: DemandCrossing[] }> {
+  const demand = await loadDemandCrossings();
+  const targets = unique(
+    demand.flatMap((crossing) => [
+      ...crossing.requiredRouteStops,
+      ...crossing.observationStations,
+    ]),
+  );
+  return { targets, demand };
+}
+
 async function main() {
   validateConfig();
+
+  const useDemand = process.argv.includes("--demand");
+  const { targets, demand } = useDemand
+    ? await loadTargetsFromDemand()
+    : { targets: DEFAULT_TARGETS, demand: [] as DemandCrossing[] };
+
   console.log("\n==============================================");
   console.log(" Mobilithek Subscription Profiling");
   console.log(" EINMALIGE INVENTUR – KEIN SNAPSHOT-WRITE");
   console.log("==============================================\n");
-  console.log(`Subscriptions: ${config.subscriptionIds.length}\n`);
-  console.log(`Targets: ${TARGETS.join(" | ")}\n`);
+  console.log(`Subscriptions: ${config.subscriptionIds.length}`);
+  console.log(`Mode: ${useDemand ? "LIVE DEMAND" : "DEFAULT TARGETS"}`);
+  if (useDemand) console.log(`Demand crossings: ${demand.length}`);
+  console.log(`Targets: ${targets.length}`);
+  console.log(`Target list: ${targets.join(" | ")}\n`);
+
+  if (useDemand && targets.length === 0) {
+    console.log("Keine aktuell nachgefragten Targets; nichts zu profilieren.");
+    return;
+  }
 
   const profiles: unknown[] = [];
 
@@ -186,7 +214,7 @@ async function main() {
         feedKind: feed.kind,
         bytes: feed.bytes.length,
         elapsedMs,
-        ...profileEvents(events),
+        ...profileEvents(events, targets),
       };
 
       profiles.push(profile);
