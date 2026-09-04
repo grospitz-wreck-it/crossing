@@ -19,7 +19,7 @@ export default function Home() {
   const [ads, setAds] = useState<any[]>([]); const [currentAdIndex, setCurrentAdIndex] = useState(0); const [now, setNow] = useState(Date.now()); const [showMoreTrains, setShowMoreTrains] = useState(false); const [measurementState, setMeasurementState] = useState<"none" | "close-recorded" | "open-recorded">("none"); const [firstClickAt, setFirstClickAt] = useState<number | null>(null); const [pendingEvent, setPendingEvent] = useState<"close" | "open" | null>(null); const [message, setMessage] = useState(""); const [loadingCrossingId, setLoadingCrossingId] = useState<string | null>(null);
   const refreshTimeout = useRef<ReturnType<typeof setTimeout> | null>(null); const statusCacheRef = useRef<Map<string, StatusData>>(new Map()); const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map()); const adCacheRef = useRef<Map<string, any[]>>(new Map()); const lastStatusFetchRef = useRef<Map<string, number>>(new Map());
 
-  async function load(crossingId = activeId, force = false) {
+  async function load(crossingId = activeId, force = false, bypassServerCache = false) {
     if (!crossingId) return;
     const cached = statusCacheRef.current.get(crossingId);
     if (cached && !force) { if (activeIdRef.current === crossingId) setData(cached); return; }
@@ -27,7 +27,8 @@ export default function Home() {
     if (activeIdRef.current === crossingId) setLoadingCrossingId(crossingId);
     const request = (async () => {
       try {
-        const [statusRes, adRes] = await Promise.all([fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }), fetch(`/api/ads/${crossingId}`, { cache: "no-store" })]);
+        const statusUrl = `/api/crossings/${crossingId}/status${bypassServerCache ? "?refresh=1" : ""}`;
+        const [statusRes, adRes] = await Promise.all([fetch(statusUrl, { cache: "no-store" }), fetch(`/api/ads/${crossingId}`, { cache: "no-store" })]);
         if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
         const json = await statusRes.json(); statusCacheRef.current.set(crossingId, json); lastStatusFetchRef.current.set(crossingId, Date.now()); if (activeIdRef.current === crossingId) setData(json);
         if (adRes.ok) { const list = await adRes.json(); const normalized = Array.isArray(list) ? list : []; adCacheRef.current.set(crossingId, normalized); if (activeIdRef.current === crossingId) { setAds(normalized); setCurrentAdIndex(0); } }
@@ -49,7 +50,7 @@ export default function Home() {
   useEffect(() => { if (!firstClickAt) return; const interval = setInterval(() => { if (Date.now() - firstClickAt > MAX_PHASE_MS) { setMeasurementState("none"); setFirstClickAt(null); setMessage("⚠️ Messung verworfen"); setTimeout(() => setMessage(""), 3000); } }, 1000); return () => clearInterval(interval); }, [firstClickAt]);
   useEffect(() => { function refresh() { const id = activeIdRef.current; if (!id) return; const last = lastStatusFetchRef.current.get(id) || 0; if (Date.now() - last < FOCUS_REFRESH_MIN_MS) return; void load(id, true); } function handleVisibility() { if (document.visibilityState === "visible") refresh(); } document.addEventListener("visibilitychange", handleVisibility); window.addEventListener("focus", refresh); window.addEventListener("pageshow", refresh); return () => { document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("focus", refresh); window.removeEventListener("pageshow", refresh); }; }, []);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
-  useEffect(() => { if (!data?.phase) return; if (refreshTimeout.current) clearTimeout(refreshTimeout.current); const target = new Date(data.state === "OPEN" ? data.phase.start : data.phase.end).getTime(); refreshTimeout.current = setTimeout(() => { if (activeIdRef.current) void load(activeIdRef.current, true); }, Math.max(0, target - Date.now()) + 500); return () => { if (refreshTimeout.current) clearTimeout(refreshTimeout.current); }; }, [data]);
+  useEffect(() => { if (!data?.phase) return; if (refreshTimeout.current) clearTimeout(refreshTimeout.current); const target = new Date(data.state === "OPEN" ? data.phase.start : data.phase.end).getTime(); refreshTimeout.current = setTimeout(() => { if (activeIdRef.current) void load(activeIdRef.current, true, true); }, Math.max(0, target - Date.now()) + 500); return () => { if (refreshTimeout.current) clearTimeout(refreshTimeout.current); }; }, [data]);
 
   if (!data) return <LoadingScreen />;
   if (!data.phase || !data.phase.trains?.length) return <main className="container"><div className="heroCard">Keine aktuellen Zugdaten verfügbar.</div></main>;
