@@ -4,345 +4,65 @@ import { useEffect, useRef, useState } from "react";
 import LoadingScreen from "../components/LoadingScreen";
 import { useCrossings } from "../context/CrossingsContext";
 
-function formatSeconds(seconds: number) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-}
-
-function formatDbTime(value?: string) {
-  if (!value) return "--:--";
-  const yy = Number(value.slice(0, 2));
-  const mm = Number(value.slice(2, 4));
-  const dd = Number(value.slice(4, 6));
-  const hh = Number(value.slice(6, 8));
-  const mi = Number(value.slice(8, 10));
-  const date = new Date(Date.UTC(2000 + yy, mm - 1, dd, hh, mi));
-  return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
-}
-
-function formatIsoTime(value?: string) {
-  if (!value) return "--:--";
-  return new Date(value).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" });
-}
-
+function formatSeconds(seconds: number) { const mins = Math.floor(seconds / 60); const secs = seconds % 60; return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`; }
+function formatDbTime(value?: string) { if (!value) return "--:--"; const yy = Number(value.slice(0, 2)); const mm = Number(value.slice(2, 4)); const dd = Number(value.slice(4, 6)); const hh = Number(value.slice(6, 8)); const mi = Number(value.slice(8, 10)); const date = new Date(Date.UTC(2000 + yy, mm - 1, dd, hh, mi)); return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" }); }
+function formatIsoTime(value?: string) { if (!value) return "--:--"; return new Date(value).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" }); }
 const MAX_PHASE_MS = 900 * 1000;
-
 type StatusData = any;
 
 export default function Home() {
   const { activeId, saved } = useCrossings();
-  const activeIdRef = useRef<string | null>(null);
-  activeIdRef.current = activeId;
-
+  const activeIdRef = useRef<string | null>(null); activeIdRef.current = activeId;
   const [data, setData] = useState<StatusData>(null);
-  const [ads, setAds] = useState<any[]>([]);
-  const [currentAdIndex, setCurrentAdIndex] = useState(0);
-  const [now, setNow] = useState(Date.now());
-  const [showMoreTrains, setShowMoreTrains] = useState(false);
-  const [measurementState, setMeasurementState] = useState<"none" | "close-recorded" | "open-recorded">("none");
-  const [firstClickAt, setFirstClickAt] = useState<number | null>(null);
-  const [pendingEvent, setPendingEvent] = useState<"close" | "open" | null>(null);
-  const [message, setMessage] = useState("");
-  const [loadingCrossingId, setLoadingCrossingId] = useState<string | null>(null);
-
-  const refreshTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const statusCacheRef = useRef<Map<string, StatusData>>(new Map());
-  const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
-  const adCacheRef = useRef<Map<string, any[]>>(new Map());
+  const [ads, setAds] = useState<any[]>([]); const [currentAdIndex, setCurrentAdIndex] = useState(0); const [now, setNow] = useState(Date.now()); const [showMoreTrains, setShowMoreTrains] = useState(false); const [measurementState, setMeasurementState] = useState<"none" | "close-recorded" | "open-recorded">("none"); const [firstClickAt, setFirstClickAt] = useState<number | null>(null); const [pendingEvent, setPendingEvent] = useState<"close" | "open" | null>(null); const [message, setMessage] = useState(""); const [loadingCrossingId, setLoadingCrossingId] = useState<string | null>(null);
+  const refreshTimeout = useRef<ReturnType<typeof setTimeout> | null>(null); const statusCacheRef = useRef<Map<string, StatusData>>(new Map()); const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map()); const adCacheRef = useRef<Map<string, any[]>>(new Map());
 
   async function load(crossingId = activeId, force = false) {
     if (!crossingId) return;
-
     const cached = statusCacheRef.current.get(crossingId);
-    if (cached && !force) {
-      if (activeIdRef.current === crossingId) setData(cached);
-      return;
-    }
-
-    const existing = statusInFlightRef.current.get(crossingId);
-    if (existing) return existing;
-
+    if (cached && !force) { if (activeIdRef.current === crossingId) setData(cached); return; }
+    const existing = statusInFlightRef.current.get(crossingId); if (existing) return existing;
     if (activeIdRef.current === crossingId) setLoadingCrossingId(crossingId);
-
     const request = (async () => {
       try {
-        const [statusRes, adRes] = await Promise.all([
-          fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }),
-          fetch(`/api/ads/${crossingId}`, { cache: "no-store" }),
-        ]);
-
+        const [statusRes, adRes] = await Promise.all([fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }), fetch(`/api/ads/${crossingId}`, { cache: "no-store" })]);
         if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
-
-        const json = await statusRes.json();
-        statusCacheRef.current.set(crossingId, json);
-        if (activeIdRef.current === crossingId) setData(json);
-
-        if (adRes.ok) {
-          const list = await adRes.json();
-          const normalized = Array.isArray(list) ? list : [];
-          adCacheRef.current.set(crossingId, normalized);
-          if (activeIdRef.current === crossingId) {
-            setAds(normalized);
-            setCurrentAdIndex(0);
-          }
-        } else {
-          adCacheRef.current.set(crossingId, []);
-          if (activeIdRef.current === crossingId) setAds([]);
-        }
-      } catch (error) {
-        console.error("Failed to load crossing status:", error);
-        if (activeIdRef.current === crossingId && !statusCacheRef.current.has(crossingId)) {
-          setData({ error: true, state: "UNKNOWN", phase: null, closures: [], trains: [], trainCount: 0 });
-          setAds([]);
-        }
-      } finally {
-        statusInFlightRef.current.delete(crossingId);
-        if (activeIdRef.current === crossingId) setLoadingCrossingId(null);
-      }
+        const json = await statusRes.json(); statusCacheRef.current.set(crossingId, json); if (activeIdRef.current === crossingId) setData(json);
+        if (adRes.ok) { const list = await adRes.json(); const normalized = Array.isArray(list) ? list : []; adCacheRef.current.set(crossingId, normalized); if (activeIdRef.current === crossingId) { setAds(normalized); setCurrentAdIndex(0); } }
+        else { adCacheRef.current.set(crossingId, []); if (activeIdRef.current === crossingId) setAds([]); }
+      } catch (error) { console.error("Failed to load crossing status:", error); if (activeIdRef.current === crossingId && !statusCacheRef.current.has(crossingId)) { setData({ error: true, state: "UNKNOWN", phase: null, closures: [], trains: [], trainCount: 0 }); setAds([]); } }
+      finally { statusInFlightRef.current.delete(crossingId); if (activeIdRef.current === crossingId) setLoadingCrossingId(null); }
     })();
-
-    statusInFlightRef.current.set(crossingId, request);
-    return request;
+    statusInFlightRef.current.set(crossingId, request); return request;
   }
 
-  async function saveUnexpectedTrain() {
-    if (!data?.predictionId) return;
-    await fetch("/api/measurements/flag", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ predictionId: data.predictionId, flag: "unexpected_train" }),
-    });
-    setMessage("⚠ Sonderfall markiert");
-    setTimeout(() => setMessage(""), 3000);
-  }
-
-  async function saveMeasurement(event: "close" | "open", precision: "exact" | "at_least") {
-    if (!data) return;
-    if (event === "close" && measurementState === "close-recorded") return;
-    if (event === "open" && measurementState === "open-recorded") return;
-
-    const res = await fetch("/api/measurements", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ predictionId: data.predictionId, event, actualAt: new Date().toISOString(), phase: data.phase, precision }),
-    });
-    await res.json();
-
-    if (event === "close") {
-      if (measurementState === "open-recorded") {
-        setMeasurementState("none");
-        setFirstClickAt(null);
-        setMessage("✓ Messung abgeschlossen");
-      } else {
-        setMeasurementState("close-recorded");
-        setFirstClickAt(Date.now());
-        setMessage("✓ Schranke runter gespeichert");
-      }
-    }
-    if (event === "open") {
-      if (measurementState === "close-recorded") {
-        setMeasurementState("none");
-        setFirstClickAt(null);
-        setMessage("✓ Messung abgeschlossen");
-      } else {
-        setMeasurementState("open-recorded");
-        setFirstClickAt(Date.now());
-        setMessage("✓ Schranke hoch gespeichert");
-      }
-    }
-    setTimeout(() => setMessage(""), 3000);
-  }
+  async function saveUnexpectedTrain() { if (!data?.predictionId) return; await fetch("/api/measurements/flag", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ predictionId: data.predictionId, flag: "unexpected_train" }) }); setMessage("⚠ Sonderfall markiert"); setTimeout(() => setMessage(""), 3000); }
+  async function saveMeasurement(event: "close" | "open", precision: "exact" | "at_least") { if (!data) return; if (event === "close" && measurementState === "close-recorded") return; if (event === "open" && measurementState === "open-recorded") return; const res = await fetch("/api/measurements", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ predictionId: data.predictionId, event, actualAt: new Date().toISOString(), phase: data.phase, precision }) }); await res.json(); if (event === "close") { if (measurementState === "open-recorded") { setMeasurementState("none"); setFirstClickAt(null); setMessage("✓ Messung abgeschlossen"); } else { setMeasurementState("close-recorded"); setFirstClickAt(Date.now()); setMessage("✓ Schranke runter gespeichert"); } } if (event === "open") { if (measurementState === "close-recorded") { setMeasurementState("none"); setFirstClickAt(null); setMessage("✓ Messung abgeschlossen"); } else { setMeasurementState("open-recorded"); setFirstClickAt(Date.now()); setMessage("✓ Schranke hoch gespeichert"); } } setTimeout(() => setMessage(""), 3000); }
 
   const wakeLockRef = useRef<any>(null);
-
-  async function requestWakeLock() {
-    if (!("wakeLock" in navigator)) return;
-    try {
-      wakeLockRef.current = await (navigator as any).wakeLock.request("screen");
-    } catch (error) {
-      console.error("Wake Lock request failed:", error);
-    }
-  }
-
-  useEffect(() => {
-    if (!activeId) return;
-    const cached = statusCacheRef.current.get(activeId);
-    if (cached) setData(cached);
-    const cachedAds = adCacheRef.current.get(activeId);
-    if (cachedAds) setAds(cachedAds);
-    void load(activeId, !cached);
-    const apiRefresh = setInterval(() => void load(activeId, true), 120000);
-    return () => clearInterval(apiRefresh);
-  }, [activeId]);
-
-  useEffect(() => {
-    requestWakeLock();
-    function handleWakeLockVisibility() {
-      if (document.visibilityState === "visible") requestWakeLock();
-    }
-    document.addEventListener("visibilitychange", handleWakeLockVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", handleWakeLockVisibility);
-      if (wakeLockRef.current) {
-        wakeLockRef.current.release().catch(() => {});
-        wakeLockRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (ads.length <= 1) return;
-    const timer = setInterval(() => setCurrentAdIndex((i) => (i + 1) % ads.length), 30000);
-    return () => clearInterval(timer);
-  }, [ads]);
-
-  useEffect(() => {
-    if (!firstClickAt) return;
-    const interval = setInterval(() => {
-      if (Date.now() - firstClickAt > MAX_PHASE_MS) {
-        setMeasurementState("none");
-        setFirstClickAt(null);
-        setMessage("⚠️ Messung verworfen");
-        setTimeout(() => setMessage(""), 3000);
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [firstClickAt]);
-
-  useEffect(() => {
-    function refresh() {
-      if (activeIdRef.current) void load(activeIdRef.current, true);
-    }
-    function handleVisibility() {
-      if (document.visibilityState === "visible") refresh();
-    }
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("focus", refresh);
-    window.addEventListener("pageshow", refresh);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("pageshow", refresh);
-    };
-  }, []);
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!data?.phase) return;
-    if (refreshTimeout.current) clearTimeout(refreshTimeout.current);
-    const target = new Date(data.state === "OPEN" ? data.phase.start : data.phase.end).getTime();
-    refreshTimeout.current = setTimeout(() => {
-      if (activeIdRef.current) void load(activeIdRef.current, true);
-    }, Math.max(0, target - Date.now()) + 500);
-    return () => {
-      if (refreshTimeout.current) clearTimeout(refreshTimeout.current);
-    };
-  }, [data]);
+  async function requestWakeLock() { if (!("wakeLock" in navigator)) return; try { wakeLockRef.current = await (navigator as any).wakeLock.request("screen"); } catch (error) { console.error("Wake Lock request failed:", error); } }
+  useEffect(() => { if (!activeId) return; const cached = statusCacheRef.current.get(activeId); const cachedAds = adCacheRef.current.get(activeId); setData(cached || null); setAds(cachedAds || []); setShowMoreTrains(false); setPendingEvent(null); void load(activeId, !cached); const apiRefresh = setInterval(() => void load(activeId, true), 120000); return () => clearInterval(apiRefresh); }, [activeId]);
+  useEffect(() => { requestWakeLock(); function handleWakeLockVisibility() { if (document.visibilityState === "visible") requestWakeLock(); } document.addEventListener("visibilitychange", handleWakeLockVisibility); return () => { document.removeEventListener("visibilitychange", handleWakeLockVisibility); if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; } }; }, []);
+  useEffect(() => { if (ads.length <= 1) return; const timer = setInterval(() => setCurrentAdIndex((i) => (i + 1) % ads.length), 30000); return () => clearInterval(timer); }, [ads]);
+  useEffect(() => { if (!firstClickAt) return; const interval = setInterval(() => { if (Date.now() - firstClickAt > MAX_PHASE_MS) { setMeasurementState("none"); setFirstClickAt(null); setMessage("⚠️ Messung verworfen"); setTimeout(() => setMessage(""), 3000); } }, 1000); return () => clearInterval(interval); }, [firstClickAt]);
+  useEffect(() => { function refresh() { if (activeIdRef.current) void load(activeIdRef.current, true); } function handleVisibility() { if (document.visibilityState === "visible") refresh(); } document.addEventListener("visibilitychange", handleVisibility); window.addEventListener("focus", refresh); window.addEventListener("pageshow", refresh); return () => { document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("focus", refresh); window.removeEventListener("pageshow", refresh); }; }, []);
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
+  useEffect(() => { if (!data?.phase) return; if (refreshTimeout.current) clearTimeout(refreshTimeout.current); const target = new Date(data.state === "OPEN" ? data.phase.start : data.phase.end).getTime(); refreshTimeout.current = setTimeout(() => { if (activeIdRef.current) void load(activeIdRef.current, true); }, Math.max(0, target - Date.now()) + 500); return () => { if (refreshTimeout.current) clearTimeout(refreshTimeout.current); }; }, [data]);
 
   if (!data) return <LoadingScreen />;
-  if (!data.phase || !data.phase.trains?.length) {
-    return <main className="container"><div className="heroCard">Keine aktuellen Zugdaten verfügbar.</div></main>;
-  }
-
-  const closeTime = formatIsoTime(data.phase.start);
-  const openTime = formatIsoTime(data.phase.end);
-  const closureDuration = data.phase.durationMinutes;
-  const train = data.phase.trains[0];
-  const countdown = Math.max(0, Math.floor((new Date(data.state === "OPEN" ? data.phase.start : data.phase.end).getTime() - now) / 1000));
+  if (!data.phase || !data.phase.trains?.length) return <main className="container"><div className="heroCard">Keine aktuellen Zugdaten verfügbar.</div></main>;
+  const closeTime = formatIsoTime(data.phase.start); const openTime = formatIsoTime(data.phase.end); const closureDuration = data.phase.durationMinutes; const train = data.phase.trains[0]; const countdown = Math.max(0, Math.floor((new Date(data.state === "OPEN" ? data.phase.start : data.phase.end).getTime() - now) / 1000));
   if (!train) return <main className="container"><div className="heroCard">Keine aktuellen Zugdaten verfügbar.</div></main>;
-
-  const ad = ads[currentAdIndex];
-  const heroImage = data.state === "OPEN" ? "/images/barrier-open.webp" : "/images/barrier-closed.webp";
-  const targetCrossing = saved.find((crossing) => crossing.id === activeId);
-
+  const ad = ads[currentAdIndex]; const heroImage = data.state === "OPEN" ? "/images/barrier-open.webp" : "/images/barrier-closed.webp";
   return (
     <main className="container">
-      {loadingCrossingId === activeId && (
-        <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 1000, padding: "6px 12px", borderRadius: 999, background: "rgba(0,0,0,.72)", color: "white", fontSize: 13, pointerEvents: "none" }}>
-          {targetCrossing?.name ?? "Bahnübergang"} wird aktualisiert …
-        </div>
-      )}
-
       <div className="logo">{data.crossing?.name ? `GEMEINDE ${data.crossing.name.toUpperCase()}` : "BAHNÜBERGANG"}</div>
-
-      <div className={`heroCard ${data.state === "OPEN" ? "heroCardOpen" : "heroCardClosed"}`}>
-        <div className="heroVisual">
-          <img src={heroImage} alt={data.state === "OPEN" ? "Bahnübergang offen" : "Bahnübergang geschlossen"} className="heroImage" />
-        </div>
-        <div className="heroContent">
-          <div className={`statusBadge ${data.state === "OPEN" ? "badgeOpen" : "badgeClosed"}`}>● {data.state === "OPEN" ? "OFFEN" : "GESCHLOSSEN"}</div>
-          <div className="heroTimer">{formatSeconds(countdown)}</div>
-          <div className="heroSubtitle">{data.state === "OPEN" ? "bis Schranke schließt" : "bis Schranke öffnet"}</div>
-          <div className="heroStats">
-            <div className="heroStatCard"><div className="heroStatIcon">🕒</div><div className="heroStatValue">{closeTime}</div><div className="heroStatLabel">Schließt</div></div>
-            <div className="heroStatCard"><div className="heroStatIcon">🔓</div><div className="heroStatValue">{openTime}</div><div className="heroStatLabel">Frei</div></div>
-            <div className="heroStatCard"><div className="heroStatIcon">⏳</div><div className="heroStatValue">{closureDuration}m</div><div className="heroStatLabel">Dauer</div></div>
-          </div>
-        </div>
-      </div>
-
+      <div className={`heroCard ${data.state === "OPEN" ? "heroCardOpen" : "heroCardClosed"}`}><div className="heroVisual"><img src={heroImage} alt={data.state === "OPEN" ? "Bahnübergang offen" : "Bahnübergang geschlossen"} className="heroImage" /></div><div className="heroContent"><div className={`statusBadge ${data.state === "OPEN" ? "badgeOpen" : "badgeClosed"}`}>● {data.state === "OPEN" ? "OFFEN" : "GESCHLOSSEN"}</div><div className="heroTimer">{formatSeconds(countdown)}</div><div className="heroSubtitle">{data.state === "OPEN" ? "bis Schranke schließt" : "bis Schranke öffnet"}</div><div className="heroStats"><div className="heroStatCard"><div className="heroStatIcon">🕒</div><div className="heroStatValue">{closeTime}</div><div className="heroStatLabel">Schließt</div></div><div className="heroStatCard"><div className="heroStatIcon">🔓</div><div className="heroStatValue">{openTime}</div><div className="heroStatLabel">Frei</div></div><div className="heroStatCard"><div className="heroStatIcon">⏳</div><div className="heroStatValue">{closureDuration}m</div><div className="heroStatLabel">Dauer</div></div></div></div></div>
       {data.state === "CLOSED" && ad && <a href={ad.targetUrl} target="_blank" rel="noopener noreferrer" className="adCard"><img src={ad.imageUrl} alt={ad.title} className="adImage" /></a>}
-
-      <div className="trainCard">
-        <div className="trainLabel">Nächste Schließphase</div>
-        <div className="closureSummary">
-          <div className="closureTime">{formatIsoTime(data.phase?.start)} bis {formatIsoTime(data.phase?.end)}</div>
-          <div className="closureFacts">
-            <div className="closureFact">⏱ <strong>{data.phase?.durationMinutes}</strong> <span>Min.</span></div>
-            <div className="closureFact">🚆 <strong>{data.phase?.trainCount}</strong> <span>{data.phase?.trainCount === 1 ? "Zug" : "Züge"}</span></div>
-          </div>
-        </div>
-
-        <div className="trainHeader">
-          <div className="trainMain">
-            <div className="trainLineRow">
-              <div className="trainLine">{data.phase?.trains?.[0]?.line}<span className="trainNumberInline">{data.phase?.trains?.[0]?.journeyNumber}</span></div>
-              {data.phase?.trains?.[0]?.delayMinutes > 0 && <span className="delayChipInline">+{data.phase.trains[0].delayMinutes}</span>}
-            </div>
-            <div className="trainDirection">{data.phase?.trains?.[0]?.directionLabel}</div>
-            <div className="trainMeta">{data.phase?.trains?.[0]?.platform && <>Gleis {data.phase.trains[0].platform}</>}{data.phase?.trains?.[0]?.delayMinutes > 0 && <> · +{data.phase.trains[0].delayMinutes} Min.</>}</div>
-          </div>
-          <div className="etaCard">
-            <div className="etaLabel">passiert in</div>
-            <div className="etaValue">{Math.max(1, Math.round((data.phase?.trains?.[0]?.etaSeconds || 0) / 60))}<span className="etaUnit">Min</span></div>
-          </div>
-        </div>
-
-        {data.phase?.trains?.length > 1 && <>
-          <button className="expandButton" onClick={() => setShowMoreTrains(!showMoreTrains)}><span>{showMoreTrains ? "⌃" : "⌄"}</span><span>Weitere Züge dieser Schließphase</span><div className="expandCount">+{data.phase.trains.length - 1}</div></button>
-          {showMoreTrains && <div className="extraTrains">{data.phase.trains.slice(1).map((train: any) => <div key={train.id} className="extraTrain"><div><div className="extraTrainHeader"><div className="extraTrainLine">{train.line}</div><div className="extraTrainDelay">{train.delayMinutes > 0 ? `+${train.delayMinutes}` : ""}</div></div><div className="extraTrainRoute">{train.directionLabel}</div><div className="extraTrainMeta">{train.platform && <>Gleis {train.platform}</>}</div></div><div>{formatIsoTime(train.crossingTime)}</div></div>)}</div>}
-        </>}
-      </div>
-
-      {data.closures && data.closures.length > 1 && <>
-        <div className="laterHeading">Später</div>
-        <div className="closureList">{data.closures.slice(1).map((closure: any, index: number) => <div key={index} className="closureCard">
-          <div className="closureCardTop"><div className="closureCardTime">{formatIsoTime(closure.start)} bis {formatIsoTime(closure.end)}</div><div className="closureCardMeta">⏱ {closure.durationMinutes} Min. • 🚆 {closure.trainCount}</div></div>
-          <div className="closureCardTrains">{closure.trains.map((train: any) => <div key={train.id} className="closureTrain">
-            <div className="closureTrainInfo"><div className="closureTrainLine">{train.line}</div><div className="closureTrainDirection">{train.directionLabel}</div><div className="closureTrainPlatform">{train.platform ? `Gleis ${train.platform}` : ""}</div></div>
-            <div className="closureTrainRight"><span className="closureTrainTime">{formatIsoTime(train.crossingTime)}</span><span className="closureTrainDelay">{train.delayMinutes > 0 ? `+${train.delayMinutes}` : ""}</span></div>
-          </div>)}</div>
-        </div>)}</div>
-      </>}
-
-      {message && <div className="measurementMessage">{message}</div>}
-      {measurementState !== "none" && <div className="measurementInfo">Messung läuft</div>}
-
-      {pendingEvent ? <div className="measurementButtons">
-        <div className="precisionPrompt">{pendingEvent === "close" ? "Seit wann ist sie unten?" : "Seit wann ist sie oben?"}</div>
-        <button className="cta ctaOpen" onClick={() => { saveMeasurement(pendingEvent, "exact"); setPendingEvent(null); }}>GERADE EBEN</button>
-        <button className="cta ctaSecondary" onClick={() => { saveMeasurement(pendingEvent, "at_least"); setPendingEvent(null); }}>WAR SCHON EINE WEILE SO</button>
-        <button className="cancelButton" onClick={() => setPendingEvent(null)}>Abbrechen</button>
-      </div> : <div className="measurementButtons">
-        <button className={`cta ctaClose ${measurementState === "close-recorded" ? "disabledMeasurement" : ""}`} disabled={measurementState === "close-recorded"} onClick={() => setPendingEvent("close")}>SCHRANKE RUNTER</button>
-        <button className={`cta ctaOpen ${measurementState === "open-recorded" ? "disabledMeasurement" : ""}`} disabled={measurementState === "open-recorded"} onClick={() => setPendingEvent("open")}>SCHRANKE HOCH</button>
-        <button className="flagButton" onClick={saveUnexpectedTrain}>⚠ GÜTERZUG / SONDERFALL</button>
-      </div>}
+      <div className="trainCard"><div className="trainLabel">Nächste Schließphase</div><div className="closureSummary"><div className="closureTime">{formatIsoTime(data.phase?.start)} bis {formatIsoTime(data.phase?.end)}</div><div className="closureFacts"><div className="closureFact">⏱ <strong>{data.phase?.durationMinutes}</strong> <span>Min.</span></div><div className="closureFact">🚆 <strong>{data.phase?.trainCount}</strong> <span>{data.phase?.trainCount === 1 ? "Zug" : "Züge"}</span></div></div></div><div className="trainHeader"><div className="trainMain"><div className="trainLineRow"><div className="trainLine">{data.phase?.trains?.[0]?.line}<span className="trainNumberInline">{data.phase?.trains?.[0]?.journeyNumber}</span></div>{data.phase?.trains?.[0]?.delayMinutes > 0 && <span className="delayChipInline">+{data.phase.trains[0].delayMinutes}</span>}</div><div className="trainDirection">{data.phase?.trains?.[0]?.directionLabel}</div><div className="trainMeta">{data.phase?.trains?.[0]?.platform && <>Gleis {data.phase.trains[0].platform}</>}{data.phase?.trains?.[0]?.delayMinutes > 0 && <> · +{data.phase.trains[0].delayMinutes} Min.</>}</div></div><div className="etaCard"><div className="etaLabel">passiert in</div><div className="etaValue">{Math.max(1, Math.round((data.phase?.trains?.[0]?.etaSeconds || 0) / 60))}<span className="etaUnit">Min</span></div></div></div>{data.phase?.trains?.length > 1 && <><button className="expandButton" onClick={() => setShowMoreTrains(!showMoreTrains)}><span>{showMoreTrains ? "⌃" : "⌄"}</span><span>Weitere Züge dieser Schließphase</span><div className="expandCount">+{data.phase.trains.length - 1}</div></button>{showMoreTrains && <div className="extraTrains">{data.phase.trains.slice(1).map((train: any) => <div key={train.id} className="extraTrain"><div><div className="extraTrainHeader"><div className="extraTrainLine">{train.line}</div><div className="extraTrainDelay">{train.delayMinutes > 0 ? `+${train.delayMinutes}` : ""}</div></div><div className="extraTrainRoute">{train.directionLabel}</div><div className="extraTrainMeta">{train.platform && <>Gleis {train.platform}</>}</div></div><div>{formatIsoTime(train.crossingTime)}</div></div>)}</div>}</>}</div>
+      {data.closures && data.closures.length > 1 && <><div className="laterHeading">Später</div><div className="closureList">{data.closures.slice(1).map((closure: any, index: number) => <div key={index} className="closureCard"><div className="closureCardTop"><div className="closureCardTime">{formatIsoTime(closure.start)} bis {formatIsoTime(closure.end)}</div><div className="closureCardMeta">⏱ {closure.durationMinutes} Min. • 🚆 {closure.trainCount}</div></div><div className="closureCardTrains">{closure.trains.map((train: any) => <div key={train.id} className="closureTrain"><div className="closureTrainInfo"><div className="closureTrainLine">{train.line}</div><div className="closureTrainDirection">{train.directionLabel}</div><div className="closureTrainPlatform">{train.platform ? `Gleis ${train.platform}` : ""}</div></div><div className="closureTrainRight"><span className="closureTrainTime">{formatIsoTime(train.crossingTime)}</span><span className="closureTrainDelay">{train.delayMinutes > 0 ? `+${train.delayMinutes}` : ""}</span></div></div>)}</div></div>)}</div></>}
+      {message && <div className="measurementMessage">{message}</div>}{measurementState !== "none" && <div className="measurementInfo">Messung läuft</div>}
+      {pendingEvent ? <div className="measurementButtons"><div className="precisionPrompt">{pendingEvent === "close" ? "Seit wann ist sie unten?" : "Seit wann ist sie oben?"}</div><button className="cta ctaOpen" onClick={() => { saveMeasurement(pendingEvent, "exact"); setPendingEvent(null); }}>GERADE EBEN</button><button className="cta ctaSecondary" onClick={() => { saveMeasurement(pendingEvent, "at_least"); setPendingEvent(null); }}>WAR SCHON EINE WEILE SO</button><button className="cancelButton" onClick={() => setPendingEvent(null)}>Abbrechen</button></div> : <div className="measurementButtons"><button className={`cta ctaClose ${measurementState === "close-recorded" ? "disabledMeasurement" : ""}`} disabled={measurementState === "close-recorded"} onClick={() => setPendingEvent("close")}>SCHRANKE RUNTER</button><button className={`cta ctaOpen ${measurementState === "open-recorded" ? "disabledMeasurement" : ""}`} disabled={measurementState === "open-recorded"} onClick={() => setPendingEvent("open")}>SCHRANKE HOCH</button><button className="flagButton" onClick={saveUnexpectedTrain}>⚠ GÜTERZUG / SONDERFALL</button></div>}
     </main>
   );
 }
