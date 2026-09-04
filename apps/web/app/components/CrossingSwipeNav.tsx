@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useCrossings } from "../context/CrossingsContext";
 import styles from "./CrossingSwipeNav.module.css";
 
 const SWIPE_THRESHOLD = 48;
@@ -144,9 +143,7 @@ export default function CrossingSwipeNav({ children }: Props) {
             : "none",
         }}
       >
-        <div key={activeId ?? "none"} style={{ display: "contents" }}>
-          {children}
-        </div>
+        {children}
       </div>
     </>
   );
