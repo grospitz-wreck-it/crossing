@@ -30,9 +30,6 @@ function routeContainsStation(route: unknown, stationName: string) {
 
 function normalizeLine(value: unknown) {
   let line = String(value || "").toUpperCase().trim();
-  // DB-Fahrplandaten können neben dem eigentlichen Liniencode noch einen
-  // Laufweg enthalten, z.B. "RE60 - Bielefeld, Minden". Gespeichert wird
-  // im Crossing dagegen nur "RE60".
   line = line.split(/\s+-\s+/)[0];
   return line.replace(/\s+/g, "").trim();
 }
@@ -100,7 +97,10 @@ async function loadCrossing(id: string): Promise<any | null> {
       stationRows = stations.rows as any[];
     } catch {}
     return buildCrossingFromDb({ ...row, reference_stations: JSON.stringify(referenceStations) }, stationRows);
-  } catch { return null; }
+  } catch (error) {
+    console.error(`loadCrossing failed for ${id}`, error);
+    return null;
+  }
 }
 
 function directTrainBelongsToCrossing(train: any, crossing: any) {
@@ -146,14 +146,18 @@ const TIMETABLE_TIMEOUT_MS = 7_000;
 const AUXILIARY_TIMEOUT_MS = 4_500;
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const cacheKey = `status:${id}`;
+  let id = "unknown";
   try {
+    const resolvedParams = await params;
+    id = String(resolvedParams?.id || "").trim();
+    if (!id) return Response.json({ error: "Crossing ID fehlt." }, { status: 400 });
+
+    const cacheKey = `status:${id}`;
     const cached = await readCrossingForecastCache<any>(cacheKey, STATUS_CACHE_TTL_MS);
     if (cached) return Response.json(cached, { headers: { "X-Crossing-Status-Cache": "HIT" } });
 
     const crossing = await loadCrossing(id);
-    if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
+    if (!crossing) return Response.json({ error: "Crossing not found", crossingId: id }, { status: 404 });
 
     const timetableSources = crossing.observationEvas.map((eva: string) => ({ eva, stationName: crossing.observationStationNames[crossing.observationEvas.indexOf(eva)] || eva, events: [] as any[], error: "" }));
     const observationEventsPromise = Promise.all(crossing.observationEvas.map((eva: string, index: number) =>
@@ -201,17 +205,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       const directStationMatches = nonCancelled.filter((event: any) => directTrainBelongsToCrossing(event, crossing));
       const lineMatches = directStationMatches.filter((event: any) => lineMatchesReference(event, crossing));
       const sampleLines = Array.from(new Set(nonCancelled.map((event: any) => normalizeLine(event.line)).filter(Boolean))).slice(0, 12);
-      return {
-        eva: source.eva,
-        stationName: source.stationName,
-        ok: !source.error,
-        error: source.error || undefined,
-        eventCount: events.length,
-        nonCancelledCount: nonCancelled.length,
-        stationMatchCount: directStationMatches.length,
-        referenceLineMatchCount: lineMatches.length,
-        sampleLines,
-      };
+      return { eva: source.eva, stationName: source.stationName, ok: !source.error, error: source.error || undefined, eventCount: events.length, nonCancelledCount: nonCancelled.length, stationMatchCount: directStationMatches.length, referenceLineMatchCount: lineMatches.length, sampleLines };
     });
 
     const closures: any[] = [];
@@ -234,20 +228,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       trains,
       divertedTrains,
       lineHints: [],
-      diagnostics: {
-        referenceStations: crossing.referenceStations,
-        referenceLines: crossing.referenceLines,
-        observationEvas: crossing.observationEvas,
-        stations: stationDiagnostics,
-        directEventCount: observationEvents.length,
-        directCandidateCount: directCandidates.length,
-        finalTrainCount: trains.length,
-      },
+      diagnostics: { referenceStations: crossing.referenceStations, referenceLines: crossing.referenceLines, observationEvas: crossing.observationEvas, stations: stationDiagnostics, directEventCount: observationEvents.length, directCandidateCount: directCandidates.length, finalTrainCount: trains.length },
     };
     await writeCrossingForecastCache(cacheKey, payload);
     return Response.json(payload, { headers: { "X-Crossing-Status-Cache": "MISS" } });
   } catch (error) {
     console.error(`Crossing status failed for ${id}`, error);
-    return Response.json({ error: "Prognose konnte nicht geladen werden.", crossingId: id }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    const detail = error instanceof Error ? error.message : String(error);
+    return Response.json({ error: "Prognose konnte nicht geladen werden.", crossingId: id, detail }, { status: 503, headers: { "Cache-Control": "no-store" } });
   }
 }
