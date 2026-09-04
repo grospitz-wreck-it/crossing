@@ -5,29 +5,68 @@ import { refreshOnce } from "./mobilithek.js";
 import { ensureSchema } from "./schema.js";
 import { writeSnapshot } from "./snapshot.js";
 
+// Subscription inventory for the current Mobilithek account.
+// Slots refer to the environment variables consumed by config.ts:
+//   0 = MOBILITHEK_SUBSCRIPTION_ID
+//   2 = MOBILITHEK_SUBSCRIPTION_ID_3
+//   4 = MOBILITHEK_SUBSCRIPTION_ID_5
+//
+// Kirchlengern uses the smallest useful combination found in the one-time
+// profiling run: slot 0 covers the observation EVAs plus Bünde/Bielefeld;
+// slot 4 covers Osnabrück Hbf; slot 2 covers Hannover Hbf.
+//
+// IMPORTANT: there is deliberately no fallback to config.subscriptionIds.
+// Unknown demand therefore fails closed instead of downloading Germany.
+function selectSubscriptionIdsForDemand(
+  demand: Array<{ id: string }>,
+): { ids: string[]; slots: number[] } {
+  const slots = new Set<number>();
+
+  for (const crossing of demand) {
+    if (crossing.id.toLowerCase() === "kirchlengern") {
+      slots.add(0);
+      slots.add(4);
+      slots.add(2);
+    }
+  }
+
+  const selectedSlots = [...slots].sort((a, b) => a - b);
+  const ids = selectedSlots
+    .map((slot) => config.subscriptionIds[slot])
+    .filter((id): id is string => Boolean(id));
+
+  return { ids, slots: selectedSlots };
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
 
   console.log("[Mobilithek Worker] starting");
-
   validateConfig();
-
   await ensureSchema();
 
   const demand = await loadDemandCrossings();
-
   console.log(`[Mobilithek Worker] demanded crossings=${demand.length}`);
 
-  // Ohne aktive Nutzung gibt es keinen Grund, einen Deutschland-Snapshot
-  // in Turso zu halten. Vorhandene Daten bleiben unangetastet.
   if (demand.length === 0) {
-    console.log(
-      "[Mobilithek Worker] no demanded crossings; snapshot unchanged",
-    );
+    console.log("[Mobilithek Worker] no demanded crossings; snapshot unchanged");
     return;
   }
 
-  const result = await refreshOnce();
+  const selection = selectSubscriptionIdsForDemand(demand);
+
+  if (selection.ids.length === 0) {
+    throw new Error(
+      "Für die aktuell nachgefragten BÜs ist keine Mobilithek-Subscription gemappt; Snapshot bleibt unverändert",
+    );
+  }
+
+  console.log(
+    `[Mobilithek Worker] selected subscription slots=${selection.slots.join(",")} ` +
+      `count=${selection.ids.length}`,
+  );
+
+  const result = await refreshOnce(selection.ids);
   const demandedEvents = filterEventsByDemand(result.events, demand);
 
   console.log(
@@ -39,8 +78,6 @@ async function main() {
       `demandedEvents=${demandedEvents.length}`,
   );
 
-  // FAIL-SAFE: bei komplettem Ausfall oder ohne verwertbare Nachfrage
-  // wird der bestehende Snapshot NICHT gelöscht.
   if (result.successful === 0) {
     throw new Error(
       "Keine Mobilithek-Subscription erfolgreich verarbeitet; Snapshot bleibt unverändert",
@@ -60,14 +97,12 @@ async function main() {
   });
 
   const byDay = new Map<string, number>();
-
   for (const item of demandedEvents) {
     const date = item.event.actualTime.toISOString().slice(0, 10);
     byDay.set(date, (byDay.get(date) || 0) + 1);
   }
 
   console.log("[Mobilithek Worker] demanded event date distribution:");
-
   for (const [date, count] of [...byDay.entries()].sort()) {
     console.log(`  ${date}: ${count}`);
   }
