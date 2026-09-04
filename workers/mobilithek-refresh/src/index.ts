@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { config, validateConfig } from "./config.js";
 import { loadDemandCrossings } from "./demand.js";
 import { filterEventsByDemand } from "./filterDemand.js";
@@ -5,87 +7,122 @@ import { refreshOnce } from "./mobilithek.js";
 import { ensureSchema } from "./schema.js";
 import { writeSnapshot } from "./snapshot.js";
 
-type DemandCrossing = {
-  id: string;
-  requiredRouteStops: string[];
-  categories: string[];
-  observationStations: string[];
+type DemandCrossing = Awaited<ReturnType<typeof loadDemandCrossings>>[number];
+
+type SubscriptionProfile = {
+  subscriptionId: string;
+  targetMatches?: string[];
+  error?: string;
 };
 
-function normalize(value: string): string {
+const PROFILE_PATH = path.resolve(process.cwd(), "subscription-profiles.json");
+
+function normalizeTarget(value: string): string {
   return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
+    .replace(/\(westf\.?\)/g, "")
+    .replace(/\bhbf\.?\b/g, "")
+    .replace(/[.,/#!$%^&*;:{}=_`~()\-]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-function hasAny(values: string[], needles: string[]): boolean {
-  const normalizedValues = values.map(normalize);
-  return needles.some((needle) => {
-    const target = normalize(needle);
-    return normalizedValues.some(
-      (value) => value === target || value.includes(target) || target.includes(value),
+function loadProfiles(): SubscriptionProfile[] {
+  if (!fs.existsSync(PROFILE_PATH)) {
+    throw new Error(
+      `Subscription-Profil fehlt: ${PROFILE_PATH}. Bitte zuerst profileSubscriptions.ts ausführen.`,
     );
-  });
+  }
+
+  const raw: unknown = JSON.parse(fs.readFileSync(PROFILE_PATH, "utf8"));
+  if (!Array.isArray(raw)) {
+    throw new Error("Subscription-Profil hat ein ungültiges Format (Array erwartet)");
+  }
+
+  return raw.filter(
+    (item): item is SubscriptionProfile =>
+      !!item &&
+      typeof item === "object" &&
+      typeof (item as SubscriptionProfile).subscriptionId === "string" &&
+      !(item as SubscriptionProfile).error &&
+      Array.isArray((item as SubscriptionProfile).targetMatches),
+  );
 }
 
-/**
- * Account-specific Mobilithek inventory derived from the one-time profiling run.
- *
- * The important part is that selection is driven by the demand's stations/EVAs,
- * not by crossing IDs. There is intentionally no fallback to all configured
- * subscriptions: an unmapped demand fails closed.
- *
- * Current profiled coverage:
- *   slot 0 -> observation EVAs + Bünde/Bielefeld
- *   slot 4 -> Osnabrück Hbf
- *   slot 2 -> Hannover Hbf
- */
-function selectSubscriptionIdsForDemand(
-  demand: DemandCrossing[],
-): { ids: string[]; slots: number[] } {
-  const slots = new Set<number>();
-
-  const observationEvas = [
-    "8003288",
-    "8000059",
-    "8000036",
-    "8000152",
-    "8000294",
-  ];
+function getDemandTargets(demand: DemandCrossing[]): Set<string> {
+  const targets = new Set<string>();
 
   for (const crossing of demand) {
-    if (
-      hasAny(crossing.observationStations, observationEvas) ||
-      hasAny(crossing.observationStations, ["Bünde", "Bielefeld", "Bielefeld Hbf"]) ||
-      hasAny(crossing.requiredRouteStops, ["Bünde", "Bünde (Westf)", "Bielefeld", "Bielefeld Hbf"])
-    ) {
-      slots.add(0);
-    }
-
-    if (
-      hasAny(crossing.requiredRouteStops, ["Osnabrück", "Osnabrück Hbf"]) ||
-      hasAny(crossing.observationStations, ["Osnabrück", "Osnabrück Hbf"])
-    ) {
-      slots.add(4);
-    }
-
-    if (
-      hasAny(crossing.requiredRouteStops, ["Hannover", "Hannover Hbf"]) ||
-      hasAny(crossing.observationStations, ["Hannover", "Hannover Hbf"])
-    ) {
-      slots.add(2);
+    for (const value of [
+      ...crossing.requiredRouteStops,
+      ...crossing.observationStations,
+    ]) {
+      const normalized = normalizeTarget(value);
+      if (normalized) targets.add(normalized);
     }
   }
 
-  const selectedSlots = [...slots].sort((a, b) => a - b);
-  const ids = selectedSlots
-    .map((slot) => config.subscriptionIds[slot])
-    .filter((id): id is string => Boolean(id));
+  return targets;
+}
 
-  return { ids, slots: selectedSlots };
+function selectSubscriptionIdsForDemand(
+  demand: DemandCrossing[],
+): { ids: string[]; slots: number[]; uncovered: string[] } {
+  const profiles = loadProfiles();
+  const uncovered = getDemandTargets(demand);
+  const selected = new Set<string>();
+  const selectedSlots = new Set<number>();
+
+  const candidates = profiles.map((profile) => {
+    const slot = config.subscriptionIds.findIndex(
+      (id) => id === profile.subscriptionId,
+    );
+
+    return {
+      profile,
+      slot,
+      coverage: new Set(
+        (profile.targetMatches || [])
+          .map(normalizeTarget)
+          .filter(Boolean),
+      ),
+    };
+  });
+
+  while (uncovered.size > 0) {
+    let best: (typeof candidates)[number] | undefined;
+    let bestHits = 0;
+
+    for (const candidate of candidates) {
+      if (selected.has(candidate.profile.subscriptionId)) continue;
+
+      const hits = [...uncovered].filter((target) =>
+        candidate.coverage.has(target),
+      ).length;
+
+      if (hits > bestHits) {
+        best = candidate;
+        bestHits = hits;
+      }
+    }
+
+    if (!best || bestHits === 0) break;
+
+    selected.add(best.profile.subscriptionId);
+    if (best.slot >= 0) selectedSlots.add(best.slot);
+
+    for (const target of best.coverage) {
+      uncovered.delete(target);
+    }
+  }
+
+  return {
+    ids: [...selected],
+    slots: [...selectedSlots].sort((a, b) => a - b),
+    uncovered: [...uncovered].sort(),
+  };
 }
 
 function logDemand(demand: DemandCrossing[]): void {
@@ -107,25 +144,37 @@ async function main() {
 
   const demand = await loadDemandCrossings();
   console.log(`[Mobilithek Worker] demanded crossings=${demand.length}`);
-  logDemand(demand);
 
   if (demand.length === 0) {
     console.log("[Mobilithek Worker] no demanded crossings; snapshot unchanged");
     return;
   }
 
+  logDemand(demand);
+
   const selection = selectSubscriptionIdsForDemand(demand);
+  const targetCount = getDemandTargets(demand).size;
+
+  console.log(
+    `[Mobilithek Worker] demand targets=${targetCount} ` +
+      `selected subscription slots=${selection.slots.join(",") || "-"} ` +
+      `count=${selection.ids.length}`,
+  );
+
+  if (selection.uncovered.length > 0) {
+    console.error(
+      `[Mobilithek Worker] UNMAPPED targets=${selection.uncovered.join(" | ")}`,
+    );
+    throw new Error(
+      "Für den aktuellen Demand konnten nicht alle benötigten Stationen/EVAs einer Mobilithek-Subscription zugeordnet werden; Snapshot bleibt unverändert",
+    );
+  }
 
   if (selection.ids.length === 0) {
     throw new Error(
       "Für die aktuell nachgefragten BÜs ist keine Mobilithek-Subscription gemappt; Snapshot bleibt unverändert",
     );
   }
-
-  console.log(
-    `[Mobilithek Worker] selected subscription slots=${selection.slots.join(",")} ` +
-      `count=${selection.ids.length}`,
-  );
 
   const result = await refreshOnce(selection.ids);
   const demandedEvents = filterEventsByDemand(result.events, demand);
