@@ -16,3 +16,4 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/test-kirchlengern-status.mjs
+      - run: node scripts/test-regional-crossings-status.mjs
