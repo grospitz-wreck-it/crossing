@@ -25,6 +25,13 @@ export async function getStationTimetable(
   eva: string,
   hoursAhead = DEFAULT_TIMETABLE_HOURS
 ): Promise<OfficialTrainEvent[]> {
+  // Lokale Entwicklungsumgebungen ohne DB-API-Zugang sollen nicht bei jedem
+  // Statusaufruf in die fehlerhafte API-Kette laufen. Auf Vercel mit gesetzten
+  // Credentials bleibt das Verhalten unverändert.
+  if (!process.env.DB_CLIENT_ID || !process.env.DB_API_KEY) {
+    return [];
+  }
+
   const key = `${String(eva).trim()}|${hoursAhead}`;
   const now = Date.now();
   const cached = timetableCache.get(key);
