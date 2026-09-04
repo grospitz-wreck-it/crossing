@@ -144,7 +144,9 @@ export default function CrossingSwipeNav({ children }: Props) {
             : "none",
         }}
       >
-        {children}
+        <div key={activeId ?? "none"} style={{ display: "contents" }}>
+          {children}
+        </div>
       </div>
     </>
   );
