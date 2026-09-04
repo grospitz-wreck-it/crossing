@@ -1,4 +1,4 @@
-import { db } from "../../../../../../lib/db";
+import { db } from "../../../../../../app/lib/db";
 
 function normalize(value: unknown): string[] {
   const values = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[\n,;]+/) : [];
