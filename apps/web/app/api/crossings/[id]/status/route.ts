@@ -13,13 +13,7 @@ function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return val
 function normalizeStationName(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function routeContainsStation(route: unknown, stationName: string) { if (!Array.isArray(route) || !stationName) return false; const target = normalizeStationName(stationName); if (!target) return false; return route.some((stop) => { const value = normalizeStationName(String(stop || "")); return value === target || value.includes(target) || target.includes(value); }); }
 function normalizeLine(value: unknown) { return String(value || "").toUpperCase().replace(/\s+/g, "").trim(); }
-function lineMatchesReference(train: any, crossing: any) {
-  const references = Array.isArray(crossing.referenceLines) ? crossing.referenceLines.map(normalizeLine).filter(Boolean) : [];
-  if (!references.length) return true;
-  const line = normalizeLine(train?.line);
-  if (!line) return true;
-  return references.includes(line);
-}
+function lineMatchesReference(train: any, crossing: any) { const references = Array.isArray(crossing.referenceLines) ? crossing.referenceLines.map(normalizeLine).filter(Boolean) : []; if (!references.length) return true; const line = normalizeLine(train?.line); if (!line) return true; return references.includes(line); }
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const linkedEvas = stationRows.filter((s) => !s.role || s.role === "observation" || s.role === "automatic").map((s) => String(s.eva || "").trim()).filter(Boolean);
   const referenceStations = jsonArray(row.reference_stations).map(String).map((eva) => eva.trim()).filter(Boolean);
@@ -37,20 +31,10 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   return { id: String(row.id), name: String(row.name || row.id), eva: observationEvas[0] || String(row.eva || ""), observationEvas, observationStationNames, referenceStations, contextEvas, requiredRouteStops, referenceLines, lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [], throughRules: normalizedThroughRules, diversionRules, rerouteWatchRules, confidence: Number(row.confidence || 0.5) };
 }
 async function loadCrossing(id: string): Promise<any | null> { try { const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,reference_lines,reference_stations,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }); const row: any = result.rows[0]; if (!row) return null; let stationRows: any[] = []; try { const stations = await db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }); stationRows = stations.rows as any[]; } catch {} return buildCrossingFromDb(row, stationRows); } catch { return null; } }
-function directTrainBelongsToCrossing(train: any, crossing: any) { const names = Array.isArray(crossing.observationStationNames) ? crossing.observationStationNames : []; if (!names.length) return true; return names.some((name: string) => routeContainsStation(train?.route, name)); }
-async function allowTrainForCrossing(crossingId: string, train: any, mode: "direct" | "through", crossing: any): Promise<boolean> {
-  if (!lineMatchesReference(train, crossing)) return false;
-  if (mode === "direct") return true;
-  const references = Array.isArray(crossing.referenceLines) ? crossing.referenceLines.map(normalizeLine).filter(Boolean) : [];
-  if (references.length && normalizeLine(train?.line)) return true;
-  const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : [];
-  if (route.length < 2) return false;
-  const result = await filterTrainByCrossingOsm(crossingId, route);
-  return result.status === "matched";
-}
+function directTrainBelongsToCrossing(train: any, crossing: any) { const sourceEva = String(train?.eva || "").trim(); const observationEvas = Array.isArray(crossing.observationEvas) ? crossing.observationEvas.map(String).map((eva: string) => eva.trim()) : []; if (sourceEva && observationEvas.includes(sourceEva)) return true; const names = Array.isArray(crossing.observationStationNames) ? crossing.observationStationNames : []; if (!names.length) return true; return names.some((name: string) => routeContainsStation(train?.route, name)); }
+async function allowTrainForCrossing(crossingId: string, train: any, mode: "direct" | "through", crossing: any): Promise<boolean> { if (!lineMatchesReference(train, crossing)) return false; if (mode === "direct") return true; const references = Array.isArray(crossing.referenceLines) ? crossing.referenceLines.map(normalizeLine).filter(Boolean) : []; if (references.length && normalizeLine(train?.line)) return true; const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : []; if (route.length < 2) return false; const result = await filterTrainByCrossingOsm(crossingId, route); return result.status === "matched"; }
 const STATUS_TIMETABLE_HOURS = 1; const STATUS_CACHE_TTL_MS = 30_000;
-export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params; const cacheKey = `status:${id}`; const cached = await readCrossingForecastCache<any>(cacheKey, STATUS_CACHE_TTL_MS); if (cached) return Response.json(cached, { headers: { "X-Crossing-Status-Cache": "HIT" } }); const crossing = await loadCrossing(id); if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) { const { id } = await params; const cacheKey = `status:${id}`; const cached = await readCrossingForecastCache<any>(cacheKey, STATUS_CACHE_TTL_MS); if (cached) return Response.json(cached, { headers: { "X-Crossing-Status-Cache": "HIT" } }); const crossing = await loadCrossing(id); if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
   const observationEventsPromise = crossing.observationEvas?.length ? Promise.all(crossing.observationEvas.map((eva: string) => getStationTimetable(eva, STATUS_TIMETABLE_HOURS).catch(() => []))).then((sets) => sets.flat()) : Promise.resolve([]);
   const throughPromise = withMemoryCache(`through-${crossing.id}`, 15_000, async () => { const snapshot = await getSnapshotThroughTrains(db, crossing); return snapshot ?? getThroughTrains(crossing); }).catch(() => []);
   const divertedPromise = withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []); const reroutedPromise = withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []); const [observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([observationEventsPromise, Promise.race([throughPromise, new Promise<any[]>((resolve) => setTimeout(() => resolve([]), 4500))]), divertedPromise, reroutedPromise]);
