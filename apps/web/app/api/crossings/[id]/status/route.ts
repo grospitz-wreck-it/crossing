@@ -30,7 +30,32 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const normalizedThroughRules = sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva);
   return { id: String(row.id), name: String(row.name || row.id), eva: observationEvas[0] || String(row.eva || ""), observationEvas, observationStationNames, referenceStations, contextEvas, requiredRouteStops, referenceLines, lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [], throughRules: normalizedThroughRules, diversionRules, rerouteWatchRules, confidence: Number(row.confidence || 0.5) };
 }
-async function loadCrossing(id: string): Promise<any | null> { try { const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,reference_lines,reference_stations,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }); const row: any = result.rows[0]; if (!row) return null; let stationRows: any[] = []; try { const stations = await db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }); stationRows = stations.rows as any[]; } catch {} return buildCrossingFromDb(row, stationRows); } catch { return null; } }
+async function loadCrossing(id: string): Promise<any | null> {
+  try {
+    // Keep the base lookup compatible with databases that have not yet run
+    // migration 008. A missing optional column must never turn an existing
+    // crossing into a misleading 404.
+    const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,reference_lines,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+    const row: any = result.rows[0];
+    if (!row) return null;
+
+    // Migration 008 is optional for backwards compatibility. If it exists,
+    // use explicitly selected reference stations; otherwise fall back to the
+    // normal crossing station links below.
+    let referenceStations: any[] = [];
+    try {
+      const referenceResult = await db.execute({ sql: `SELECT reference_stations FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+      referenceStations = jsonArray((referenceResult.rows[0] as any)?.reference_stations);
+    } catch {}
+
+    let stationRows: any[] = [];
+    try {
+      const stations = await db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] });
+      stationRows = stations.rows as any[];
+    } catch {}
+    return buildCrossingFromDb({ ...row, reference_stations: JSON.stringify(referenceStations) }, stationRows);
+  } catch { return null; }
+}
 function directTrainBelongsToCrossing(train: any, crossing: any) { const sourceEva = String(train?.eva || "").trim(); const observationEvas = Array.isArray(crossing.observationEvas) ? crossing.observationEvas.map(String).map((eva: string) => eva.trim()) : []; if (sourceEva && observationEvas.includes(sourceEva)) return true; const names = Array.isArray(crossing.observationStationNames) ? crossing.observationStationNames : []; if (!names.length) return true; return names.some((name: string) => routeContainsStation(train?.route, name)); }
 async function allowTrainForCrossing(crossingId: string, train: any, mode: "direct" | "through", crossing: any): Promise<boolean> { if (!lineMatchesReference(train, crossing)) return false; if (mode === "direct") return true; const references = Array.isArray(crossing.referenceLines) ? crossing.referenceLines.map(normalizeLine).filter(Boolean) : []; if (references.length && normalizeLine(train?.line)) return true; const route = Array.isArray(train?.route) ? train.route.map(String).filter(Boolean) : []; if (route.length < 2) return false; const result = await filterTrainByCrossingOsm(crossingId, route); return result.status === "matched"; }
 const STATUS_TIMETABLE_HOURS = 1; const STATUS_CACHE_TTL_MS = 30_000;
