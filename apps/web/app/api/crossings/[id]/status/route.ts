@@ -153,7 +153,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (!id) return Response.json({ error: "Crossing ID fehlt." }, { status: 400 });
 
     const cacheKey = `status:${id}`;
-    const cached = await readCrossingForecastCache<any>(cacheKey, STATUS_CACHE_TTL_MS);
+    const forceRefresh = new URL(request.url).searchParams.get("refresh") === "1";
+    const cached = forceRefresh ? null : await readCrossingForecastCache<any>(cacheKey, STATUS_CACHE_TTL_MS);
     if (cached) return Response.json(cached, { headers: { "X-Crossing-Status-Cache": "HIT" } });
 
     const crossing = await loadCrossing(id);
