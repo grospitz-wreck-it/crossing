@@ -39,8 +39,14 @@ function toSnapshotRow(
   event: MobilithekTrainEvent,
   refreshedAt: string,
 ): SnapshotRow {
+  // journeyRef is the stable identity of the dated journey. actualTime must
+  // not be part of the key: as a train progresses, actualTime/scheduledTime
+  // move to the next relevant stop and would otherwise turn one journey into
+  // DELETE + INSERT on every refresh.
+  const journeyIdentity = event.journeyRef || event.id;
+
   return {
-    id: `${subscriptionId}:${event.id}:${event.actualTime.getTime()}:${event.journeyRef}`,
+    id: `${subscriptionId}:${journeyIdentity}`,
     line: event.line,
     category: event.category,
     journey_number: event.journeyNumber ?? null,
