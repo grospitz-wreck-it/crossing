@@ -75,21 +75,23 @@ function selectSubscriptionIdsForDemand(
   const selected = new Set<string>();
   const selectedSlots = new Set<number>();
 
-  const candidates = profiles.map((profile) => {
-    const slot = config.subscriptionIds.findIndex(
-      (id) => id === profile.subscriptionId,
-    );
+  const candidates = profiles
+    .map((profile) => {
+      const slot = config.subscriptionIds.findIndex(
+        (id) => id === profile.subscriptionId,
+      );
 
-    return {
-      profile,
-      slot,
-      coverage: new Set(
-        (profile.targetMatches || [])
-          .map(normalizeTarget)
-          .filter(Boolean),
-      ),
-    };
-  });
+      return {
+        profile,
+        slot,
+        coverage: new Set(
+          (profile.targetMatches || [])
+            .map(normalizeTarget)
+            .filter(Boolean),
+        ),
+      };
+    })
+    .filter((candidate) => candidate.slot >= 0);
 
   while (uncovered.size > 0) {
     let best: (typeof candidates)[number] | undefined;
@@ -111,7 +113,7 @@ function selectSubscriptionIdsForDemand(
     if (!best || bestHits === 0) break;
 
     selected.add(best.profile.subscriptionId);
-    if (best.slot >= 0) selectedSlots.add(best.slot);
+    selectedSlots.add(best.slot);
 
     for (const target of best.coverage) {
       uncovered.delete(target);
@@ -166,7 +168,7 @@ async function main() {
       `[Mobilithek Worker] UNMAPPED targets=${selection.uncovered.join(" | ")}`,
     );
     throw new Error(
-      "Für den aktuellen Demand konnten nicht alle benötigten Stationen/EVAs einer Mobilithek-Subscription zugeordnet werden; Snapshot bleibt unverändert",
+      `Für den aktuellen Demand fehlen Mobilithek-Profile für ${selection.uncovered.length} Targets; Snapshot bleibt unverändert`,
     );
   }
 
