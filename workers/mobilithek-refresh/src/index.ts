@@ -5,27 +5,77 @@ import { refreshOnce } from "./mobilithek.js";
 import { ensureSchema } from "./schema.js";
 import { writeSnapshot } from "./snapshot.js";
 
-// Subscription inventory for the current Mobilithek account.
-// Slots refer to the environment variables consumed by config.ts:
-//   0 = MOBILITHEK_SUBSCRIPTION_ID
-//   2 = MOBILITHEK_SUBSCRIPTION_ID_3
-//   4 = MOBILITHEK_SUBSCRIPTION_ID_5
-//
-// Kirchlengern uses the smallest useful combination found in the one-time
-// profiling run: slot 0 covers the observation EVAs plus Bünde/Bielefeld;
-// slot 4 covers Osnabrück Hbf; slot 2 covers Hannover Hbf.
-//
-// IMPORTANT: there is deliberately no fallback to config.subscriptionIds.
-// Unknown demand therefore fails closed instead of downloading Germany.
+type DemandCrossing = {
+  id: string;
+  requiredRouteStops: string[];
+  categories: string[];
+  observationStations: string[];
+};
+
+function normalize(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasAny(values: string[], needles: string[]): boolean {
+  const normalizedValues = values.map(normalize);
+  return needles.some((needle) => {
+    const target = normalize(needle);
+    return normalizedValues.some(
+      (value) => value === target || value.includes(target) || target.includes(value),
+    );
+  });
+}
+
+/**
+ * Account-specific Mobilithek inventory derived from the one-time profiling run.
+ *
+ * The important part is that selection is driven by the demand's stations/EVAs,
+ * not by crossing IDs. There is intentionally no fallback to all configured
+ * subscriptions: an unmapped demand fails closed.
+ *
+ * Current profiled coverage:
+ *   slot 0 -> observation EVAs + Bünde/Bielefeld
+ *   slot 4 -> Osnabrück Hbf
+ *   slot 2 -> Hannover Hbf
+ */
 function selectSubscriptionIdsForDemand(
-  demand: Array<{ id: string }>,
+  demand: DemandCrossing[],
 ): { ids: string[]; slots: number[] } {
   const slots = new Set<number>();
 
+  const observationEvas = [
+    "8003288",
+    "8000059",
+    "8000036",
+    "8000152",
+    "8000294",
+  ];
+
   for (const crossing of demand) {
-    if (crossing.id.toLowerCase() === "kirchlengern") {
+    if (
+      hasAny(crossing.observationStations, observationEvas) ||
+      hasAny(crossing.observationStations, ["Bünde", "Bielefeld", "Bielefeld Hbf"]) ||
+      hasAny(crossing.requiredRouteStops, ["Bünde", "Bünde (Westf)", "Bielefeld", "Bielefeld Hbf"])
+    ) {
       slots.add(0);
+    }
+
+    if (
+      hasAny(crossing.requiredRouteStops, ["Osnabrück", "Osnabrück Hbf"]) ||
+      hasAny(crossing.observationStations, ["Osnabrück", "Osnabrück Hbf"])
+    ) {
       slots.add(4);
+    }
+
+    if (
+      hasAny(crossing.requiredRouteStops, ["Hannover", "Hannover Hbf"]) ||
+      hasAny(crossing.observationStations, ["Hannover", "Hannover Hbf"])
+    ) {
       slots.add(2);
     }
   }
@@ -38,6 +88,16 @@ function selectSubscriptionIdsForDemand(
   return { ids, slots: selectedSlots };
 }
 
+function logDemand(demand: DemandCrossing[]): void {
+  for (const crossing of demand) {
+    console.log(
+      `[Mobilithek Worker] demand ${crossing.id}: ` +
+        `routeStops=${crossing.requiredRouteStops.join(" | ") || "-"} ` +
+        `observationStations=${crossing.observationStations.join(" | ") || "-"}`,
+    );
+  }
+}
+
 async function main() {
   const startedAt = new Date().toISOString();
 
@@ -47,6 +107,7 @@ async function main() {
 
   const demand = await loadDemandCrossings();
   console.log(`[Mobilithek Worker] demanded crossings=${demand.length}`);
+  logDemand(demand);
 
   if (demand.length === 0) {
     console.log("[Mobilithek Worker] no demanded crossings; snapshot unchanged");
