@@ -141,7 +141,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Pr
 }
 
 const STATUS_TIMETABLE_HOURS = 1;
-const STATUS_CACHE_TTL_MS = 30_000;
+const STATUS_CACHE_TTL_MS = 180_000;
 const TIMETABLE_TIMEOUT_MS = 7_000;
 const AUXILIARY_TIMEOUT_MS = 4_500;
 
