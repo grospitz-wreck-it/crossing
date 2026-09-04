@@ -8,6 +8,8 @@ function formatSeconds(seconds: number) { const mins = Math.floor(seconds / 60);
 function formatDbTime(value?: string) { if (!value) return "--:--"; const yy = Number(value.slice(0, 2)); const mm = Number(value.slice(2, 4)); const dd = Number(value.slice(4, 6)); const hh = Number(value.slice(6, 8)); const mi = Number(value.slice(8, 10)); const date = new Date(Date.UTC(2000 + yy, mm - 1, dd, hh, mi)); return date.toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" }); }
 function formatIsoTime(value?: string) { if (!value) return "--:--"; return new Date(value).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Berlin" }); }
 const MAX_PHASE_MS = 900 * 1000;
+const CLIENT_REFRESH_MS = 300_000;
+const FOCUS_REFRESH_MIN_MS = 60_000;
 type StatusData = any;
 
 export default function Home() {
@@ -15,7 +17,7 @@ export default function Home() {
   const activeIdRef = useRef<string | null>(null); activeIdRef.current = activeId;
   const [data, setData] = useState<StatusData>(null);
   const [ads, setAds] = useState<any[]>([]); const [currentAdIndex, setCurrentAdIndex] = useState(0); const [now, setNow] = useState(Date.now()); const [showMoreTrains, setShowMoreTrains] = useState(false); const [measurementState, setMeasurementState] = useState<"none" | "close-recorded" | "open-recorded">("none"); const [firstClickAt, setFirstClickAt] = useState<number | null>(null); const [pendingEvent, setPendingEvent] = useState<"close" | "open" | null>(null); const [message, setMessage] = useState(""); const [loadingCrossingId, setLoadingCrossingId] = useState<string | null>(null);
-  const refreshTimeout = useRef<ReturnType<typeof setTimeout> | null>(null); const statusCacheRef = useRef<Map<string, StatusData>>(new Map()); const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map()); const adCacheRef = useRef<Map<string, any[]>>(new Map());
+  const refreshTimeout = useRef<ReturnType<typeof setTimeout> | null>(null); const statusCacheRef = useRef<Map<string, StatusData>>(new Map()); const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map()); const adCacheRef = useRef<Map<string, any[]>>(new Map()); const lastStatusFetchRef = useRef<Map<string, number>>(new Map());
 
   async function load(crossingId = activeId, force = false) {
     if (!crossingId) return;
@@ -27,7 +29,7 @@ export default function Home() {
       try {
         const [statusRes, adRes] = await Promise.all([fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }), fetch(`/api/ads/${crossingId}`, { cache: "no-store" })]);
         if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
-        const json = await statusRes.json(); statusCacheRef.current.set(crossingId, json); if (activeIdRef.current === crossingId) setData(json);
+        const json = await statusRes.json(); statusCacheRef.current.set(crossingId, json); lastStatusFetchRef.current.set(crossingId, Date.now()); if (activeIdRef.current === crossingId) setData(json);
         if (adRes.ok) { const list = await adRes.json(); const normalized = Array.isArray(list) ? list : []; adCacheRef.current.set(crossingId, normalized); if (activeIdRef.current === crossingId) { setAds(normalized); setCurrentAdIndex(0); } }
         else { adCacheRef.current.set(crossingId, []); if (activeIdRef.current === crossingId) setAds([]); }
       } catch (error) { console.error("Failed to load crossing status:", error); if (activeIdRef.current === crossingId && !statusCacheRef.current.has(crossingId)) { setData({ error: true, state: "UNKNOWN", phase: null, closures: [], trains: [], trainCount: 0 }); setAds([]); } }
@@ -41,11 +43,11 @@ export default function Home() {
 
   const wakeLockRef = useRef<any>(null);
   async function requestWakeLock() { if (!("wakeLock" in navigator)) return; try { wakeLockRef.current = await (navigator as any).wakeLock.request("screen"); } catch (error) { console.error("Wake Lock request failed:", error); } }
-  useEffect(() => { if (!activeId) return; const cached = statusCacheRef.current.get(activeId); const cachedAds = adCacheRef.current.get(activeId); setData(cached || null); setAds(cachedAds || []); setShowMoreTrains(false); setPendingEvent(null); void load(activeId, !cached); const apiRefresh = setInterval(() => void load(activeId, true), 120000); return () => clearInterval(apiRefresh); }, [activeId]);
+  useEffect(() => { if (!activeId) return; const cached = statusCacheRef.current.get(activeId); const cachedAds = adCacheRef.current.get(activeId); setData(cached || null); setAds(cachedAds || []); setShowMoreTrains(false); setPendingEvent(null); void load(activeId, !cached); const apiRefresh = setInterval(() => void load(activeId, true), CLIENT_REFRESH_MS); return () => clearInterval(apiRefresh); }, [activeId]);
   useEffect(() => { requestWakeLock(); function handleWakeLockVisibility() { if (document.visibilityState === "visible") requestWakeLock(); } document.addEventListener("visibilitychange", handleWakeLockVisibility); return () => { document.removeEventListener("visibilitychange", handleWakeLockVisibility); if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; } }; }, []);
   useEffect(() => { if (ads.length <= 1) return; const timer = setInterval(() => setCurrentAdIndex((i) => (i + 1) % ads.length), 30000); return () => clearInterval(timer); }, [ads]);
   useEffect(() => { if (!firstClickAt) return; const interval = setInterval(() => { if (Date.now() - firstClickAt > MAX_PHASE_MS) { setMeasurementState("none"); setFirstClickAt(null); setMessage("⚠️ Messung verworfen"); setTimeout(() => setMessage(""), 3000); } }, 1000); return () => clearInterval(interval); }, [firstClickAt]);
-  useEffect(() => { function refresh() { if (activeIdRef.current) void load(activeIdRef.current, true); } function handleVisibility() { if (document.visibilityState === "visible") refresh(); } document.addEventListener("visibilitychange", handleVisibility); window.addEventListener("focus", refresh); window.addEventListener("pageshow", refresh); return () => { document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("focus", refresh); window.removeEventListener("pageshow", refresh); }; }, []);
+  useEffect(() => { function refresh() { const id = activeIdRef.current; if (!id) return; const last = lastStatusFetchRef.current.get(id) || 0; if (Date.now() - last < FOCUS_REFRESH_MIN_MS) return; void load(id, true); } function handleVisibility() { if (document.visibilityState === "visible") refresh(); } document.addEventListener("visibilitychange", handleVisibility); window.addEventListener("focus", refresh); window.addEventListener("pageshow", refresh); return () => { document.removeEventListener("visibilitychange", handleVisibility); window.removeEventListener("focus", refresh); window.removeEventListener("pageshow", refresh); }; }, []);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(timer); }, []);
   useEffect(() => { if (!data?.phase) return; if (refreshTimeout.current) clearTimeout(refreshTimeout.current); const target = new Date(data.state === "OPEN" ? data.phase.start : data.phase.end).getTime(); refreshTimeout.current = setTimeout(() => { if (activeIdRef.current) void load(activeIdRef.current, true); }, Math.max(0, target - Date.now()) + 500); return () => { if (refreshTimeout.current) clearTimeout(refreshTimeout.current); }; }, [data]);
 
