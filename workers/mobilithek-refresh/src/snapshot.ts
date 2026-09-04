@@ -8,6 +8,133 @@ type SnapshotEvent = {
   event: MobilithekTrainEvent;
 };
 
+type SnapshotRow = {
+  id: string;
+  line: string;
+  category: string;
+  journey_number: string | null;
+  journey_ref: string | null;
+  origin: string | null;
+  destination: string | null;
+  route_json: string;
+  calls_json: string;
+  delay_minutes: number;
+  actual_time: string;
+  scheduled_time: string;
+  direction: string | null;
+  source_subscription_id: string;
+  refreshed_at: string;
+};
+
+type ExistingSnapshotRow = Omit<SnapshotRow, "refreshed_at">;
+
+function serializeCalls(calls: MobilithekTrainEvent["calls"]): string {
+  return JSON.stringify(calls ?? [], (_, value) =>
+    value instanceof Date ? value.toISOString() : value,
+  );
+}
+
+function toSnapshotRow(
+  subscriptionId: string,
+  event: MobilithekTrainEvent,
+  refreshedAt: string,
+): SnapshotRow {
+  return {
+    id: `${subscriptionId}:${event.id}:${event.actualTime.getTime()}:${event.journeyRef}`,
+    line: event.line,
+    category: event.category,
+    journey_number: event.journeyNumber ?? null,
+    journey_ref: event.journeyRef ?? null,
+    origin: event.origin ?? null,
+    destination: event.destination ?? null,
+    route_json: JSON.stringify(event.route ?? []),
+    calls_json: serializeCalls(event.calls),
+    delay_minutes: event.delayMinutes ?? 0,
+    actual_time: event.actualTime.toISOString(),
+    scheduled_time: event.scheduledTime.toISOString(),
+    direction: event.direction ?? null,
+    source_subscription_id: subscriptionId,
+    refreshed_at: refreshedAt,
+  };
+}
+
+function sameSnapshotRow(
+  existing: ExistingSnapshotRow,
+  incoming: SnapshotRow,
+): boolean {
+  return (
+    existing.line === incoming.line &&
+    existing.category === incoming.category &&
+    existing.journey_number === incoming.journey_number &&
+    existing.journey_ref === incoming.journey_ref &&
+    existing.origin === incoming.origin &&
+    existing.destination === incoming.destination &&
+    existing.route_json === incoming.route_json &&
+    existing.calls_json === incoming.calls_json &&
+    existing.delay_minutes === incoming.delay_minutes &&
+    existing.actual_time === incoming.actual_time &&
+    existing.scheduled_time === incoming.scheduled_time &&
+    existing.direction === incoming.direction &&
+    existing.source_subscription_id === incoming.source_subscription_id
+  );
+}
+
+function upsertStatement(row: SnapshotRow) {
+  return {
+    sql: `
+      INSERT INTO mobilithek_train_snapshot (
+        id,
+        line,
+        category,
+        journey_number,
+        journey_ref,
+        origin,
+        destination,
+        route_json,
+        calls_json,
+        delay_minutes,
+        actual_time,
+        scheduled_time,
+        direction,
+        source_subscription_id,
+        refreshed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        line = excluded.line,
+        category = excluded.category,
+        journey_number = excluded.journey_number,
+        journey_ref = excluded.journey_ref,
+        origin = excluded.origin,
+        destination = excluded.destination,
+        route_json = excluded.route_json,
+        calls_json = excluded.calls_json,
+        delay_minutes = excluded.delay_minutes,
+        actual_time = excluded.actual_time,
+        scheduled_time = excluded.scheduled_time,
+        direction = excluded.direction,
+        source_subscription_id = excluded.source_subscription_id,
+        refreshed_at = excluded.refreshed_at
+    `,
+    args: [
+      row.id,
+      row.line,
+      row.category,
+      row.journey_number,
+      row.journey_ref,
+      row.origin,
+      row.destination,
+      row.route_json,
+      row.calls_json,
+      row.delay_minutes,
+      row.actual_time,
+      row.scheduled_time,
+      row.direction,
+      row.source_subscription_id,
+      row.refreshed_at,
+    ],
+  };
+}
+
 export async function writeSnapshot(
   events: SnapshotEvent[],
   refreshStartedAt: string,
@@ -20,66 +147,73 @@ export async function writeSnapshot(
   const db = getDb();
   const refreshedAt = new Date().toISOString();
 
-  // Alte Snapshot-Daten nur einmal am Anfang entfernen.
-  await db.execute("DELETE FROM mobilithek_train_snapshot");
+  const incoming = new Map<string, SnapshotRow>();
+  for (const { subscriptionId, event } of events) {
+    const row = toSnapshotRow(subscriptionId, event, refreshedAt);
+    incoming.set(row.id, row);
+  }
 
-  let written = 0;
+  const existingResult = await db.execute(`
+    SELECT
+      id,
+      line,
+      category,
+      journey_number,
+      journey_ref,
+      origin,
+      destination,
+      route_json,
+      calls_json,
+      delay_minutes,
+      actual_time,
+      scheduled_time,
+      direction,
+      source_subscription_id
+    FROM mobilithek_train_snapshot
+  `);
 
-  for (let offset = 0; offset < events.length; offset += BATCH_SIZE) {
-    const chunk = events.slice(offset, offset + BATCH_SIZE);
+  const existing = new Map<string, ExistingSnapshotRow>();
+  for (const row of existingResult.rows as unknown as ExistingSnapshotRow[]) {
+    existing.set(row.id, row);
+  }
 
-    const statements = chunk.map(({ subscriptionId, event }) => ({
-      sql: `
-        INSERT OR IGNORE INTO mobilithek_train_snapshot (
-          id,
-          line,
-          category,
-          journey_number,
-          journey_ref,
-          origin,
-          destination,
-          route_json,
-          calls_json,
-          delay_minutes,
-          actual_time,
-          scheduled_time,
-          direction,
-          source_subscription_id,
-          refreshed_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
-      args: [
-        `${subscriptionId}:${event.id}:${event.actualTime.getTime()}:${event.journeyRef}`,
-        event.line,
-        event.category,
-        event.journeyNumber,
-        event.journeyRef,
-        event.origin ?? null,
-        event.destination ?? null,
-        JSON.stringify(event.route ?? []),
-        JSON.stringify(event.calls ?? [], (_, value) =>
-          value instanceof Date ? value.toISOString() : value
-        ),
-        event.delayMinutes ?? 0,
-        event.actualTime.toISOString(),
-        event.scheduledTime.toISOString(),
-        event.direction ?? null,
-        subscriptionId,
-        refreshedAt,
-      ],
-    }));
+  const changed: SnapshotRow[] = [];
+  for (const row of incoming.values()) {
+    const previous = existing.get(row.id);
+    if (!previous || !sameSnapshotRow(previous, row)) {
+      changed.push(row);
+    }
+  }
 
-    await db.batch(statements, "write");
+  const deletedIds = [...existing.keys()].filter((id) => !incoming.has(id));
 
-    written += chunk.length;
+  const statements: Array<ReturnType<typeof upsertStatement> | {
+    sql: string;
+    args: string[];
+  }> = [];
 
+  for (const row of changed) {
+    statements.push(upsertStatement(row));
+  }
+
+  for (const id of deletedIds) {
+    statements.push({
+      sql: "DELETE FROM mobilithek_train_snapshot WHERE id = ?",
+      args: [id],
+    });
+  }
+
+  for (let offset = 0; offset < statements.length; offset += BATCH_SIZE) {
+    const chunk = statements.slice(offset, offset + BATCH_SIZE);
+    await db.batch(chunk, "write");
     console.log(
-      `[Mobilithek Worker] snapshot progress: ${written}/${events.length}`,
+      `[Mobilithek Worker] snapshot diff progress: ${Math.min(
+        offset + chunk.length,
+        statements.length,
+      )}/${statements.length}`,
     );
   }
 
-  // Erst wenn ALLE Snapshot-Chunks erfolgreich geschrieben wurden,
-  // markieren wir den Refresh als erfolgreich.
   await db.execute({
     sql: `
       INSERT INTO mobilithek_refresh_status (
@@ -113,6 +247,11 @@ export async function writeSnapshot(
     ],
   });
 
+  console.log(
+    `[Mobilithek Worker] snapshot diff: incoming=${incoming.size} ` +
+      `existing=${existing.size} changed=${changed.length} ` +
+      `deleted=${deletedIds.length} unchanged=${incoming.size - changed.length}`,
+  );
   console.log(
     `[Mobilithek Worker] snapshot written: ${events.length} events`,
   );
