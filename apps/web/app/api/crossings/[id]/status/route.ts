@@ -170,9 +170,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       })
     )).then((sets) => sets.flat());
 
-    const throughPromise = withMemoryCache(`through-${crossing.id}`, 15_000, async () => { const snapshot = await getSnapshotThroughTrains(db, crossing); return snapshot ?? getThroughTrains(crossing); }).catch(() => []);
-    const divertedPromise = withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []);
-    const reroutedPromise = withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []);
+    const throughPromise = withMemoryCache(`through-${crossing.id}`, 15_000, async () => { const snapshot = await getSnapshotThroughTrains(db, crossing); return snapshot ?? getThroughTrains(crossing); }).then((value) => Array.isArray(value) ? value : []).catch(() => []);
+    const divertedPromise = withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).then((value) => Array.isArray(value) ? value : []).catch(() => []);
+    const reroutedPromise = withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).then((value) => Array.isArray(value) ? value : []).catch(() => []);
     const [observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([
       observationEventsPromise,
       withTimeout(Promise.race([throughPromise, new Promise<any[]>((resolve) => setTimeout(() => resolve([]), AUXILIARY_TIMEOUT_MS))]), AUXILIARY_TIMEOUT_MS + 500, []),
