@@ -120,41 +120,16 @@ function targetMatchesEvent(event: MobilithekTrainEvent, target: string): boolea
 }
 
 function profileEvents(events: MobilithekTrainEvent[], targets: string[]) {
-  const lines = unique(events.flatMap((event) => [event.line, ...event.route]));
-  const categories = unique(events.map((event) => event.category));
-  const stations = unique(events.flatMap((event) => [
-    event.origin,
-    event.destination,
-    ...event.route,
-    ...event.calls.map((call) => call.name),
-  ]));
+  // Runtime only needs the subscription → target coverage mapping.
+  // Do not persist the full feed inventory (lines/stations/categories/counts),
+  // which can grow to several megabytes and is not needed by the selector.
   const targetMatches = targets.filter((target) =>
-    stations.some((station) => targetMatchesValue(station, target)),
+    events.some((event) => targetMatchesEvent(event, target)),
   );
-  const targetEventCounts = Object.fromEntries(
-    targets.map((target) => [
-      target,
-      events.filter((event) => targetMatchesEvent(event, target)).length,
-    ]),
-  );
-
-  const times = events
-    .map((event) => event.actualTime)
-    .filter((value) => value instanceof Date && !Number.isNaN(value.getTime()));
 
   return {
     parsedEvents: events.length,
-    lines,
-    categories,
-    stations,
     targetMatches,
-    targetEventCounts,
-    minActualTime: times.length
-      ? new Date(Math.min(...times.map((d) => d.getTime()))).toISOString()
-      : null,
-    maxActualTime: times.length
-      ? new Date(Math.max(...times.map((d) => d.getTime()))).toISOString()
-      : null,
   };
 }
 
@@ -192,7 +167,13 @@ async function main() {
     return;
   }
 
-  const profiles: unknown[] = [];
+  const profiles: Array<{
+    subscriptionId: string;
+    feedKind?: ReturnType<typeof classifyFeed>;
+    parsedEvents?: number;
+    targetMatches?: string[];
+    error?: string;
+  }> = [];
 
   for (const [index, subscriptionId] of config.subscriptionIds.entries()) {
     console.log(`[${index + 1}/${config.subscriptionIds.length}] ${subscriptionId}`);
@@ -212,27 +193,18 @@ async function main() {
       const profile = {
         subscriptionId,
         feedKind: feed.kind,
-        bytes: feed.bytes.length,
-        elapsedMs,
-        ...profileEvents(events, targets),
+        parsedEvents: events.length,
+        targetMatches: profileEvents(events, targets).targetMatches,
       };
 
       profiles.push(profile);
       console.log(`  feed:       ${profile.feedKind}`);
-      console.log(`  bytes:      ${profile.bytes}`);
-      console.log(`  duration:   ${profile.elapsedMs} ms`);
+      console.log(`  bytes:      ${feed.bytes.length}`);
+      console.log(`  duration:   ${elapsedMs} ms`);
       console.log(`  events:     ${profile.parsedEvents}`);
-      console.log(`  lines:      ${profile.lines.length}`);
-      console.log(`  categories: ${profile.categories.length}`);
-      console.log(`  stations:   ${profile.stations.length}`);
-      console.log(`  actualTime: ${profile.minActualTime ?? "-"} → ${profile.maxActualTime ?? "-"}`);
-      console.log(`  TARGET MATCHES: ${profile.targetMatches.length ? profile.targetMatches.join(" | ") : "NONE"}`);
-      for (const [target, count] of Object.entries(profile.targetEventCounts)) {
-        if (count > 0) console.log(`    ${target}: ${count} events`);
-      }
-      console.log(`  line sample: ${profile.lines.slice(0, 40).join(", ")}`);
-      console.log(`  category sample: ${profile.categories.slice(0, 20).join(", ")}`);
-      console.log(`  station sample: ${profile.stations.slice(0, 40).join(" | ")}`);
+      console.log(
+        `  TARGET MATCHES: ${profile.targetMatches.length ? profile.targetMatches.join(" | ") : "NONE"}`,
+      );
       console.log("");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
