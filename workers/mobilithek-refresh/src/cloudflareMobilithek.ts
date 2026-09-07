@@ -48,6 +48,12 @@ async function fetchFeed(
     });
 
     if (!response.ok) {
+      const body = (await response.text()).slice(0, 4000);
+      console.error(
+        `[Mobilithek] ${subscriptionId} HTTP ${response.status}`,
+        `content-type=${response.headers.get("content-type") || ""}`,
+        `body=${body || "<empty>"}`,
+      );
       throw new Error(`Mobilithek ${subscriptionId} HTTP ${response.status}`);
     }
 
