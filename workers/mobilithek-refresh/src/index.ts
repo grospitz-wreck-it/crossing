@@ -42,9 +42,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     throw new Error("Keine Mobilithek-Subscription-IDs konfiguriert");
   }
 
-  console.log(
-    `[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`,
-  );
+  console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
 
   const result = await refreshOnce(env, subscriptionIds);
   const demandedEvents = filterEventsByDemand(result.events, demand);
@@ -55,7 +53,9 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   );
 
   if (result.successful === 0) {
-    throw new Error("Keine Mobilithek-Subscription erfolgreich verarbeitet");
+    throw new Error(
+      `Keine Mobilithek-Subscription erfolgreich verarbeitet: ${JSON.stringify(result.errors)}`,
+    );
   }
 
   if (demandedEvents.length === 0) {
@@ -97,7 +97,10 @@ export default {
           error instanceof Error ? error.stack || error.message : String(error),
         );
         return Response.json(
-          { status: "error", error: error instanceof Error ? error.message : String(error) },
+          {
+            status: "error",
+            error: error instanceof Error ? error.message : String(error),
+          },
           { status: 500 },
         );
       }
