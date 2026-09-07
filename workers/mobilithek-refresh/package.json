@@ -15,7 +15,7 @@
     "protobufjs": "^8.7.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20260905.0",
+    "@cloudflare/workers-types": "^5.20260907.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
     "wrangler": "^4.68.0"
