@@ -20,13 +20,11 @@ type RefreshResult = {
   acceptedEvents: number;
   successful: number;
   failed: number;
+  errors: Array<{ subscriptionId: string; error: string }>;
   events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
 };
 
-async function fetchFeed(
-  env: MobilithekEnv,
-  subscriptionId: string,
-): Promise<{ bytes: Uint8Array; kind: MobilithekFeedKind }> {
+async function fetchFeed(env: MobilithekEnv, subscriptionId: string): Promise<{ bytes: Uint8Array; kind: MobilithekFeedKind }> {
   const url = new URL(
     env.MOBILITHEK_SUBSCRIPTION_URL?.trim() ||
       "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription",
@@ -48,12 +46,17 @@ async function fetchFeed(
 
     if (!response.ok) {
       const body = (await response.text()).slice(0, 4000);
+      const contentType = response.headers.get("content-type") || "";
       console.error(
         `[Mobilithek] ${subscriptionId} HTTP ${response.status}`,
-        `content-type=${response.headers.get("content-type") || ""}`,
+        `content-type=${contentType}`,
         `body=${body || "<empty>"}`,
       );
-      throw new Error(`Mobilithek ${subscriptionId} HTTP ${response.status}`);
+      throw new Error(
+        `Mobilithek ${subscriptionId} HTTP ${response.status}` +
+          (contentType ? ` content-type=${contentType}` : "") +
+          (body ? ` body=${body}` : ""),
+      );
     }
 
     const raw = new Uint8Array(await response.arrayBuffer());
@@ -80,14 +83,9 @@ function isValidTrainTime(value: Date): boolean {
   return year >= 2020 && year <= 2100;
 }
 
-export async function refreshOnce(
-  env: MobilithekEnv,
-  subscriptionIds: string[],
-): Promise<RefreshResult> {
-  const snapshotEvents: Array<{
-    subscriptionId: string;
-    event: MobilithekTrainEvent;
-  }> = [];
+export async function refreshOnce(env: MobilithekEnv, subscriptionIds: string[]): Promise<RefreshResult> {
+  const snapshotEvents: Array<{ subscriptionId: string; event: MobilithekTrainEvent }> = [];
+  const errors: Array<{ subscriptionId: string; error: string }> = [];
   let successful = 0;
   let failed = 0;
   let parsedEvents = 0;
@@ -121,15 +119,12 @@ export async function refreshOnce(
         subscriptionAccepted++;
       }
 
-      console.log(
-        `[Mobilithek] ${subscriptionId}: ${events.length} parsed, ${subscriptionAccepted} accepted`,
-      );
+      console.log(`[Mobilithek] ${subscriptionId}: ${events.length} parsed, ${subscriptionAccepted} accepted`);
     } catch (error) {
       failed++;
-      console.error(
-        `[Mobilithek] ${subscriptionId} failed`,
-        error instanceof Error ? error.message : String(error),
-      );
+      const message = error instanceof Error ? error.message : String(error);
+      errors.push({ subscriptionId, error: message });
+      console.error(`[Mobilithek] ${subscriptionId} failed`, message);
     }
   }
 
@@ -141,6 +136,7 @@ export async function refreshOnce(
     acceptedEvents,
     successful,
     failed,
+    errors,
     events: snapshotEvents,
   };
 }
