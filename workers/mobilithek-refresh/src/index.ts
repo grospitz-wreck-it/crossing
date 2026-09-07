@@ -87,6 +87,21 @@ export default {
     if (url.pathname === "/health") {
       return Response.json({ ok: true, service: "mobilithek-refresh" });
     }
+    if (url.pathname === "/run") {
+      try {
+        const result = await runRefresh((request as Request & { env?: Env }).env!);
+        return Response.json(result);
+      } catch (error) {
+        console.error(
+          "[Mobilithek Worker] manual refresh failed",
+          error instanceof Error ? error.stack || error.message : String(error),
+        );
+        return Response.json(
+          { status: "error", error: error instanceof Error ? error.message : String(error) },
+          { status: 500 },
+        );
+      }
+    }
     return new Response("Mobilithek refresh worker", { status: 200 });
   },
 
