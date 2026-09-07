@@ -82,14 +82,14 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
 }
 
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       return Response.json({ ok: true, service: "mobilithek-refresh" });
     }
     if (url.pathname === "/run") {
       try {
-        const result = await runRefresh((request as Request & { env?: Env }).env!);
+        const result = await runRefresh(env);
         return Response.json(result);
       } catch (error) {
         console.error(
