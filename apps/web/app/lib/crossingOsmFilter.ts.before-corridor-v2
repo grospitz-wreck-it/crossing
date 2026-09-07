@@ -1,0 +1,375 @@
+import { db } from "./db";
+import { distanceMeters } from "./railGraph";
+import type { RouteStation } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
+
+export type CrossingOsmFilterResult = {
+  status: "matched" | "rejected" | "unknown";
+  score?: number;
+  railwayWayId?: string;
+  ref?: string;
+};
+
+type Mapping = {
+  crossingId: string;
+  osmCrossingId: number;
+  confidence: number;
+  crossingLat: number;
+  crossingLon: number;
+  crossingNodeIds: Set<string>;
+  railwayWayIds: string[];
+};
+
+const CACHE_TTL_MS = 300_000;
+const RESULT_CACHE_TTL_MS = 300_000;
+const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
+const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
+let stationCatalogCache: { expiresAt: number; value: Map<string, RouteStation> } | null = null;
+let stationCatalogPromise: Promise<Map<string, RouteStation>> | null = null;
+let mappingsCache: { expiresAt: number; value: Mapping[] } | null = null;
+let mappingsPromise: Promise<Mapping[]> | null = null;
+
+function normalizeStationName(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+async function loadStationCatalog() {
+  if (stationCatalogCache && stationCatalogCache.expiresAt > Date.now()) return stationCatalogCache.value;
+  if (stationCatalogPromise) return stationCatalogPromise;
+
+  stationCatalogPromise = (async () => {
+    try {
+      const result = await db.execute({
+        sql: `SELECT name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`,
+        args: [],
+      });
+      const byName = new Map<string, RouteStation>();
+      for (const row of result.rows as any[]) {
+        const name = String(row.name || "");
+        const normalized = normalizeStationName(name);
+        if (!normalized || byName.has(normalized)) continue;
+        byName.set(normalized, { name, lat: Number(row.lat), lon: Number(row.lon) });
+      }
+      stationCatalogCache = { expiresAt: Date.now() + CACHE_TTL_MS, value: byName };
+      return byName;
+    } finally {
+      stationCatalogPromise = null;
+    }
+  })();
+
+  return stationCatalogPromise;
+}
+
+async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
+  const key = route.join("|");
+  const cached = stationCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  try {
+    const byName = await loadStationCatalog();
+    const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
+
+    console.log(
+      "[OSM ROUTE]",
+      route.map((name, i) => ({
+        input: name,
+        normalized: normalizeStationName(name),
+        resolved: value[i]?.lat != null && value[i]?.lon != null,
+        lat: value[i]?.lat,
+        lon: value[i]?.lon,
+      })),
+    );
+
+    stationCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+    return value;
+  } catch (error) {
+    console.error("Failed to resolve route stations:", error);
+    return route.map((name) => ({ name }));
+  }
+}
+
+async function loadMapping(crossingId: string): Promise<Mapping | null> {
+  const linkResult = await db.execute({
+    sql: `
+      SELECT crossing_id, osm_crossing_id, confidence
+      FROM crossing_osm_links
+      WHERE crossing_id = ?
+        AND confidence >= 0.8
+      LIMIT 1
+    `,
+    args: [crossingId],
+  });
+
+  const link: any = linkResult.rows[0];
+  if (!link) return null;
+
+  const osmCrossingId = Number(link.osm_crossing_id);
+
+  const crossingResult = await db.execute({
+    sql: `
+      SELECT lat, lon
+      FROM osm_crossings
+      WHERE osm_id = ?
+      LIMIT 1
+    `,
+    args: [osmCrossingId],
+  });
+
+  const crossingRow: any = crossingResult.rows[0];
+  if (!crossingRow) return null;
+
+  const tracksResult = await db.execute({
+    sql: `
+      SELECT railway_way_id, crossing_node_index
+      FROM osm_crossing_rail_ways
+      WHERE crossing_osm_id = ?
+    `,
+    args: [osmCrossingId],
+  });
+
+  const tracks = tracksResult.rows as any[];
+  const railwayWayIds = tracks
+    .map((row) => String(row.railway_way_id))
+    .filter(Boolean);
+
+  if (!railwayWayIds.length) return null;
+
+  const crossingNodeIds = new Set<string>();
+
+  /*
+   * Den Crossing-Node nicht mehr aus osm_rail_ways.node_ids_json lesen.
+   * Diese Tabelle enthält den kompletten Deutschland-Graphen und kann
+   * bei Turso eine sehr große Response erzeugen.
+   *
+   * osm_rail_way_nodes enthält die einzelnen Way/Node-Zuordnungen bereits
+   * normalisiert. Für den Crossing-Node benötigen wir nur den Node an der
+   * gespeicherten Indexposition.
+   */
+  for (const track of tracks) {
+    const wayId = String(track.railway_way_id);
+    const index = Number(track.crossing_node_index);
+
+    if (!Number.isInteger(index) || index < 0) continue;
+
+    const nodeResult = await db.execute({
+      sql: `
+        SELECT node_id
+        FROM osm_rail_way_nodes
+        WHERE railway_way_id = ?
+          AND node_index = ?
+        LIMIT 1
+      `,
+      args: [wayId, index],
+    });
+
+    const node = nodeResult.rows[0] as any;
+    if (node?.node_id != null) {
+      crossingNodeIds.add(String(node.node_id));
+    }
+  }
+
+  return {
+    crossingId: String(link.crossing_id),
+    osmCrossingId,
+    confidence: Number(link.confidence ?? 0),
+    crossingLat: Number(crossingRow.lat),
+    crossingLon: Number(crossingRow.lon),
+    crossingNodeIds,
+    railwayWayIds,
+  };
+}
+
+const mappingCache = new Map<
+  string,
+  { expiresAt: number; value: Mapping | null }
+>();
+
+const mappingPromises = new Map<string, Promise<Mapping | null>>();
+
+async function loadMappingCached(crossingId: string) {
+  const cached = mappingCache.get(crossingId);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const pending = mappingPromises.get(crossingId);
+  if (pending) return pending;
+
+  const promise = loadMapping(crossingId).finally(() => {
+    mappingPromises.delete(crossingId);
+  });
+
+  mappingPromises.set(crossingId, promise);
+
+  const value = await promise;
+
+  mappingCache.set(crossingId, {
+    expiresAt: Date.now() + CACHE_TTL_MS,
+    value,
+  });
+
+  return value;
+}
+
+export async function filterTrainByCrossingOsm(
+  crossingId: string,
+  route: string[] | undefined,
+): Promise<CrossingOsmFilterResult> {
+  if (!route?.length) return { status: "unknown" };
+
+  const resultKey = `${crossingId}|${route.join("|")}`;
+  const cachedResult = resultCache.get(resultKey);
+
+  if (cachedResult && cachedResult.expiresAt > Date.now()) {
+    return cachedResult.value;
+  }
+
+  try {
+    const coordinateRoute = await routeToCoordinates(route);
+
+    const stations = coordinateRoute.filter(
+      (s): s is RouteStation & { lat: number; lon: number } =>
+        s.lat != null && s.lon != null,
+    );
+
+    if (stations.length < 2) {
+      const result: CrossingOsmFilterResult = { status: "unknown" };
+      resultCache.set(resultKey, {
+        expiresAt: Date.now() + RESULT_CACHE_TTL_MS,
+        value: result,
+      });
+      return result;
+    }
+
+    const mapping = await loadMappingCached(crossingId);
+
+    if (!mapping) {
+      const result: CrossingOsmFilterResult = { status: "unknown" };
+      resultCache.set(resultKey, {
+        expiresAt: Date.now() + RESULT_CACHE_TTL_MS,
+        value: result,
+      });
+      return result;
+    }
+
+    /*
+     * Wir verwenden bewusst nicht mehr den kompletten osm_rail_ways-Graphen.
+     *
+     * Der alte Ansatz lud das gesamte Bahnnetz und berechnete für jedes
+     * Stationspaar einen globalen Dijkstra-Pfad. Das war sowohl teuer als
+     * auch fehleranfällig: ein "kürzester" Netzpfad ist nicht automatisch
+     * der tatsächliche Laufweg des Zuges.
+     *
+     * Stattdessen prüfen wir die reale Stationsfolge des Zuges als
+     * geografische Polyline. Der BÜ muss innerhalb eines engen Korridors
+     * um einen tatsächlichen Streckenabschnitt liegen.
+     */
+
+    const CROSSING_ROUTE_TOLERANCE_METERS = 2500;
+
+    const crossing = {
+      lat: mapping.crossingLat,
+      lon: mapping.crossingLon,
+    };
+
+    // Lokale, metrische Projektion um den Crossing-Punkt.
+    const latScale = Math.cos((crossing.lat * Math.PI) / 180);
+    const metersPerDegree = 111320;
+
+    const toXY = (point: { lat: number; lon: number }) => ({
+      x: (point.lon - crossing.lon) * metersPerDegree * latScale,
+      y: (point.lat - crossing.lat) * metersPerDegree,
+    });
+
+    const pointToSegmentDistance = (
+      point: { x: number; y: number },
+      a: { x: number; y: number },
+      b: { x: number; y: number },
+    ) => {
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+
+      if (dx === 0 && dy === 0) {
+        return Math.hypot(point.x - a.x, point.y - a.y);
+      }
+
+      const t = Math.max(
+        0,
+        Math.min(
+          1,
+          ((point.x - a.x) * dx + (point.y - a.y) * dy) /
+            (dx * dx + dy * dy),
+        ),
+      );
+
+      const px = a.x + t * dx;
+      const py = a.y + t * dy;
+
+      return Math.hypot(point.x - px, point.y - py);
+    };
+
+    const crossingXY = { x: 0, y: 0 };
+    let bestDistance = Infinity;
+    let bestSegment = -1;
+
+    for (let i = 1; i < stations.length; i += 1) {
+      const a = toXY(stations[i - 1]);
+      const b = toXY(stations[i]);
+
+      const distance = pointToSegmentDistance(crossingXY, a, b);
+
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSegment = i - 1;
+      }
+    }
+
+    const matched = bestDistance <= CROSSING_ROUTE_TOLERANCE_METERS;
+
+    let result: CrossingOsmFilterResult;
+
+    if (matched) {
+      result = {
+        status: "matched",
+        score: Math.max(
+          0,
+          1 - bestDistance / CROSSING_ROUTE_TOLERANCE_METERS,
+        ),
+        railwayWayId: mapping.railwayWayIds[0],
+      };
+    } else {
+      result = {
+        status: "rejected",
+        railwayWayId: mapping.railwayWayIds[0],
+      };
+    }
+
+    if (result.status === "matched") {
+      console.log(
+        `[OSM MATCH] crossing=${crossingId}`,
+        `lineRoute=${JSON.stringify(route)}`,
+        `segment=${bestSegment >= 0 ? `${route[bestSegment]} -> ${route[bestSegment + 1]}` : "?"}`,
+        `distance=${bestDistance.toFixed(0)}m`,
+        `score=${result.score?.toFixed(3)}`,
+      );
+    }
+
+    resultCache.set(resultKey, {
+      expiresAt: Date.now() + RESULT_CACHE_TTL_MS,
+      value: result,
+    });
+
+    return result;
+  } catch (error) {
+    console.error("Failed to match train against route geometry:", error);
+    return { status: "unknown" };
+  }
+}
+

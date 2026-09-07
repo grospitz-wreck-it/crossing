@@ -1,0 +1,9 @@
+{
+  "nextTile": 80,
+  "successful": 77,
+  "failed": [
+    35,
+    56,
+    69
+  ]
+}
