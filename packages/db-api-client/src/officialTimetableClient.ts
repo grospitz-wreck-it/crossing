@@ -6,6 +6,8 @@ import { getTimetableCache, setTimetableCache } from "./timetableCache";
 const BASE_URL =
   "https://apis.deutschebahn.com/db-api-marketplace/apis/timetables/v1";
 
+const REQUEST_TIMEOUT_MS = 4_000;
+
 function dbHeaders() {
   const clientId = process.env.DB_CLIENT_ID;
   const apiKey = process.env.DB_API_KEY;
@@ -46,32 +48,43 @@ async function fetchXml(
   cacheKind: "plan" | "fchg",
   cacheSlot: string
 ): Promise<string> {
-  // Shared Turso cache comes BEFORE the DB API limiter: cache hits consume
-  // zero Timetables quota and are shared by all Vercel instances.
   const cached = await getTimetableCache(cacheKind, meta.eva, cacheSlot);
   if (cached !== null) return cached;
 
   await acquireDbApiSlot(meta);
 
-  const res = await fetch(url, {
-    headers: dbHeaders(),
-    cache: "no-store",
-  });
-  const text = await res.text();
-
-  if (!res.ok) {
-    throw new Error(
-      `${label} fehlgeschlagen: ${res.status} ${res.statusText} - ${text.slice(0, 200)}`
-    );
-  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    await setTimetableCache(cacheKind, meta.eva, cacheSlot, text);
-  } catch (error) {
-    console.warn("[TIMETABLE CACHE WRITE FAILED]", error);
-  }
+    const res = await fetch(url, {
+      headers: dbHeaders(),
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    const text = await res.text();
 
-  return text;
+    if (!res.ok) {
+      throw new Error(
+        `${label} fehlgeschlagen: ${res.status} ${res.statusText} - ${text.slice(0, 200)}`
+      );
+    }
+
+    try {
+      await setTimetableCache(cacheKind, meta.eva, cacheSlot, text);
+    } catch (error) {
+      console.warn("[TIMETABLE CACHE WRITE FAILED]", error);
+    }
+
+    return text;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`${label} Timeout nach ${REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 export async function fetchPlanXml(eva: string, hoursAhead = 4): Promise<string[]> {
