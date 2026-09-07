@@ -27,7 +27,7 @@ type SavedCrossing = {
 };
 
 async function getFavoriteId(userId: string): Promise<string | null> {
-  const result = await authDb.get<{ default_crossing_id: string | null }>(
+  const result = await authDb.all<{ default_crossing_id: string | null }>(
     sql`
       SELECT default_crossing_id
       FROM user_settings
@@ -36,7 +36,7 @@ async function getFavoriteId(userId: string): Promise<string | null> {
     `,
   );
 
-  return result?.default_crossing_id ?? null;
+  return result[0]?.default_crossing_id ?? null;
 }
 
 async function setFavorite(
