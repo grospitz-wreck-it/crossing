@@ -38,7 +38,9 @@ export function buildRailGraph(rows: RailWayRow[]): RailGraph {
     if (way.nodeIds.length < 2 || way.geometry.length < 2) continue;
     wayIds.add(way.osmId);
     const count = Math.min(way.nodeIds.length, way.geometry.length);
-    for (let i = 0; i < count; i += 1) nodePoints.set(way.nodeIds[i], way.geometry[i]);
+    for (let i = 0; i < count; i += 1) {
+      nodePoints.set(way.nodeIds[i], way.geometry[i]);
+    }
     for (let i = 1; i < count; i += 1) {
       const from = way.nodeIds[i - 1];
       const to = way.nodeIds[i];
@@ -61,50 +63,21 @@ export function nearestNode(graph: RailGraph, point: GeoPoint, maxDistanceMeters
   return best;
 }
 
-type HeapEntry = { node: string; distance: number };
-
-function pushHeap(heap: HeapEntry[], entry: HeapEntry) {
-  heap.push(entry);
-  let index = heap.length - 1;
-  while (index > 0) {
-    const parent = Math.floor((index - 1) / 2);
-    if (heap[parent].distance <= heap[index].distance) break;
-    [heap[parent], heap[index]] = [heap[index], heap[parent]];
-    index = parent;
-  }
-}
-
-function popHeap(heap: HeapEntry[]): HeapEntry | undefined {
-  if (!heap.length) return undefined;
-  const first = heap[0];
-  const last = heap.pop()!;
-  if (heap.length) {
-    heap[0] = last;
-    let index = 0;
-    while (true) {
-      const left = index * 2 + 1;
-      const right = left + 1;
-      let smallest = index;
-      if (left < heap.length && heap[left].distance < heap[smallest].distance) smallest = left;
-      if (right < heap.length && heap[right].distance < heap[smallest].distance) smallest = right;
-      if (smallest === index) break;
-      [heap[index], heap[smallest]] = [heap[smallest], heap[index]];
-      index = smallest;
-    }
-  }
-  return first;
-}
-
+/**
+ * Dijkstra on the OSM railway topology. The result contains OSM node ids in
+ * travel order and the way ids used by the chosen path.
+ */
 export function shortestRailPath(graph: RailGraph, start: string, target: string, maxVisited = 50000) {
-  if (start === target) return { nodes: [start], wayIds: new Set<string>(), distance: 0 };
+  if (start === target) return { nodes: [start], wayIds: new Set<string>() };
 
   const distances = new Map<string, number>([[start, 0]]);
   const previous = new Map<string, { node: string; wayId: string }>();
-  const queue: HeapEntry[] = [{ node: start, distance: 0 }];
+  const queue: Array<{ node: string; distance: number }> = [{ node: start, distance: 0 }];
   const visited = new Set<string>();
 
   while (queue.length) {
-    const current = popHeap(queue)!;
+    queue.sort((a, b) => a.distance - b.distance);
+    const current = queue.shift()!;
     if (visited.has(current.node)) continue;
     visited.add(current.node);
     if (visited.size > maxVisited) break;
@@ -116,7 +89,7 @@ export function shortestRailPath(graph: RailGraph, start: string, target: string
       if (nextDistance >= (distances.get(edge.to) ?? Infinity)) continue;
       distances.set(edge.to, nextDistance);
       previous.set(edge.to, { node: current.node, wayId: edge.wayId });
-      pushHeap(queue, { node: edge.to, distance: nextDistance });
+      queue.push({ node: edge.to, distance: nextDistance });
     }
   }
 

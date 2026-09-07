@@ -1,0 +1,344 @@
+import { db } from "./db";
+import { buildRailGraph, distanceMeters, nearestNode, shortestRailPath, type RailWayRow } from "./railGraph";
+import type { RouteStation } from "../../../../packages/prediction-engine/src/routeOsmMatcher";
+
+export type CrossingOsmFilterResult = {
+  status: "matched" | "rejected" | "unknown";
+  score?: number;
+  railwayWayId?: string;
+  ref?: string;
+};
+
+type Mapping = {
+  crossingId: string;
+  osmCrossingId: number;
+  confidence: number;
+  crossingLat: number;
+  crossingLon: number;
+  crossingNodeIds: Set<string>;
+  railwayWayIds: string[];
+};
+
+const CACHE_TTL_MS = 300_000;
+const RESULT_CACHE_TTL_MS = 300_000;
+const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
+const graphCache = new Map<string, { expiresAt: number; value: ReturnType<typeof buildRailGraph> }>();
+const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
+let stationCatalogCache: { expiresAt: number; value: Map<string, RouteStation> } | null = null;
+let stationCatalogPromise: Promise<Map<string, RouteStation>> | null = null;
+let graphPromise: Promise<ReturnType<typeof buildRailGraph>> | null = null;
+let mappingsCache: { expiresAt: number; value: Mapping[] } | null = null;
+let mappingsPromise: Promise<Mapping[]> | null = null;
+
+function normalizeStationName(value: string) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+async function loadStationCatalog() {
+  if (stationCatalogCache && stationCatalogCache.expiresAt > Date.now()) return stationCatalogCache.value;
+  if (stationCatalogPromise) return stationCatalogPromise;
+
+  stationCatalogPromise = (async () => {
+    try {
+      const result = await db.execute({
+        sql: `SELECT name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`,
+        args: [],
+      });
+      const byName = new Map<string, RouteStation>();
+      for (const row of result.rows as any[]) {
+        const name = String(row.name || "");
+        const normalized = normalizeStationName(name);
+        if (!normalized || byName.has(normalized)) continue;
+        byName.set(normalized, { name, lat: Number(row.lat), lon: Number(row.lon) });
+      }
+      stationCatalogCache = { expiresAt: Date.now() + CACHE_TTL_MS, value: byName };
+      return byName;
+    } finally {
+      stationCatalogPromise = null;
+    }
+  })();
+
+  return stationCatalogPromise;
+}
+
+async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
+  const key = route.join("|");
+  const cached = stationCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
+  try {
+    const byName = await loadStationCatalog();
+    const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
+    stationCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+    return value;
+  } catch (error) {
+    console.error("Failed to resolve route stations:", error);
+    return route.map((name) => ({ name }));
+  }
+}
+
+async function loadGraph() {
+  const cached = graphCache.get("rail");
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (graphPromise) return graphPromise;
+
+  graphPromise = (async () => {
+    try {
+      const result = await db.execute({
+        sql: `SELECT osm_id, node_ids_json, geometry_json, tags_json FROM osm_rail_ways`,
+        args: [],
+      });
+      const rows: RailWayRow[] = [];
+      for (const row of result.rows as any[]) {
+        try {
+          const nodeIds = JSON.parse(String(row.node_ids_json || "[]")).map(String);
+          const geometry = JSON.parse(String(row.geometry_json || "[]"));
+          let tags: Record<string, string> = {};
+          try { tags = JSON.parse(String(row.tags_json || "{}")); } catch {}
+          if (nodeIds.length >= 2 && geometry.length >= 2) rows.push({ osmId: String(row.osm_id), nodeIds, geometry, ref: tags.ref });
+        } catch {}
+      }
+      const graph = buildRailGraph(rows);
+      graphCache.set("rail", { expiresAt: Date.now() + CACHE_TTL_MS, value: graph });
+      return graph;
+    } finally {
+      graphPromise = null;
+    }
+  })();
+
+  return graphPromise;
+}
+
+async function loadMapping(crossingId: string): Promise<Mapping | null> {
+  const linkResult = await db.execute({
+    sql: `
+      SELECT crossing_id, osm_crossing_id, confidence
+      FROM crossing_osm_links
+      WHERE crossing_id = ?
+        AND confidence >= 0.8
+      LIMIT 1
+    `,
+    args: [crossingId],
+  });
+
+  const link: any = linkResult.rows[0];
+  if (!link) return null;
+
+  const osmCrossingId = Number(link.osm_crossing_id);
+
+  const crossingResult = await db.execute({
+    sql: `
+      SELECT lat, lon
+      FROM osm_crossings
+      WHERE osm_id = ?
+      LIMIT 1
+    `,
+    args: [osmCrossingId],
+  });
+
+  const crossingRow: any = crossingResult.rows[0];
+  if (!crossingRow) return null;
+
+  const tracksResult = await db.execute({
+    sql: `
+      SELECT railway_way_id, crossing_node_index
+      FROM osm_crossing_rail_ways
+      WHERE crossing_osm_id = ?
+    `,
+    args: [osmCrossingId],
+  });
+
+  const tracks = tracksResult.rows as any[];
+  const railwayWayIds = tracks
+    .map((row) => String(row.railway_way_id))
+    .filter(Boolean);
+
+  if (!railwayWayIds.length) return null;
+
+  const wayIds = [...new Set(railwayWayIds)];
+  const placeholders = wayIds.map(() => "?").join(",");
+
+  const waysResult = await db.execute({
+    sql: `
+      SELECT osm_id, node_ids_json
+      FROM osm_rail_ways
+      WHERE osm_id IN (${placeholders})
+    `,
+    args: wayIds,
+  });
+
+  const nodesByWay = new Map<string, string[]>();
+
+  for (const row of waysResult.rows as any[]) {
+    try {
+      nodesByWay.set(
+        String(row.osm_id),
+        JSON.parse(String(row.node_ids_json || "[]")).map(String),
+      );
+    } catch {}
+  }
+
+  const crossingNodeIds = new Set<string>();
+
+  for (const track of tracks) {
+    const wayId = String(track.railway_way_id);
+    const nodes = nodesByWay.get(wayId);
+    if (!nodes) continue;
+
+    const index = Number(track.crossing_node_index);
+
+    if (Number.isInteger(index) && nodes[index]) {
+      crossingNodeIds.add(nodes[index]);
+    }
+  }
+
+  return {
+    crossingId: String(link.crossing_id),
+    osmCrossingId,
+    confidence: Number(link.confidence ?? 0),
+    crossingLat: Number(crossingRow.lat),
+    crossingLon: Number(crossingRow.lon),
+    crossingNodeIds,
+    railwayWayIds,
+  };
+}
+
+const mappingCache = new Map<
+  string,
+  { expiresAt: number; value: Mapping | null }
+>();
+
+const mappingPromises = new Map<string, Promise<Mapping | null>>();
+
+async function loadMappingCached(crossingId: string) {
+  const cached = mappingCache.get(crossingId);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
+  const pending = mappingPromises.get(crossingId);
+  if (pending) return pending;
+
+  const promise = loadMapping(crossingId).finally(() => {
+    mappingPromises.delete(crossingId);
+  });
+
+  mappingPromises.set(crossingId, promise);
+
+  const value = await promise;
+
+  mappingCache.set(crossingId, {
+    expiresAt: Date.now() + CACHE_TTL_MS,
+    value,
+  });
+
+  return value;
+}
+
+export async function filterTrainByCrossingOsm(
+  crossingId: string,
+  route: string[] | undefined,
+): Promise<CrossingOsmFilterResult> {
+  if (!route?.length) return { status: "unknown" };
+
+  const resultKey = `${crossingId}|${route.join("|")}`;
+  const cachedResult = resultCache.get(resultKey);
+  if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
+
+  try {
+    const coordinateRoute = await routeToCoordinates(route);
+    const stations = coordinateRoute.filter(
+      (s): s is RouteStation & { lat: number; lon: number } => s.lat != null && s.lon != null,
+    );
+    if (stations.length < 2) return { status: "unknown" };
+
+    const [graph, requested] = await Promise.all([
+      loadGraph(),
+      loadMappingCached(crossingId),
+    ]);
+
+    if (!requested || requested.crossingNodeIds.size === 0) {
+      return { status: "unknown" };
+    }
+
+    const mappings = [requested];
+
+    const candidateHits = new Map<string, { wayId?: string; ref?: string; distance: number }>();
+
+    for (let i = 1; i < stations.length; i += 1) {
+      const from = stations[i - 1];
+      const to = stations[i];
+      const start = nearestNode(graph, from, 5000);
+      const target = nearestNode(graph, to, 5000);
+      if (!start || !target) continue;
+
+      const nearbyMappings = mappings.filter((mapping) => {
+        const d = Math.min(
+          distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, from),
+          distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, to),
+        );
+        return d <= 12000;
+      });
+      if (!nearbyMappings.length) continue;
+
+      const path = shortestRailPath(graph, start.nodeId, target.nodeId);
+      if (!path) continue;
+
+      for (const mapping of nearbyMappings) {
+        const allowedWays = new Set(mapping.railwayWayIds);
+        const hitNode = [...mapping.crossingNodeIds].find((nodeId) => {
+          const hitIndex = path.nodes.indexOf(nodeId);
+          if (hitIndex < 0) return false;
+          const adjacentEdges = [
+            ...(hitIndex > 0 ? graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [] : []),
+            ...(graph.adjacency.get(nodeId) ?? []),
+          ];
+          return adjacentEdges.some((edge) => allowedWays.has(edge.wayId));
+        });
+
+        if (!hitNode) continue;
+
+        const hitIndex = path.nodes.indexOf(hitNode);
+        const incomingEdge = hitIndex > 0
+          ? [...(graph.adjacency.get(path.nodes[hitIndex - 1]) ?? [])].find((edge) => edge.to === hitNode)
+          : undefined;
+        const outgoingEdge = [...(graph.adjacency.get(hitNode) ?? [])].find((edge) => path.nodes[hitIndex + 1] === edge.to);
+        const matchedWayId = [incomingEdge?.wayId, outgoingEdge?.wayId].find((wayId) => wayId != null && allowedWays.has(wayId));
+        const distanceToCrossing = distanceMeters(
+          { lat: mapping.crossingLat, lon: mapping.crossingLon },
+          graph.nodePoints.get(hitNode) ?? { lat: mapping.crossingLat, lon: mapping.crossingLon },
+        );
+        candidateHits.set(mapping.crossingId, {
+          wayId: matchedWayId || mapping.railwayWayIds[0],
+          ref: undefined,
+          distance: distanceToCrossing,
+        });
+      }
+    }
+
+    const own = candidateHits.get(crossingId);
+    let result: CrossingOsmFilterResult;
+    if (own) {
+      result = { status: "matched", score: Math.max(0, 1 - own.distance / 100), railwayWayId: own.wayId, ref: own.ref };
+    } else {
+      const other = [...candidateHits.entries()].find(([id]) => id !== crossingId);
+      result = other
+        ? { status: "rejected", railwayWayId: other[1].wayId, ref: other[1].ref }
+        : { status: "unknown" };
+    }
+
+    resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
+    return result;
+  } catch (error) {
+    console.error("Failed to match train against OSM railway topology:", error);
+    return { status: "unknown" };
+  }
+}
