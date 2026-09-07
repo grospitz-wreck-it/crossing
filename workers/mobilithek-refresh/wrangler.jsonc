@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "meineschranke",
+  "main": "./src/index.ts",
+  "compatibility_date": "2026-09-05",
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
+  "mtls_certificates": [
+    {
+      "binding": "MOBILITHEK_CLIENT",
+      "certificate_id": "REPLACE_WITH_CLOUDFLARE_MTLS_CERTIFICATE_ID"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
