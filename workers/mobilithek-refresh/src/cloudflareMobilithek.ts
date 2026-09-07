@@ -40,10 +40,9 @@ async function fetchFeed(
     const response = await env.MOBILITHEK_CLIENT.fetch(url.toString(), {
       method: "GET",
       headers: {
-        accept: "application/xml, text/xml, */*",
+        accept: "application/json, application/xml, text/plain, */*",
         "user-agent": "Crossings/1.0 (meineschranke.com)",
       },
-      cache: "no-store",
       signal: controller.signal,
     });
 
