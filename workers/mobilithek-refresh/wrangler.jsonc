@@ -10,6 +10,10 @@
     {
       "binding": "MOBILITHEK_CLIENT",
       "certificate_id": "f058ed8b-18d7-46f0-b26b-12bbf869f7de"
+    },
+    {
+      "binding": "MOBILITHEK_CLIENT_TEST",
+      "certificate_id": "f058ed8b-18d7-46f0-b26b-12bbf869f7de"
     }
   ],
   "observability": {
