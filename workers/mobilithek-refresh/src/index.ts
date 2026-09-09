@@ -13,6 +13,7 @@ export interface Env {
   MOBILITHEK_SUBSCRIPTION_ID_4?: string;
   MOBILITHEK_SUBSCRIPTION_URL?: string;
   MOBILITHEK_CLIENT: Fetcher;
+  MOBILITHEK_CLIENT_TEST: Fetcher;
 }
 
 function getSubscriptionIds(env: Env): string[] {
@@ -26,7 +27,7 @@ function getSubscriptionIds(env: Env): string[] {
     .filter(Boolean);
 }
 
-const TEST_URL =
+const TEST_URL_8443 =
   "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
 const TEST_URL_443 =
   "https://mobilithek.info/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
@@ -71,21 +72,30 @@ async function probe(
 }
 
 async function runMtlsCompare(env: Env): Promise<Response> {
-  const direct8443 = await probe("global-fetch-8443", TEST_URL, fetch);
-  const mtls8443 = await probe(
-    "mtls-binding-8443",
-    TEST_URL,
-    env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
-  );
-  const mtls443 = await probe(
-    "mtls-binding-443",
-    TEST_URL_443,
-    env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
-  );
-
-  return Response.json({
-    tests: [direct8443, mtls8443, mtls443],
-  });
+  const tests = [
+    await probe("global-fetch-8443", TEST_URL_8443, fetch),
+    await probe(
+      "mtls-binding-8443",
+      TEST_URL_8443,
+      env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
+    ),
+    await probe(
+      "mtls-binding-test-8443",
+      TEST_URL_8443,
+      env.MOBILITHEK_CLIENT_TEST.fetch.bind(env.MOBILITHEK_CLIENT_TEST),
+    ),
+    await probe(
+      "mtls-binding-443",
+      TEST_URL_443,
+      env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
+    ),
+    await probe(
+      "mtls-binding-test-443",
+      TEST_URL_443,
+      env.MOBILITHEK_CLIENT_TEST.fetch.bind(env.MOBILITHEK_CLIENT_TEST),
+    ),
+  ];
+  return Response.json({ tests });
 }
 
 async function runRefresh(env: Env): Promise<Record<string, unknown>> {
