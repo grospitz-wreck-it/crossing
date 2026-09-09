@@ -28,14 +28,21 @@ function getSubscriptionIds(env: Env): string[] {
 
 const TEST_URL =
   "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
+const TEST_URL_443 =
+  "https://mobilithek.info/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
 
-async function probe(label: string, fetcher: typeof fetch): Promise<Record<string, unknown>> {
+async function probe(
+  label: string,
+  url: string,
+  fetcher: typeof fetch,
+): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
   try {
-    const response = await fetcher(TEST_URL, { method: "GET" });
+    const response = await fetcher(url, { method: "GET" });
     const body = await response.text();
     return {
       label,
+      url,
       ok: response.ok,
       status: response.status,
       statusText: response.statusText,
@@ -53,6 +60,7 @@ async function probe(label: string, fetcher: typeof fetch): Promise<Record<strin
   } catch (error) {
     return {
       label,
+      url,
       ok: false,
       durationMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : String(error),
@@ -63,9 +71,21 @@ async function probe(label: string, fetcher: typeof fetch): Promise<Record<strin
 }
 
 async function runMtlsCompare(env: Env): Promise<Response> {
-  const direct = await probe("global-fetch", fetch);
-  const mtls = await probe("mtls-binding", env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT));
-  return Response.json({ url: TEST_URL, direct, mtls });
+  const direct8443 = await probe("global-fetch-8443", TEST_URL, fetch);
+  const mtls8443 = await probe(
+    "mtls-binding-8443",
+    TEST_URL,
+    env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
+  );
+  const mtls443 = await probe(
+    "mtls-binding-443",
+    TEST_URL_443,
+    env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
+  );
+
+  return Response.json({
+    tests: [direct8443, mtls8443, mtls443],
+  });
 }
 
 async function runRefresh(env: Env): Promise<Record<string, unknown>> {
