@@ -26,20 +26,16 @@ function getSubscriptionIds(env: Env): string[] {
     .filter(Boolean);
 }
 
-async function runMtlsTest(env: Env): Promise<Response> {
-  const subscriptionId = "1027362883041628160";
-  const url =
-    `https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription` +
-    `?subscriptionID=${subscriptionId}`;
+const TEST_URL =
+  "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
+
+async function probe(label: string, fetcher: typeof fetch): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
-
   try {
-    const response = await env.MOBILITHEK_CLIENT.fetch(url, {
-      method: "GET",
-    });
+    const response = await fetcher(TEST_URL, { method: "GET" });
     const body = await response.text();
-
-    return Response.json({
+    return {
+      label,
       ok: response.ok,
       status: response.status,
       statusText: response.statusText,
@@ -52,20 +48,24 @@ async function runMtlsTest(env: Env): Promise<Response> {
         date: response.headers.get("date"),
       },
       bodyLength: body.length,
-      bodyPreview: body.slice(0, 500),
-    });
+      bodyPreview: body.slice(0, 300),
+    };
   } catch (error) {
-    return Response.json(
-      {
-        ok: false,
-        durationMs: Date.now() - startedAt,
-        error: error instanceof Error ? error.message : String(error),
-        errorName: error instanceof Error ? error.name : undefined,
-        stack: error instanceof Error ? error.stack : undefined,
-      },
-      { status: 500 },
-    );
+    return {
+      label,
+      ok: false,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : undefined,
+      stack: error instanceof Error ? error.stack : undefined,
+    };
   }
+}
+
+async function runMtlsCompare(env: Env): Promise<Response> {
+  const direct = await probe("global-fetch", fetch);
+  const mtls = await probe("mtls-binding", env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT));
+  return Response.json({ url: TEST_URL, direct, mtls });
 }
 
 async function runRefresh(env: Env): Promise<Record<string, unknown>> {
@@ -130,7 +130,7 @@ export default {
       return Response.json({ ok: true, service: "mobilithek-refresh" });
     }
     if (url.pathname === "/mtls-test") {
-      return runMtlsTest(env);
+      return runMtlsCompare(env);
     }
     if (url.pathname === "/run") {
       try {
