@@ -31,6 +31,7 @@ const TEST_URL_8443 =
   "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
 const TEST_URL_443 =
   "https://mobilithek.info/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
+const PUBLIC_TEST_URL = "https://example.com/";
 
 async function probe(
   label: string,
@@ -39,8 +40,11 @@ async function probe(
 ): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
   try {
-    const response = await fetcher(url, { method: "GET" });
-    const body = await response.text();
+    const response = await fetcher(url, {
+      method: "GET",
+      headers: { "user-agent": "Crossings-mTLS-Diagnostic/1.0" },
+    });
+    const body = (await response.text()).slice(0, 4000);
     return {
       label,
       url,
@@ -73,6 +77,17 @@ async function probe(
 
 async function runMtlsCompare(env: Env): Promise<Response> {
   const tests = [
+    await probe("global-fetch-example", PUBLIC_TEST_URL, fetch),
+    await probe(
+      "mtls-binding-example",
+      PUBLIC_TEST_URL,
+      env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
+    ),
+    await probe(
+      "mtls-binding-test-example",
+      PUBLIC_TEST_URL,
+      env.MOBILITHEK_CLIENT_TEST.fetch.bind(env.MOBILITHEK_CLIENT_TEST),
+    ),
     await probe("global-fetch-8443", TEST_URL_8443, fetch),
     await probe(
       "mtls-binding-8443",
