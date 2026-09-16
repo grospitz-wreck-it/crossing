@@ -34,7 +34,7 @@ function fetchMobilithek(
         passphrase,
         headers: {
           accept: "application/xml, text/xml, */*",
-          "accept-encoding": "identity",
+          "accept-encoding": "gzip",
           "user-agent": "Crossings/1.0 (meineschranke.com)",
         },
         timeout: 60_000,
@@ -163,7 +163,7 @@ export async function POST(request: Request) {
         "Cache-Control": "no-store",
         "X-Mobilithek-Subscription": "test",
         ...(result.contentEncoding
-          ? { "X-Mobilithek-Content-Encoding": result.contentEncoding }
+          ? { "Content-Encoding": result.contentEncoding }
           : {}),
       },
     });
