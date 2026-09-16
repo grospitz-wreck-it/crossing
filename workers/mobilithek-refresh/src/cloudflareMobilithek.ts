@@ -48,23 +48,20 @@ async function fetchFeed(env: MobilithekEnv, subscriptionId: string): Promise<{ 
     if (!response.ok) {
       const body = (await response.text()).slice(0, 4000);
       const contentType = response.headers.get("content-type") || "";
-      console.error(
-        `[Mobilithek] ${subscriptionId} HTTP ${response.status}`,
-        JSON.stringify({
-          status: response.status,
-          statusText: response.statusText,
-          contentType,
-          server: response.headers.get("server"),
-          cfRay: response.headers.get("cf-ray"),
-          cfError: response.headers.get("cf-error"),
-          body,
-        }),
-      );
-      throw new Error(
-        `Mobilithek ${subscriptionId} HTTP ${response.status}` +
-          (contentType ? ` content-type=${contentType}` : "") +
-          (body ? ` body=${body}` : ""),
-      );
+      const metadata = {
+        status: response.status,
+        statusText: response.statusText,
+        contentType,
+        server: response.headers.get("server"),
+        cfRay: response.headers.get("cf-ray"),
+        cfError: response.headers.get("cf-error"),
+        contentLength: response.headers.get("content-length"),
+        date: response.headers.get("date"),
+        bodyLength: body.length,
+        bodyPreview: body.slice(0, 1000),
+      };
+      console.error(`[Mobilithek] ${subscriptionId} HTTP response`, JSON.stringify(metadata));
+      throw new Error(`Mobilithek ${subscriptionId} HTTP ${response.status} ${JSON.stringify(metadata)}`);
     }
 
     const raw = new Uint8Array(await response.arrayBuffer());
