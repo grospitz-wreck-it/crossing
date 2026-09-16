@@ -118,7 +118,27 @@ export async function POST(request: Request) {
     const expectedToken = process.env.MOBILITHEK_RELAY_TOKEN;
 
     if (!expectedToken || token !== `Bearer ${expectedToken}`) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
+      console.error("[Relay auth]", {
+        received: Boolean(token),
+        receivedLength: token?.length ?? 0,
+        expected: Boolean(expectedToken),
+        expectedLength: expectedToken?.length ?? 0,
+        startsBearer: token?.startsWith("Bearer ") ?? false,
+      });
+
+      return Response.json(
+        {
+          error: "Unauthorized",
+          diagnostics: {
+            received: Boolean(token),
+            receivedLength: token?.length ?? 0,
+            expected: Boolean(expectedToken),
+            expectedLength: expectedToken?.length ?? 0,
+            startsBearer: token?.startsWith("Bearer ") ?? false,
+          },
+        },
+        { status: 401 },
+      );
     }
 
     const body = await request.json().catch(() => ({}));
