@@ -49,14 +49,13 @@ function matchesRoute(trainRoute: string[], observationStation: string, required
     .map((stop, order) => ({ stop, order, index: routeIndex(trainRoute, stop) }))
     .filter((entry) => entry.index >= 0);
 
-  if (anchors.length < 2) {
-    return routeIndex(trainRoute, observationStation) >= 0;
-  }
+  if (anchors.length < 2) return routeIndex(trainRoute, observationStation) >= 0;
 
   const ordered = [...anchors].sort((a, b) => a.order - b.order);
   for (let i = 1; i < ordered.length; i += 1) {
     if (ordered[i - 1].index >= ordered[i].index) return false;
   }
+
   const observationIndex = routeIndex(trainRoute, observationStation);
   if (observationIndex >= 0) {
     if (observationIndex < ordered[0].index || observationIndex > ordered[ordered.length - 1].index) return false;
@@ -112,8 +111,14 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
     const now = Date.now();
     const from = new Date(now - 5 * 60_000).toISOString();
     const to = new Date(now + 3 * 60 * 60_000).toISOString();
+
+    // Do not ORDER BY here. The status layer sorts the small candidate set later.
+    // Without an actual_time index an ORDER BY forces SQLite/Turso to scan and sort
+    // the whole snapshot table before applying LIMIT, which was causing ~100s loads.
+    // The production migration adds the proper index; removing the sort also keeps
+    // the endpoint bounded while that migration propagates.
     const result = await db.execute({
-      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction FROM mobilithek_train_snapshot WHERE actual_time >= ? AND actual_time <= ? ORDER BY actual_time ASC LIMIT 5000`,
+      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction FROM mobilithek_train_snapshot WHERE actual_time >= ? AND actual_time <= ? LIMIT 1500`,
       args: [from, to],
     });
 
