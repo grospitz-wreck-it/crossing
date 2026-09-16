@@ -38,7 +38,8 @@ async function fetchFeed(env: MobilithekEnv, subscriptionId: string): Promise<{ 
     const response = await env.MOBILITHEK_CLIENT.fetch(url.toString(), {
       method: "GET",
       headers: {
-        accept: "application/json, application/xml, text/plain, */*",
+        accept: "application/xml",
+        "accept-encoding": "gzip",
         "user-agent": "Crossings/1.0 (meineschranke.com)",
       },
       signal: controller.signal,
@@ -49,8 +50,15 @@ async function fetchFeed(env: MobilithekEnv, subscriptionId: string): Promise<{ 
       const contentType = response.headers.get("content-type") || "";
       console.error(
         `[Mobilithek] ${subscriptionId} HTTP ${response.status}`,
-        `content-type=${contentType}`,
-        `body=${body || "<empty>"}`,
+        JSON.stringify({
+          status: response.status,
+          statusText: response.statusText,
+          contentType,
+          server: response.headers.get("server"),
+          cfRay: response.headers.get("cf-ray"),
+          cfError: response.headers.get("cf-error"),
+          body,
+        }),
       );
       throw new Error(
         `Mobilithek ${subscriptionId} HTTP ${response.status}` +
@@ -67,6 +75,14 @@ async function fetchFeed(env: MobilithekEnv, subscriptionId: string): Promise<{ 
 
     return { bytes, kind: classifyFeed(bytes) };
   } catch (error) {
+    console.error(
+      `[Mobilithek] ${subscriptionId} fetch exception`,
+      JSON.stringify({
+        name: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      }),
+    );
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`Mobilithek ${subscriptionId} request timed out`);
     }
