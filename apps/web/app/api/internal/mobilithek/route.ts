@@ -152,9 +152,28 @@ async function processJourney(
   if (!events.length) return [];
 
   try {
+    const normalizedDemand = demand.map((crossing) => ({
+      ...crossing,
+      requiredRouteStops: Array.isArray(crossing.requiredRouteStops)
+        ? crossing.requiredRouteStops
+        : [],
+      observationStations: Array.isArray(crossing.observationStations)
+        ? crossing.observationStations
+        : [],
+      throughRules: Array.isArray(crossing.throughRules)
+        ? crossing.throughRules
+        : [],
+      diversionRules: Array.isArray(crossing.diversionRules)
+        ? crossing.diversionRules
+        : [],
+      rerouteWatchRules: Array.isArray(crossing.rerouteWatchRules)
+        ? crossing.rerouteWatchRules
+        : [],
+    }));
+
     return filterEventsByDemand(
       events.map((event) => ({ subscriptionId, event })),
-      demand,
+      normalizedDemand,
     );
   } catch (error) {
     const message =
