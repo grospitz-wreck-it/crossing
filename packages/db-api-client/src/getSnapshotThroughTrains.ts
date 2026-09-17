@@ -1,5 +1,6 @@
 import type { Client } from "@libsql/client";
 import type { Crossing } from "../../crossing-model/src/types";
+import { getRailCorridor, matchesRailCorridor } from "./railCorridors";
 
 export type SnapshotThroughTrain = {
   type: "through";
@@ -49,9 +50,7 @@ function matchesRoute(trainRoute: string[], observationStation: string, required
     .map((stop, order) => ({ stop, order, index: routeIndex(trainRoute, stop) }))
     .filter((entry) => entry.index >= 0);
 
-  if (anchors.length < 2) {
-    return routeIndex(trainRoute, observationStation) >= 0;
-  }
+  if (anchors.length < 2) return routeIndex(trainRoute, observationStation) >= 0;
 
   const ordered = [...anchors].sort((a, b) => a.order - b.order);
   for (let i = 1; i < ordered.length; i += 1) {
@@ -82,12 +81,16 @@ function directionForRoute(route: string[], observationStation: string, required
   return "unknown" as const;
 }
 
-function ruleAllowsTrain(rule: any, train: { category?: string; line?: string }) {
+function ruleAllowsTrain(rule: any, train: { category?: string; line?: string }, corridorMatch = false) {
+  if (corridorMatch) return true;
   const categories = Array.isArray(rule.categories) ? rule.categories : [];
   if (!categories.length) return true;
-  const line = String(train.line || "").toUpperCase();
-  const category = String(train.category || "");
-  return categories.includes(category) || categories.some((value: string) => line.includes(String(value).toUpperCase()));
+  const line = String(train.line || "").toUpperCase().replace(/[\s-]+/g, "");
+  const category = String(train.category || "").toUpperCase().replace(/[\s-]+/g, "");
+  return categories.some((value: string) => {
+    const wanted = String(value).toUpperCase().replace(/[\s-]+/g, "");
+    return category === wanted || line === wanted || line.includes(wanted) || wanted.includes(line);
+  });
 }
 
 function parseJson(value: unknown, fallback: any) {
@@ -109,6 +112,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       : crossing.observationEvas.map((eva: string) => ({ observationEva: eva, observationStation: eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }))) as any[];
     if (!rules.length) return null;
 
+    const corridor = getRailCorridor(crossing.id);
     const now = Date.now();
     const from = new Date(now - 5 * 60_000).toISOString();
     const to = new Date(now + 3 * 60 * 60_000).toISOString();
@@ -122,12 +126,19 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       const route = parseJson(row.route_json, []).map(String).filter(Boolean);
       const calls = parseJson(row.calls_json, []);
       if (route.length < 2) continue;
-      const train = { line: String(row.line || ""), category: String(row.category || "") };
+      const train = {
+        line: String(row.line || ""),
+        category: String(row.category || ""),
+        route,
+        origin: row.origin ? String(row.origin) : undefined,
+        destination: row.destination ? String(row.destination) : undefined,
+      };
+      const corridorMatch = Boolean(corridor && matchesRailCorridor(train, corridor));
 
       for (const rule of rules) {
-        if (!ruleAllowsTrain(rule, train)) continue;
+        if (!ruleAllowsTrain(rule, train, corridorMatch)) continue;
         const observationStation = String(rule.observationStation || "");
-        if (!matchesRoute(route, observationStation, crossing.requiredRouteStops || [])) continue;
+        if (!corridorMatch && !matchesRoute(route, observationStation, crossing.requiredRouteStops || [])) continue;
 
         const observationCall = snapshotCallsContain(calls, observationStation);
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
@@ -135,26 +146,26 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
         if (!Number.isFinite(parsedObservation.getTime())) continue;
 
         const expectedDirection = directionForRoute(route, observationStation, crossing.requiredRouteStops || []);
-        if (rule.direction !== "unknown" && expectedDirection !== "unknown" && rule.direction !== expectedDirection) continue;
+        if (!corridorMatch && rule.direction !== "unknown" && expectedDirection !== "unknown" && rule.direction !== expectedDirection) continue;
 
         const crossingTime = new Date(parsedObservation.getTime() + Number(rule.fallbackOffsetSeconds || 300) * 1000);
         if (crossingTime.getTime() < now - 60_000 || crossingTime.getTime() > now + 3 * 60 * 60_000) continue;
 
         candidates.push({
           type: "through",
-          line: String(row.line || ""),
-          category: String(row.category || ""),
+          line: train.line,
+          category: train.category,
           journeyNumber: Number(row.journey_number || 0),
-          destination: row.destination ? String(row.destination) : undefined,
-          origin: row.origin ? String(row.origin) : undefined,
+          destination: train.destination,
+          origin: train.origin,
           route,
           delayMinutes: Number(row.delay_minutes || 0),
           observationEva: String(rule.observationEva || ""),
-          observationStation,
+          observationStation: observationStation || (corridor?.crossingMarker || ""),
           observationActualTime: parsedObservation.toISOString(),
           fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300),
           trackDistanceMeters: Number(rule.trackDistanceMeters || 0),
-          direction: rule.direction === "unknown" ? expectedDirection : rule.direction,
+          direction: corridorMatch ? "unknown" : (rule.direction === "unknown" ? expectedDirection : rule.direction),
           crossingTime: crossingTime.toISOString(),
           detection: "snapshot-route",
         });
