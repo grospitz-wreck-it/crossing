@@ -12,6 +12,8 @@ export interface Env {
   MOBILITHEK_SUBSCRIPTION_ID_3?: string;
   MOBILITHEK_SUBSCRIPTION_ID_4?: string;
   MOBILITHEK_SUBSCRIPTION_URL?: string;
+  MOBILITHEK_RELAY_URL?: string;
+  MOBILITHEK_RELAY_TOKEN?: string;
   MOBILITHEK_CLIENT: Fetcher;
   MOBILITHEK_CLIENT_TEST: Fetcher;
 }
@@ -131,7 +133,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
 
   console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
 
-  const result = await refreshOnce(env, subscriptionIds);
+  const result = await refreshOnce(env, subscriptionIds, demand);
   const demandedEvents = filterEventsByDemand(result.events, demand);
 
   console.log(
