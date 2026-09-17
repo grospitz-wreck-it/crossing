@@ -1,5 +1,5 @@
 import { getDb } from "./db.js";
-import { getRailCorridor } from "../../../packages/db-api-client/src/railCorridors.js";
+import { getRailCorridor } from "@crossing/db-api-client";
 
 type DemandRule = {
   observationStation?: string;
