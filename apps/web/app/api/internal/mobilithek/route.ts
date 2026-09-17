@@ -124,12 +124,53 @@ async function processJourney(
   subscriptionId: string,
   demand: DemandCrossing[],
 ): Promise<Array<{ subscriptionId: string; event: MobilithekTrainEvent }>> {
-  const events = parseBody(xml);
+  let events: MobilithekTrainEvent[];
+  try {
+    events = parseBody(xml);
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? `${error.name}: ${error.message}`
+        : String(error);
+
+    console.error("[Mobilithek Relay parseBody]", {
+      subscriptionId,
+      message,
+      xmlLength: xml.length,
+      xmlStart: xml.slice(0, 500),
+    });
+
+    throw new Error(`parseBody failed: ${message}`);
+  }
+
+  if (!Array.isArray(events)) {
+    throw new Error(
+      `parseBody returned ${typeof events}, expected array`,
+    );
+  }
+
   if (!events.length) return [];
-  return filterEventsByDemand(
-    events.map((event) => ({ subscriptionId, event })),
-    demand,
-  );
+
+  try {
+    return filterEventsByDemand(
+      events.map((event) => ({ subscriptionId, event })),
+      demand,
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? `${error.name}: ${error.message}`
+        : String(error);
+
+    console.error("[Mobilithek Relay filterEventsByDemand]", {
+      subscriptionId,
+      message,
+      eventsLength: events.length,
+      demandLength: demand.length,
+    });
+
+    throw new Error(`filterEventsByDemand failed: ${message}`);
+  }
 }
 
 export async function POST(request: Request) {
