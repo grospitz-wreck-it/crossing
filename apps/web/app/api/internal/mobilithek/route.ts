@@ -1,4 +1,5 @@
 import https from "node:https";
+import type { ClientRequest } from "node:http";
 import { createGunzip } from "node:zlib";
 import {
   filterEventsByDemand,
@@ -20,7 +21,7 @@ function fetchMobilithek(
   source: NodeJS.ReadableStream;
   contentType: string;
   contentEncoding: string;
-  request: typeof https.request extends (...args: any[]) => infer R ? R : never;
+  request: ClientRequest;
 }> {
   const baseUrl =
     process.env.MOBILITHEK_SUBSCRIPTION_URL?.trim() || DEFAULT_URL;
@@ -33,11 +34,10 @@ function fetchMobilithek(
   url.searchParams.set("subscriptionID", subscriptionId);
 
   return new Promise((resolve, reject) => {
-    const request = https.request(
+    const req = https.request(
       url,
       {
         method: "GET",
-        p12: undefined,
         pfx: Buffer.from(p12Base64, "base64"),
         passphrase,
         headers: {
@@ -75,16 +75,16 @@ function fetchMobilithek(
           source: response,
           contentType,
           contentEncoding,
-          request,
+          request: req,
         });
       },
     );
 
-    request.on("timeout", () =>
-      request.destroy(new Error("Mobilithek request timed out")),
+    req.on("timeout", () =>
+      req.destroy(new Error("Mobilithek request timed out")),
     );
-    request.on("error", reject);
-    request.end();
+    req.on("error", reject);
+    req.end();
   });
 }
 
