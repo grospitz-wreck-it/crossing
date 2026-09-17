@@ -1,4 +1,5 @@
 import https from "node:https";
+import type { ClientRequest } from "node:http";
 import { createGunzip } from "node:zlib";
 import {
   filterEventsByDemand,
@@ -20,7 +21,7 @@ function fetchMobilithek(
   source: NodeJS.ReadableStream;
   contentType: string;
   contentEncoding: string;
-  request: import("node:https").ClientRequest;
+  request: ClientRequest;
 }> {
   const baseUrl =
     process.env.MOBILITHEK_SUBSCRIPTION_URL?.trim() || DEFAULT_URL;
