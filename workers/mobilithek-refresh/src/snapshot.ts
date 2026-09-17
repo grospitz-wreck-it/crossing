@@ -1,7 +1,7 @@
 import { getDb } from "./db.js";
 import type { MobilithekTrainEvent } from "@crossing/db-api-client";
 
-const BATCH_SIZE = 500;
+const BATCH_SIZE = 1000;
 
 type SnapshotEvent = {
   subscriptionId: string;
