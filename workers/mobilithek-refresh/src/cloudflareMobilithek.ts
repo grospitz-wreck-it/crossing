@@ -3,6 +3,7 @@ import {
   classifyFeed,
   parseBody,
   parseGtfsRtTripUpdates,
+  type DemandCrossing,
   type MobilithekTrainEvent,
   type MobilithekFeedKind,
 } from "@crossing/db-api-client";
@@ -10,6 +11,8 @@ import {
 export interface MobilithekEnv {
   MOBILITHEK_SUBSCRIPTION_URL?: string;
   MOBILITHEK_CLIENT: Fetcher;
+  MOBILITHEK_RELAY_URL?: string;
+  MOBILITHEK_RELAY_TOKEN?: string;
 }
 
 type RefreshResult = {
@@ -24,7 +27,12 @@ type RefreshResult = {
   events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
 };
 
-async function fetchFeed(env: MobilithekEnv, subscriptionId: string): Promise<{ bytes: Uint8Array; kind: MobilithekFeedKind }> {
+const RELAY_TEST_SUBSCRIPTION_ID = "1027363432285736960";
+
+async function fetchDirectFeed(
+  env: MobilithekEnv,
+  subscriptionId: string,
+): Promise<{ bytes: Uint8Array; kind: MobilithekFeedKind }> {
   const url = new URL(
     env.MOBILITHEK_SUBSCRIPTION_URL?.trim() ||
       "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription",
@@ -48,20 +56,15 @@ async function fetchFeed(env: MobilithekEnv, subscriptionId: string): Promise<{ 
     if (!response.ok) {
       const body = (await response.text()).slice(0, 4000);
       const contentType = response.headers.get("content-type") || "";
-      const metadata = {
-        status: response.status,
-        statusText: response.statusText,
-        contentType,
-        server: response.headers.get("server"),
-        cfRay: response.headers.get("cf-ray"),
-        cfError: response.headers.get("cf-error"),
-        contentLength: response.headers.get("content-length"),
-        date: response.headers.get("date"),
-        bodyLength: body.length,
-        bodyPreview: body.slice(0, 1000),
-      };
-      console.error(`[Mobilithek] ${subscriptionId} HTTP response`, JSON.stringify(metadata));
-      throw new Error(`Mobilithek ${subscriptionId} HTTP ${response.status} ${JSON.stringify(metadata)}`);
+      throw new Error(
+        `Mobilithek ${subscriptionId} HTTP ${response.status} ${JSON.stringify({
+          statusText: response.statusText,
+          contentType,
+          server: response.headers.get("server"),
+          cfRay: response.headers.get("cf-ray"),
+          bodyPreview: body.slice(0, 1000),
+        })}`,
+      );
     }
 
     const raw = new Uint8Array(await response.arrayBuffer());
@@ -71,22 +74,91 @@ async function fetchFeed(env: MobilithekEnv, subscriptionId: string): Promise<{ 
       : raw;
 
     return { bytes, kind: classifyFeed(bytes) };
-  } catch (error) {
-    console.error(
-      `[Mobilithek] ${subscriptionId} fetch exception`,
-      JSON.stringify({
-        name: error instanceof Error ? error.name : typeof error,
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      }),
-    );
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(`Mobilithek ${subscriptionId} request timed out`);
-    }
-    throw error;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function fetchRelayEvents(
+  env: MobilithekEnv,
+  subscriptionId: string,
+  demand: DemandCrossing[],
+): Promise<{
+  events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
+  parsedEvents: number;
+}> {
+  const relayUrl = env.MOBILITHEK_RELAY_URL?.trim();
+  const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
+  if (!relayUrl || !relayToken) {
+    throw new Error("Mobilithek Relay ist nicht konfiguriert");
+  }
+
+  const response = await fetch(relayUrl, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${relayToken}`,
+      "content-type": "application/json",
+      accept: "application/x-ndjson",
+    },
+    body: JSON.stringify({ subscriptionId, demand }),
+  });
+
+  if (!response.ok || !response.body) {
+    const body = (await response.text()).slice(0, 2000);
+    throw new Error(`Mobilithek Relay HTTP ${response.status}: ${body}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let parsedEvents = 0;
+  const events: Array<{
+    subscriptionId: string;
+    event: MobilithekTrainEvent;
+  }> = [];
+
+  const consumeLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    const value = JSON.parse(trimmed) as {
+      subscriptionId: string;
+      event: MobilithekTrainEvent;
+    };
+    parsedEvents++;
+    events.push({
+      subscriptionId: value.subscriptionId,
+      event: {
+        ...value.event,
+        actualTime: new Date(value.event.actualTime),
+        scheduledTime: new Date(value.event.scheduledTime),
+        calls: (value.event.calls || []).map((call) => ({
+          ...call,
+          planned: call.planned ? new Date(call.planned) : undefined,
+          actual: call.actual ? new Date(call.actual) : undefined,
+        })),
+      },
+    });
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newline = buffer.indexOf("\n");
+      while (newline >= 0) {
+        consumeLine(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf("\n");
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consumeLine(buffer);
+  } finally {
+    reader.releaseLock();
+  }
+
+  return { events, parsedEvents };
 }
 
 function isValidTrainTime(value: Date): boolean {
@@ -96,8 +168,15 @@ function isValidTrainTime(value: Date): boolean {
   return year >= 2020 && year <= 2100;
 }
 
-export async function refreshOnce(env: MobilithekEnv, subscriptionIds: string[]): Promise<RefreshResult> {
-  const snapshotEvents: Array<{ subscriptionId: string; event: MobilithekTrainEvent }> = [];
+export async function refreshOnce(
+  env: MobilithekEnv,
+  subscriptionIds: string[],
+  demand: DemandCrossing[] = [],
+): Promise<RefreshResult> {
+  const snapshotEvents: Array<{
+    subscriptionId: string;
+    event: MobilithekTrainEvent;
+  }> = [];
   const errors: Array<{ subscriptionId: string; error: string }> = [];
   let successful = 0;
   let failed = 0;
@@ -108,7 +187,25 @@ export async function refreshOnce(env: MobilithekEnv, subscriptionIds: string[])
   for (const subscriptionId of subscriptionIds) {
     try {
       console.log(`[Mobilithek] loading ${subscriptionId}`);
-      const feed = await fetchFeed(env, subscriptionId);
+
+      if (
+        subscriptionId === RELAY_TEST_SUBSCRIPTION_ID &&
+        env.MOBILITHEK_RELAY_URL &&
+        env.MOBILITHEK_RELAY_TOKEN &&
+        demand.length
+      ) {
+        const relay = await fetchRelayEvents(env, subscriptionId, demand);
+        successful++;
+        parsedEvents += relay.parsedEvents;
+        acceptedEvents += relay.events.length;
+        snapshotEvents.push(...relay.events);
+        console.log(
+          `[Mobilithek] ${subscriptionId}: relay returned ${relay.parsedEvents} demanded events`,
+        );
+        continue;
+      }
+
+      const feed = await fetchDirectFeed(env, subscriptionId);
       console.log(`[Mobilithek] ${subscriptionId}: ${feed.kind}`);
 
       let events: MobilithekTrainEvent[] = [];
@@ -132,7 +229,9 @@ export async function refreshOnce(env: MobilithekEnv, subscriptionIds: string[])
         subscriptionAccepted++;
       }
 
-      console.log(`[Mobilithek] ${subscriptionId}: ${events.length} parsed, ${subscriptionAccepted} accepted`);
+      console.log(
+        `[Mobilithek] ${subscriptionId}: ${events.length} parsed, ${subscriptionAccepted} accepted`,
+      );
     } catch (error) {
       failed++;
       const message = error instanceof Error ? error.message : String(error);
