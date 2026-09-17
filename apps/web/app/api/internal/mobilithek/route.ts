@@ -218,10 +218,11 @@ export async function POST(request: Request) {
         }
       },
       cancel() {
+        // Closing the upstream HTTP request is sufficient to abort both the
+        // raw response and any attached gunzip stream. `source` is typed as
+        // a NodeJS.ReadableStream here, but its inferred pipe result can be a
+        // Web ReadableStream in Next.js, which has no `.destroy()` method.
         upstream.request.destroy();
-        if (typeof (source as NodeJS.ReadableStream).destroy === "function") {
-          (source as NodeJS.ReadableStream & { destroy(): void }).destroy();
-        }
       },
     });
 
