@@ -12,7 +12,7 @@ type SnapshotRow = {
   id: string;
   line: string;
   category: string;
-  journey_number: string | null;
+  journey_number: number | null;
   journey_ref: string | null;
   origin: string | null;
   destination: string | null;

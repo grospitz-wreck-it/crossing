@@ -203,7 +203,7 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
 // FacilityMonitoringDelivery/FacilityCondition => siri-facility, anything non-XML => gtfs-rt
 // (protobuf), everything else => unknown.
 export function classifyFeed(bytes: Buffer): MobilithekFeedKind {
-  const preview = bytes.subarray(0, Math.min(bytes.length, 512_000)).toString("utf8");
+  const preview = Buffer.from(bytes.subarray(0, Math.min(bytes.length, 512_000))).toString("utf8");
   const trimmed = preview.trimStart();
   if (trimmed.startsWith("<")) {
     if (preview.includes("EstimatedVehicleJourney") || preview.includes("EstimatedVehicleJourneyCode")) return "siri-journey";
@@ -324,7 +324,7 @@ async function fetchFeed(subscriptionId: string): Promise<{ body: string; bytes:
             bytes = String(response.headers["content-encoding"] || "").includes("gzip")
               ? gunzipSync(raw)
               : raw;
-            body = bytes.toString("utf8");
+            body = Buffer.from(bytes).toString("utf8");
           } catch (error) {
             return reject(error);
           }

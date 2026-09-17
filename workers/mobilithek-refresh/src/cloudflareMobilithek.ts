@@ -27,8 +27,6 @@ type RefreshResult = {
   events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
 };
 
-const RELAY_TEST_SUBSCRIPTION_ID = "1027363432285736960";
-
 async function fetchDirectFeed(
   env: MobilithekEnv,
   subscriptionId: string,
@@ -189,7 +187,6 @@ export async function refreshOnce(
       console.log(`[Mobilithek] loading ${subscriptionId}`);
 
       if (
-        subscriptionId === RELAY_TEST_SUBSCRIPTION_ID &&
         env.MOBILITHEK_RELAY_URL &&
         env.MOBILITHEK_RELAY_TOKEN &&
         demand.length

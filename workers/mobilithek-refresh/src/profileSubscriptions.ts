@@ -185,7 +185,7 @@ async function main() {
       let events: MobilithekTrainEvent[] = [];
 
       if (feed.kind === "siri-journey") {
-        events = parseBody(feed.bytes.toString("utf8"));
+        events = parseBody(new TextDecoder().decode(feed.bytes));
       } else if (feed.kind === "gtfs-rt") {
         events = parseGtfsRtTripUpdates(feed.bytes);
       }

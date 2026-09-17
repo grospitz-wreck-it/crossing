@@ -11,10 +11,6 @@ import {
 const DEFAULT_URL =
   "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
 
-// Test gate: only this subscription is routed through the relay until the
-// streaming path has been validated end-to-end.
-const TEST_SUBSCRIPTION_ID = "1027363432285736960";
-
 function fetchMobilithek(
   subscriptionId: string,
 ): Promise<{
@@ -188,13 +184,6 @@ export async function POST(request: Request) {
       ? (body.demand as DemandCrossing[])
       : [];
 
-    if (subscriptionId !== TEST_SUBSCRIPTION_ID) {
-      return Response.json(
-        { error: "Subscription not allowed", allowed: [TEST_SUBSCRIPTION_ID] },
-        { status: 403 },
-      );
-    }
-
     if (!demand.length) {
       return Response.json({ error: "Demand is required" }, { status: 400 });
     }
@@ -285,7 +274,7 @@ export async function POST(request: Request) {
       headers: {
         "Content-Type": "application/x-ndjson; charset=utf-8",
         "Cache-Control": "no-store",
-        "X-Mobilithek-Subscription": "test-stream-filtered",
+        "X-Mobilithek-Subscription": subscriptionId,
       },
     });
   } catch (error) {
