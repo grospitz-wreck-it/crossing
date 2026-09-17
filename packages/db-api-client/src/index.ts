@@ -14,9 +14,11 @@ export {
   filterMobilithekTrains,
 } from "./mobilithekTimetable";
 export { filterEventsByDemand } from "./filterDemand";
+export { getRailCorridor, matchesRailCorridor } from "./railCorridors";
 
 export type {
   MobilithekTrainEvent,
   MobilithekFeedKind,
 } from "./mobilithekTimetable";
 export type { DemandCrossing } from "./filterDemand";
+export type { RailCorridor } from "./railCorridors";
