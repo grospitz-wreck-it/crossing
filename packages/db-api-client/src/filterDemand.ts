@@ -24,6 +24,12 @@ export function filterEventsByDemand(
 ) {
   if (!demand.length) return [];
 
+  console.log("[Mobilithek filter] input", {
+    events: events.length,
+    demand: demand.length,
+    firstDemand: demand[0],
+  });
+
   return events.filter(({ event }) => {
     const line = String(event.line || "").toUpperCase();
     const category = String(event.category || "").toUpperCase();
@@ -46,9 +52,17 @@ export function filterEventsByDemand(
 
       if (!categoryMatch) return false;
 
+      const observationStations = Array.isArray(crossing.observationStations)
+        ? crossing.observationStations
+        : [];
+
+      const requiredRouteStops = Array.isArray(crossing.requiredRouteStops)
+        ? crossing.requiredRouteStops
+        : [];
+
       const stations = [
-        ...crossing.observationStations,
-        ...crossing.requiredRouteStops,
+        ...observationStations,
+        ...requiredRouteStops,
       ]
         .map(normalize)
         .filter(Boolean);
