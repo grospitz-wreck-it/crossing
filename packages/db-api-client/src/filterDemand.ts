@@ -33,9 +33,13 @@ export function filterEventsByDemand(
       .filter(Boolean);
 
     return demand.some((crossing) => {
+      const categories = Array.isArray(crossing.categories)
+        ? crossing.categories
+        : [];
+
       const categoryMatch =
-        crossing.categories.length === 0 ||
-        crossing.categories.some((value) => {
+        categories.length === 0 ||
+        categories.some((value) => {
           const wanted = String(value).toUpperCase();
           return category === wanted || line.includes(wanted);
         });
