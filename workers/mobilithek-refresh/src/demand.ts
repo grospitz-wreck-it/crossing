@@ -1,4 +1,5 @@
 import { getDb } from "./db.js";
+import { getRailCorridor } from "../../../packages/db-api-client/src/railCorridors.js";
 
 type DemandRule = {
   observationStation?: string;
@@ -10,6 +11,8 @@ type DemandCrossing = {
   requiredRouteStops: string[];
   categories: string[];
   observationStations: string[];
+  corridorId?: string;
+  corridorLines?: string[];
 };
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -58,14 +61,19 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
   `);
 
   return (result.rows as any[]).map((row) => {
+    const id = String(row.id);
     const rules = [
       ...collectRules(row.through_rules),
       ...collectRules(row.diversion_rules),
       ...collectRules(row.reroute_watch_rules),
     ];
 
+    const corridor = getRailCorridor(id);
     const categories = Array.from(
-      new Set(rules.flatMap((rule) => rule.categories || [])),
+      new Set([
+        ...rules.flatMap((rule) => rule.categories || []),
+        ...(corridor?.lines || []),
+      ]),
     );
 
     const observationStations = Array.from(
@@ -77,10 +85,12 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
     );
 
     return {
-      id: String(row.id),
+      id,
       requiredRouteStops: parseJson<string[]>(row.required_route_stops, []).map(String),
       categories,
       observationStations,
+      corridorId: corridor?.id,
+      corridorLines: corridor?.lines,
     };
   });
 }
