@@ -13,8 +13,10 @@ export {
   parseGtfsRtTripUpdates,
   filterMobilithekTrains,
 } from "./mobilithekTimetable";
+export { filterEventsByDemand } from "./filterDemand";
 
 export type {
   MobilithekTrainEvent,
   MobilithekFeedKind,
 } from "./mobilithekTimetable";
+export type { DemandCrossing } from "./filterDemand";
