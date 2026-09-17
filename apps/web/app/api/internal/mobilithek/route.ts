@@ -212,8 +212,21 @@ export async function POST(request: Request) {
           );
           controller.close();
         } catch (error) {
+          const message =
+            error instanceof Error
+              ? `${error.name}: ${error.message}`
+              : String(error);
+
           console.error("[Mobilithek Relay stream]", error);
-          controller.error(error);
+
+          controller.enqueue(
+            encodeLine({
+              error: "Mobilithek relay stream failed",
+              message,
+            }),
+          );
+
+          controller.close();
           upstream.request.destroy();
         }
       },
