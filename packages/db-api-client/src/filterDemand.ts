@@ -1,10 +1,13 @@
 import type { MobilithekTrainEvent } from "./mobilithekTimetable";
+import { getRailCorridor, matchesRailCorridor } from "./railCorridors";
 
 export type DemandCrossing = {
   id: string;
   requiredRouteStops: string[];
   categories: string[];
   observationStations: string[];
+  corridorId?: string;
+  corridorLines?: string[];
 };
 
 function normalize(value: string): string {
@@ -16,6 +19,30 @@ function normalize(value: string): string {
     .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
     .replace(/[^a-z0-9]+/g, "")
     .trim();
+}
+
+function normalizeLine(value: string): string {
+  return String(value || "").toUpperCase().replace(/[\s-]+/g, "");
+}
+
+function matchesCategory(event: MobilithekTrainEvent, categories: string[]) {
+  if (!categories.length) return true;
+  const line = normalizeLine(event.line);
+  const category = normalizeLine(event.category);
+  return categories.some((value) => {
+    const wanted = normalizeLine(value);
+    return category === wanted || line === wanted || line.includes(wanted) || wanted.includes(line);
+  });
+}
+
+function matchesStations(event: MobilithekTrainEvent, stations: string[]) {
+  if (!stations.length) return true;
+  const route = (event.route || []).map(normalize).filter(Boolean);
+  const calls = (event.calls || []).map((call) => normalize(String(call?.name || ""))).filter(Boolean);
+  return stations.map(normalize).filter(Boolean).some((station) =>
+    route.some((stop) => stop === station || stop.includes(station) || station.includes(stop)) ||
+    calls.some((call) => call === station || call.includes(station) || station.includes(call)),
+  );
 }
 
 export function filterEventsByDemand(
@@ -30,59 +57,23 @@ export function filterEventsByDemand(
     firstDemand: demand[0],
   });
 
-  return events.filter(({ event }) => {
-    const line = String(event.line || "").toUpperCase();
-    const category = String(event.category || "").toUpperCase();
-    const route = (event.route || []).map(normalize).filter(Boolean);
-    const calls = (event.calls || [])
-      .map((call) => normalize(String(call?.name || "")))
-      .filter(Boolean);
+  return events.filter(({ event }) => demand.some((crossing) => {
+    const corridor = crossing.corridorId ? getRailCorridor(crossing.id) : null;
 
-    return demand.some((crossing) => {
-      const categories = Array.isArray(crossing.categories)
-        ? crossing.categories
-        : [];
+    if (corridor) {
+      // Corridor matching deliberately happens before observation-station
+      // matching. A train can trigger the BÜ without calling at the nearby
+      // station; its journey route is the evidence that it traverses the rail
+      // section. The line/category gate prevents unrelated bus/tram events
+      // with coincidentally similar stop names from entering the snapshot.
+      return matchesRailCorridor(event, corridor);
+    }
 
-      const categoryMatch =
-        categories.length === 0 ||
-        categories.some((value) => {
-          const wanted = String(value).toUpperCase();
-          return category === wanted || line.includes(wanted);
-        });
+    if (!matchesCategory(event, crossing.categories || [])) return false;
 
-      if (!categoryMatch) return false;
-
-      const observationStations = Array.isArray(crossing.observationStations)
-        ? crossing.observationStations
-        : [];
-
-      const requiredRouteStops = Array.isArray(crossing.requiredRouteStops)
-        ? crossing.requiredRouteStops
-        : [];
-
-      const stations = [
-        ...observationStations,
-        ...requiredRouteStops,
-      ]
-        .map(normalize)
-        .filter(Boolean);
-
-      if (!stations.length) return true;
-
-      return stations.some((station) =>
-        route.some(
-          (stop) =>
-            stop === station ||
-            stop.includes(station) ||
-            station.includes(stop),
-        ) ||
-        calls.some(
-          (call) =>
-            call === station ||
-            call.includes(station) ||
-            station.includes(call),
-        ),
-      );
-    });
-  });
+    return matchesStations(event, [
+      ...(crossing.observationStations || []),
+      ...(crossing.requiredRouteStops || []),
+    ]);
+  }));
 }
