@@ -1,5 +1,4 @@
 import https from "node:https";
-import type { ClientRequest } from "node:http";
 import { createGunzip } from "node:zlib";
 import {
   filterEventsByDemand,
@@ -21,7 +20,7 @@ function fetchMobilithek(
   source: NodeJS.ReadableStream;
   contentType: string;
   contentEncoding: string;
-  request: ClientRequest;
+  request: typeof https.request extends (...args: any[]) => infer R ? R : never;
 }> {
   const baseUrl =
     process.env.MOBILITHEK_SUBSCRIPTION_URL?.trim() || DEFAULT_URL;
@@ -38,6 +37,7 @@ function fetchMobilithek(
       url,
       {
         method: "GET",
+        p12: undefined,
         pfx: Buffer.from(p12Base64, "base64"),
         passphrase,
         headers: {
@@ -101,8 +101,6 @@ function takeJourneys(buffer: string): {
   while (true) {
     const start = rest.search(START_RE);
     if (start < 0) {
-      // Keep a small tail because the next chunk may contain the remainder
-      // of an opening tag.
       return { journeys, rest: rest.length > 4096 ? rest.slice(-4096) : rest };
     }
 
