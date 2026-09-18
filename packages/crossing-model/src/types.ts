@@ -3,6 +3,8 @@ export type CrossingRule = {
   stopping: boolean;
   closeOffsetSeconds?: number;
   openOffsetSeconds?: number;
+  /** Explicit lines/services known to cross this BÜ; used to constrain demand and snapshots. */
+  lineHints?: string[];
 };
 
 export type ThroughRule = {
