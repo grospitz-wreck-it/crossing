@@ -10,6 +10,8 @@ type Point = { lat: number; lon: number };
 type RailwayLine = { id: number; routeType: string; ref: string; name: string; from: string; to: string; network?: string; operator?: string };
 type RailwayCandidate = { kind: string; routeType: string; ref: string; name: string; from: string; to: string; distanceMeters: number; wayId: number; relationId?: number | null; source: string; waysCount: number; segments: Point[][]; lineRelations?: RailwayLine[] };
 type RailwayInfrastructure = { status: string; candidates: RailwayCandidate[]; error?: string };
+type StationCandidate = { eva: string; stationName: string; ril100?: string; ibnr?: string; lat: number; lon: number; distanceKm: number; trackDistanceMeters: number };
+type SelectedObservationStation = StationCandidate & { side: "before" | "after" };
 type Forecast = { crossing: any; state: string; nextClosure: any; closures: any[]; trains: any[]; stations: any[]; message?: string };
 
 export default function CrossingsAdmin() {
@@ -24,6 +26,9 @@ export default function CrossingsAdmin() {
   const [selectedRouteKey, setSelectedRouteKey] = useState("");
   const [selectedRoute, setSelectedRoute] = useState<RailwayCandidate | null>(null);
   const [selectedLineHints, setSelectedLineHints] = useState<string[]>([]);
+  const [stationCandidates, setStationCandidates] = useState<StationCandidate[]>([]);
+  const [selectedObservationStations, setSelectedObservationStations] = useState<SelectedObservationStation[]>([]);
+  const [stationCandidateLoading, setStationCandidateLoading] = useState(false);
   const [stationLoading, setStationLoading] = useState(false);
   const [forecast, setForecast] = useState<Forecast | null>(null);
   const [forecastLoading, setForecastLoading] = useState(false);
@@ -36,7 +41,7 @@ export default function CrossingsAdmin() {
   useEffect(() => { void load(); return () => { if (lookupTimer.current) clearTimeout(lookupTimer.current); }; }, []);
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) { setForm((f) => ({ ...f, [key]: value })); }
   function looksLikeLocation(value: string) { const input = value.trim(); if (input.length < 8) return false; if (/[-+]?\d{1,3}[.,]\d+\s*[,; ]\s*[-+]?\d{1,3}[.,]\d+/.test(input)) return true; return /^[23456789CFGHJMPQRVWX]{4,7}\+[23456789CFGHJMPQRVWX]{2,7}(?:\s+.+)?$/i.test(input); }
-  function resetWizard() { setCoords(""); setLocation(null); setLookupError(""); setRailwayInfrastructure({ status: "NOT_RUN", candidates: [] }); setSelectedRouteKey(""); setSelectedRoute(null); setSelectedLineHints([]); setForm({ id: "", name: "", eva: "", lat: "", lon: "", closeOffsetSeconds: "80", openOffsetSeconds: "20", confidence: "0.5" }); }
+  function resetWizard() { setCoords(""); setLocation(null); setLookupError(""); setRailwayInfrastructure({ status: "NOT_RUN", candidates: [] }); setSelectedRouteKey(""); setSelectedRoute(null); setSelectedLineHints([]); setStationCandidates([]); setSelectedObservationStations([]); setStationCandidateLoading(false); setForm({ id: "", name: "", eva: "", lat: "", lon: "", closeOffsetSeconds: "80", openOffsetSeconds: "20", confidence: "0.5" }); }
   async function resolveLocation(value = coords) {
     const input = value.trim(); if (!looksLikeLocation(input)) return;
     const requestId = ++lookupRequest.current; setLookupError(""); setStationLoading(true); setRailwayInfrastructure({ status: "LOADING", candidates: [] }); setSelectedRouteKey(""); setSelectedRoute(null);
@@ -54,6 +59,27 @@ export default function CrossingsAdmin() {
     } catch { if (requestId === lookupRequest.current) { setRailwayInfrastructure({ status: "ERROR", candidates: [] }); setLookupError("Standort konnte nicht geladen werden. Bitte erneut versuchen."); } }
     finally { if (requestId === lookupRequest.current) setStationLoading(false); }
   }
+  async function loadStationCandidates(candidate: RailwayCandidate) {
+    if (!location || !candidate.relationId) {
+      setStationCandidates([]);
+      setSelectedObservationStations([]);
+      return;
+    }
+    setStationCandidateLoading(true);
+    try {
+      const res = await fetch(`/api/admin/crossings/stations?lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}&relationId=${encodeURIComponent(candidate.relationId)}`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "DB-Stationen konnten nicht ermittelt werden.");
+      setStationCandidates(Array.isArray(data.stations) ? data.stations : []);
+      setSelectedObservationStations([]);
+    } catch (error) {
+      setStationCandidates([]);
+      setSelectedObservationStations([]);
+      setLookupError(error instanceof Error ? error.message : "DB-Stationen konnten nicht ermittelt werden.");
+    } finally {
+      setStationCandidateLoading(false);
+    }
+  }
   function selectRouteState(candidate: RailwayCandidate) {
     setSelectedRouteKey(routeKey(candidate));
     setSelectedRoute({ ...candidate, segments: (candidate.segments || []).map((segment) => segment.map((point) => ({ ...point }))) });
@@ -62,6 +88,15 @@ export default function CrossingsAdmin() {
         .map((line) => (line.ref || line.name || "").trim())
         .filter(Boolean)
     );
+    void loadStationCandidates(candidate);
+  }
+  function setStationSide(station: StationCandidate, side: "before" | "after") {
+    setSelectedObservationStations((current) => {
+      const existing = current.find((item) => item.eva === station.eva);
+      if (existing?.side === side) return current.filter((item) => item.eva !== station.eva);
+      const next = current.filter((item) => item.eva !== station.eva);
+      return [...next, { ...station, side }];
+    });
   }
   function toggleLineHint(value: string) {
     setSelectedLineHints((current) =>
@@ -74,7 +109,7 @@ export default function CrossingsAdmin() {
     if (railwayInfrastructure.candidates.length > 0 && !selectedRoute) { setLookupError("Bitte zuerst eine Bahnstrecke auf der Karte auswählen."); return; }
     setSaving(true); setLookupError("");
     try {
-      const route = selectedRoute; const payload = { ...form, lat: Number(form.lat), lon: Number(form.lon), closeOffsetSeconds: Number(form.closeOffsetSeconds), openOffsetSeconds: Number(form.openOffsetSeconds), confidence: Number(form.confidence), routeRef: route?.ref || "", routeName: route?.name || "", selectedRouteRef: route?.ref || "", selectedRouteName: route?.name || "", selectedRoute: route ? { ...route, segments: route.segments } : null, lineHints: selectedLineHints };
+      const route = selectedRoute; const payload = { ...form, lat: Number(form.lat), lon: Number(form.lon), closeOffsetSeconds: Number(form.closeOffsetSeconds), openOffsetSeconds: Number(form.openOffsetSeconds), confidence: Number(form.confidence), routeRef: route?.ref || "", routeName: route?.name || "", selectedRouteRef: route?.ref || "", selectedRouteName: route?.name || "", selectedRoute: route ? { ...route, segments: route.segments } : null, lineHints: selectedLineHints, observationStations: selectedObservationStations };
       const res = await fetch("/api/admin/crossings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }); const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Speichern fehlgeschlagen (${res.status})`);
       const savedId = String(data?.crossing?.id || data?.id || "").trim(); if (!savedId) throw new Error("Der Server hat keinen Datensatz bestätigt.");
@@ -108,7 +143,33 @@ export default function CrossingsAdmin() {
     {forecastError && !forecast && <div className={styles.backdrop} onMouseDown={() => setForecastError("")}><aside className={styles.drawer} onMouseDown={(e) => e.stopPropagation()}><div className={styles.drawerHead}><h2>Prognose</h2><button className={styles.close} onClick={() => setForecastError("")}>×</button></div><div className={styles.content}><div className={styles.error}>{forecastError}</div></div></aside></div>}
     {open && <div className={styles.backdrop} onMouseDown={() => !saving && setOpen(false)}><aside className={styles.drawer} onMouseDown={(e) => e.stopPropagation()}><div className={styles.drawerHead}><div><div className={styles.eyebrow}>NEUER DATENSATZ</div><h2>Übergang einrichten</h2></div><button className={styles.close} disabled={saving} onClick={() => setOpen(false)}>×</button></div><div className={styles.steps}><span className={styles.active}>01 Standort</span><span className={styles.active}>02 Strecke</span><span>03 Automatik &amp; Speichern</span></div><div className={styles.content}>
       <section><label>Google Maps / Plus Code</label><div className={styles.inline}><input value={coords} onChange={(e) => handleLocationChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void resolveLocation(); } }} placeholder="z. B. 6F25+VRJ Rödinghausen"/><button className={styles.secondary} disabled={stationLoading || saving} onClick={() => void resolveLocation()}>{stationLoading ? "Suche…" : "Standort prüfen"}</button></div><small>Akzeptiert Google-Maps-Plus-Codes und GPS-Koordinaten. Nach der Standortprüfung werden OSM-Bahnstrecken und später automatisch die passenden DB-Stationen und Prognoseregeln bestimmt.</small>{lookupError && <div className={styles.error}>{lookupError}</div>}{location && <div className={styles.location}><strong>Standort erkannt</strong><span>{Number(location.lat).toFixed(6)}, {Number(location.lon).toFixed(6)} · {location.source === "plus-code-recovered" ? "Plus Code aufgelöst" : location.source === "plus-code" ? "Plus Code" : "GPS"}</span></div>}</section>
-      {location && <section className={styles.routeSection}><div className={styles.routeIntro}><div><label>Bahnstrecke auswählen</label><small>Die ausgewählte OSM-Strecke ist die Grundlage für die automatische Stationserkennung und Regelgenerierung.</small></div>{selectedRoute && <span className={styles.routeSelected}>✓ {selectedRoute.ref ? `Strecke ${selectedRoute.ref}` : "Strecke ausgewählt"}</span>}</div><RouteMap lat={Number(location.lat)} lon={Number(location.lon)} candidates={railwayInfrastructure.candidates} selectedKey={selectedRouteKey} onSelect={selectRouteState}/>{selectedRoute && getLineChips(selectedRoute).length > 0 && <div className={styles.lineChipSection}>
+      {location && <section className={styles.routeSection}><div className={styles.routeIntro}><div><label>Bahnstrecke auswählen</label><small>Die ausgewählte OSM-Strecke ist die Grundlage für die automatische Stationserkennung und Regelgenerierung.</small></div>{selectedRoute && <span className={styles.routeSelected}>✓ {selectedRoute.ref ? `Strecke ${selectedRoute.ref}` : "Strecke ausgewählt"}</span>}</div><RouteMap lat={Number(location.lat)} lon={Number(location.lon)} candidates={railwayInfrastructure.candidates} selectedKey={selectedRouteKey} onSelect={selectRouteState}/>{selectedRoute && <section style={{ marginTop: 18 }}>
+        <div className={styles.lineChipLabel}>Welche Stationen bilden die Grundanalyse?</div>
+        <small>Wähle die relevanten DB-Stationen unmittelbar vor und nach dem Übergang. Diese Stationen liefern die präzisesten Fahrplan-/Echtzeitbeobachtungen. Mehrere Stationen je Seite sind möglich.</small>
+        {stationCandidateLoading && <div className={styles.emptySmall}>Streckennahe DB-Stationen werden ermittelt…</div>}
+        {!stationCandidateLoading && stationCandidates.length === 0 && <div className={styles.emptySmall}>Keine streckennahen DB-Stationen gefunden.</div>}
+        {!stationCandidateLoading && stationCandidates.length > 0 && <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+          {stationCandidates.map((station) => {
+            const selected = selectedObservationStations.find((item) => item.eva === station.eva);
+            return <div key={station.eva} className={styles.nearbyStation}>
+              <div style={{ flex: 1 }}>
+                <strong>{station.stationName}</strong>
+                <span>EVA {station.eva} · {station.distanceKm.toFixed(1)} km vom BÜ · {Math.round(station.trackDistanceMeters)} m zur Strecke</span>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <button type="button" className={styles.secondary} aria-pressed={selected?.side === "before"} onClick={() => setStationSide(station, "before")}>{selected?.side === "before" ? "✓ " : ""}Vorher</button>
+                <button type="button" className={styles.secondary} aria-pressed={selected?.side === "after"} onClick={() => setStationSide(station, "after")}>{selected?.side === "after" ? "✓ " : ""}Nachher</button>
+              </div>
+            </div>;
+          })}
+        </div>
+        {!!selectedObservationStations.length && <small style={{ display: "block", marginTop: 8 }}>Grundanalyse: {selectedObservationStations.map((station) => `${station.stationName} (${station.side === "before" ? "vorher" : "nachher"})`).join(" · ")}</small>}
+        <div style={{ marginTop: 12, padding: 10, borderRadius: 10, background: "rgba(15,23,42,.05)" }}>
+          <strong>Danach: Durchfahrten erkennen</strong>
+          <span style={{ display: "block", marginTop: 4 }}>Zusätzlich wird der vollständige Streckenverlauf geprüft. So erkennen wir Züge, die den Übergang passieren, ohne an den ausgewählten Beobachtungsstationen zu halten.</span>
+        </div>
+      </section>}
+      {selectedRoute && getLineChips(selectedRoute).length > 0 && <div className={styles.lineChipSection}>
         <div className={styles.lineChipLabel}>Welche Linien kreuzen hier sicher?</div>
         <small>Die ausgewählten Linien werden für Nachfrage, Snapshot und Prognose als harte Einschränkung verwendet.</small>
         <div className={styles.lineChips}>{getLineChips(selectedRoute).map((line) => {
@@ -124,7 +185,7 @@ export default function CrossingsAdmin() {
       <div className={styles.grid}><Field label="Name" value={form.name} onChange={(v) => update("name", v)} placeholder="z. B. Bahnübergang Bruchmühlen"/><Field label="EVA des Übergangs" value={form.eva} onChange={(v) => update("eva", v)} placeholder="optional"/></div>
       {location && selectedRoute && <section><label>Automatische Konfiguration</label><div className={styles.nearbyStations}><div className={styles.nearbyStation}><div><strong>DB-Stationen werden automatisch bestimmt</strong><span>Streckennahe Beobachtungsbahnhöfe plus größere Bahnhöfe im Umkreis von bis zu 75 km für ICE/IC-Erkennung.</span></div></div><div className={styles.nearbyStation}><div><strong>Prognoseregeln werden automatisch erzeugt</strong><span>OSM-Streckenrelation, Strecken-Endpunkte, Stationen und Entfernung fließen in requiredRouteStops und throughRules ein.</span></div></div></div></section>}
       <div className={styles.grid}><Field label="Schließ-Offset (Sek.)" value={form.closeOffsetSeconds} onChange={(v) => update("closeOffsetSeconds", v)} /><Field label="Öffnungs-Offset (Sek.)" value={form.openOffsetSeconds} onChange={(v) => update("openOffsetSeconds", v)} /><Field label="Konfidenz" value={form.confidence} onChange={(v) => update("confidence", v)} /></div>
-    </div><footer className={styles.footer}><button className={styles.cancel} disabled={saving} onClick={() => setOpen(false)}>Abbrechen</button><button className={styles.primary} disabled={saving || !location || (railwayInfrastructure.candidates.length > 0 && !selectedRoute)} onClick={() => void save()}>{saving ? "Speichere…" : "Übergang speichern"}</button></footer></aside></div>}
+    </div><footer className={styles.footer}><button className={styles.cancel} disabled={saving} onClick={() => setOpen(false)}>Abbrechen</button><button className={styles.primary} disabled={saving || !location || (railwayInfrastructure.candidates.length > 0 && !selectedRoute) || (selectedRoute && stationCandidates.length > 0 && selectedObservationStations.length === 0)} onClick={() => void save()}>{saving ? "Speichere…" : "Übergang speichern"}</button></footer></aside></div>}
   </main>;
 }
 
