@@ -18,7 +18,8 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
     id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas,
     contextEvas: jsonArray(row.context_evas).map(String).filter(Boolean),
     requiredRouteStops: jsonArray(row.required_route_stops).map(String).filter(Boolean),
-    lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [],
+    lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20),
+    rules: jsonArray(row.rules),
     throughRules: sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva),
     diversionRules: jsonArray(row.diversion_rules), rerouteWatchRules: jsonArray(row.reroute_watch_rules), confidence: Number(row.confidence || 0.5)
   };
@@ -26,13 +27,22 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
 async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
-      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
+      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,rules,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
       db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] })
     ]);
     const row: any = result.rows[0]; return row ? buildCrossingFromDb(row, stations.rows as any[]) : null;
   } catch (error) { console.error("[STATUS] loadCrossing failed:", error); return null; }
 }
-function lineHintsForCrossing(crossing: any): string[] { const refs = (crossing.requiredRouteStops || []).map(String); return !crossing.eva && (refs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || ""))) ? ["S28"] : []; }
+function lineHintsForCrossing(crossing: any): string[] {
+  const explicit = Array.from(new Set(
+    jsonArray(crossing.rules).flatMap((rule: any) =>
+      Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
+    )
+  )).filter(Boolean);
+  if (explicit.length) return explicit;
+  const refs = (crossing.requiredRouteStops || []).map(String);
+  return !crossing.eva && (refs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || ""))) ? ["S28"] : [];
+}
 function lineMatches(train: any, hints: string[]) { if (!hints.length) return true; const normalize=(v:any)=>String(v||"").toUpperCase().replace(/\s+/g,"").replace(/[._-]/g,""); const line=normalize(train.line),cat=normalize(train.category); return hints.some(h=>{const x=normalize(h);return line===x||line.includes(x)||x.includes(line)||cat===x;}); }
 function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   const now=Date.now(); trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
@@ -65,7 +75,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // Observation-only crossings stay fully snapshot-backed for the fast test path.
     if(crossing.eva && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
       const direct=await getStationTimetable(crossing.eva,1).catch(()=>[]);
-      for(const train of direct.filter((t:any)=>!t.cancelled)) { const crossingTime=train.actualTime; if(crossingTime.getTime()<Date.now()-60_000||crossingTime.getTime()>Date.now()+3*60*60_000)continue; trains.push({id:`direct-${train.category}-${train.journeyNumber}`,line:train.line,category:train.category,journeyNumber:train.journeyNumber,origin:train.origin,destination:train.destination,platform:train.platform,isStoppingTrain:true,direction:getCrossingDirection(train.route||[]),directionLabel:train.destination?`Richtung ${train.destination}`:null,delayMinutes:train.delayMinutes,crossingTime:crossingTime.toISOString(),arrival:crossingTime.toISOString(),etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)}); }
+      for(const train of direct.filter((t:any)=>!t.cancelled && lineMatches(t,lineHints))) { const crossingTime=train.actualTime; if(crossingTime.getTime()<Date.now()-60_000||crossingTime.getTime()>Date.now()+3*60*60_000)continue; trains.push({id:`direct-${train.category}-${train.journeyNumber}`,line:train.line,category:train.category,journeyNumber:train.journeyNumber,origin:train.origin,destination:train.destination,platform:train.platform,isStoppingTrain:true,direction:getCrossingDirection(train.route||[]),directionLabel:train.destination?`Richtung ${train.destination}`:null,delayMinutes:train.delayMinutes,crossingTime:crossingTime.toISOString(),arrival:crossingTime.toISOString(),etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)}); }
     }
     const unique=Array.from(new Map(trains.map(t=>[`${t.line}-${t.category}-${t.journeyNumber}`,t])).values()); const payload=toPayload(crossing,unique,lineHints); await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
