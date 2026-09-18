@@ -53,11 +53,14 @@ export async function getThroughTrains(crossing:Crossing):Promise<ThroughTrain[]
     try {
       const snapshot = await getSnapshotThroughTrains(snapshotDb, crossing);
       if (snapshot?.length) {
+        console.log(`[getThroughTrains] snapshot HIT für ${crossing.id}: ${snapshot.length} Events`);
         return snapshot.map((train) => ({
           ...train,
           detection: "official-route" as const,
         }));
       }
+
+      console.warn(`[getThroughTrains] snapshot MISS für ${crossing.id} — Fallback auf Live-Mobilithek`);
     } catch (error) {
       console.warn("Mobilithek snapshot through-train lookup failed; falling back", error);
     }
