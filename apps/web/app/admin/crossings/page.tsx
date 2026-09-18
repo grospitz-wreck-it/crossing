@@ -67,9 +67,9 @@ export default function CrossingsAdmin() {
     }
     setStationCandidateLoading(true);
     try {
-      const res = await fetch(`/api/admin/crossings/stations?lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}&relationId=${encodeURIComponent(candidate.relationId)}`, { cache: "no-store" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "DB-Stationen konnten nicht ermittelt werden.");
+      const response = await fetch(`/api/admin/crossings/stations?lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}&relationId=${encodeURIComponent(candidate.relationId)}`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "DB-Stationen konnten nicht ermittelt werden.");
       setStationCandidates(Array.isArray(data.stations) ? data.stations : []);
       setSelectedObservationStations([]);
     } catch (error) {
@@ -80,6 +80,13 @@ export default function CrossingsAdmin() {
       setStationCandidateLoading(false);
     }
   }
+  function setStationSide(station: StationCandidate, side: "before" | "after") {
+    setSelectedObservationStations((current) => {
+      const existing = current.find((item) => item.eva === station.eva);
+      if (existing?.side === side) return current.filter((item) => item.eva !== station.eva);
+      return [...current.filter((item) => item.eva !== station.eva), { ...station, side }];
+    });
+  }
   function selectRouteState(candidate: RailwayCandidate) {
     setSelectedRouteKey(routeKey(candidate));
     setSelectedRoute({ ...candidate, segments: (candidate.segments || []).map((segment) => segment.map((point) => ({ ...point }))) });
@@ -89,14 +96,6 @@ export default function CrossingsAdmin() {
         .filter(Boolean)
     );
     void loadStationCandidates(candidate);
-  }
-  function setStationSide(station: StationCandidate, side: "before" | "after") {
-    setSelectedObservationStations((current) => {
-      const existing = current.find((item) => item.eva === station.eva);
-      if (existing?.side === side) return current.filter((item) => item.eva !== station.eva);
-      const next = current.filter((item) => item.eva !== station.eva);
-      return [...next, { ...station, side }];
-    });
   }
   function toggleLineHint(value: string) {
     setSelectedLineHints((current) =>
@@ -143,33 +142,7 @@ export default function CrossingsAdmin() {
     {forecastError && !forecast && <div className={styles.backdrop} onMouseDown={() => setForecastError("")}><aside className={styles.drawer} onMouseDown={(e) => e.stopPropagation()}><div className={styles.drawerHead}><h2>Prognose</h2><button className={styles.close} onClick={() => setForecastError("")}>×</button></div><div className={styles.content}><div className={styles.error}>{forecastError}</div></div></aside></div>}
     {open && <div className={styles.backdrop} onMouseDown={() => !saving && setOpen(false)}><aside className={styles.drawer} onMouseDown={(e) => e.stopPropagation()}><div className={styles.drawerHead}><div><div className={styles.eyebrow}>NEUER DATENSATZ</div><h2>Übergang einrichten</h2></div><button className={styles.close} disabled={saving} onClick={() => setOpen(false)}>×</button></div><div className={styles.steps}><span className={styles.active}>01 Standort</span><span className={styles.active}>02 Strecke</span><span>03 Automatik &amp; Speichern</span></div><div className={styles.content}>
       <section><label>Google Maps / Plus Code</label><div className={styles.inline}><input value={coords} onChange={(e) => handleLocationChange(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void resolveLocation(); } }} placeholder="z. B. 6F25+VRJ Rödinghausen"/><button className={styles.secondary} disabled={stationLoading || saving} onClick={() => void resolveLocation()}>{stationLoading ? "Suche…" : "Standort prüfen"}</button></div><small>Akzeptiert Google-Maps-Plus-Codes und GPS-Koordinaten. Nach der Standortprüfung werden OSM-Bahnstrecken und später automatisch die passenden DB-Stationen und Prognoseregeln bestimmt.</small>{lookupError && <div className={styles.error}>{lookupError}</div>}{location && <div className={styles.location}><strong>Standort erkannt</strong><span>{Number(location.lat).toFixed(6)}, {Number(location.lon).toFixed(6)} · {location.source === "plus-code-recovered" ? "Plus Code aufgelöst" : location.source === "plus-code" ? "Plus Code" : "GPS"}</span></div>}</section>
-      {location && <section className={styles.routeSection}><div className={styles.routeIntro}><div><label>Bahnstrecke auswählen</label><small>Die ausgewählte OSM-Strecke ist die Grundlage für die automatische Stationserkennung und Regelgenerierung.</small></div>{selectedRoute && <span className={styles.routeSelected}>✓ {selectedRoute.ref ? `Strecke ${selectedRoute.ref}` : "Strecke ausgewählt"}</span>}</div><RouteMap lat={Number(location.lat)} lon={Number(location.lon)} candidates={railwayInfrastructure.candidates} selectedKey={selectedRouteKey} onSelect={selectRouteState}/>{selectedRoute && <section style={{ marginTop: 18 }}>
-        <div className={styles.lineChipLabel}>Welche Stationen bilden die Grundanalyse?</div>
-        <small>Wähle die relevanten DB-Stationen unmittelbar vor und nach dem Übergang. Diese Stationen liefern die präzisesten Fahrplan-/Echtzeitbeobachtungen. Mehrere Stationen je Seite sind möglich.</small>
-        {stationCandidateLoading && <div className={styles.emptySmall}>Streckennahe DB-Stationen werden ermittelt…</div>}
-        {!stationCandidateLoading && stationCandidates.length === 0 && <div className={styles.emptySmall}>Keine streckennahen DB-Stationen gefunden.</div>}
-        {!stationCandidateLoading && stationCandidates.length > 0 && <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-          {stationCandidates.map((station) => {
-            const selected = selectedObservationStations.find((item) => item.eva === station.eva);
-            return <div key={station.eva} className={styles.nearbyStation}>
-              <div style={{ flex: 1 }}>
-                <strong>{station.stationName}</strong>
-                <span>EVA {station.eva} · {station.distanceKm.toFixed(1)} km vom BÜ · {Math.round(station.trackDistanceMeters)} m zur Strecke</span>
-              </div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                <button type="button" className={styles.secondary} aria-pressed={selected?.side === "before"} onClick={() => setStationSide(station, "before")}>{selected?.side === "before" ? "✓ " : ""}Vorher</button>
-                <button type="button" className={styles.secondary} aria-pressed={selected?.side === "after"} onClick={() => setStationSide(station, "after")}>{selected?.side === "after" ? "✓ " : ""}Nachher</button>
-              </div>
-            </div>;
-          })}
-        </div>
-        {!!selectedObservationStations.length && <small style={{ display: "block", marginTop: 8 }}>Grundanalyse: {selectedObservationStations.map((station) => `${station.stationName} (${station.side === "before" ? "vorher" : "nachher"})`).join(" · ")}</small>}
-        <div style={{ marginTop: 12, padding: 10, borderRadius: 10, background: "rgba(15,23,42,.05)" }}>
-          <strong>Danach: Durchfahrten erkennen</strong>
-          <span style={{ display: "block", marginTop: 4 }}>Zusätzlich wird der vollständige Streckenverlauf geprüft. So erkennen wir Züge, die den Übergang passieren, ohne an den ausgewählten Beobachtungsstationen zu halten.</span>
-        </div>
-      </section>}
-      {selectedRoute && getLineChips(selectedRoute).length > 0 && <div className={styles.lineChipSection}>
+      {location && <section className={styles.routeSection}><div className={styles.routeIntro}><div><label>Bahnstrecke auswählen</label><small>Die ausgewählte OSM-Strecke ist die Grundlage für die automatische Stationserkennung und Regelgenerierung.</small></div>{selectedRoute && <span className={styles.routeSelected}>✓ {selectedRoute.ref ? `Strecke ${selectedRoute.ref}` : "Strecke ausgewählt"}</span>}</div><RouteMap lat={Number(location.lat)} lon={Number(location.lon)} candidates={railwayInfrastructure.candidates} selectedKey={selectedRouteKey} onSelect={selectRouteState}/>{selectedRoute && <ObservationStationPicker candidates={stationCandidates} selected={selectedObservationStations} loading={stationCandidateLoading} onSelect={setStationSide}/>} {selectedRoute && getLineChips(selectedRoute).length > 0 && <div className={styles.lineChipSection}>
         <div className={styles.lineChipLabel}>Welche Linien kreuzen hier sicher?</div>
         <small>Die ausgewählten Linien werden für Nachfrage, Snapshot und Prognose als harte Einschränkung verwendet.</small>
         <div className={styles.lineChips}>{getLineChips(selectedRoute).map((line) => {
@@ -185,8 +158,33 @@ export default function CrossingsAdmin() {
       <div className={styles.grid}><Field label="Name" value={form.name} onChange={(v) => update("name", v)} placeholder="z. B. Bahnübergang Bruchmühlen"/><Field label="EVA des Übergangs" value={form.eva} onChange={(v) => update("eva", v)} placeholder="optional"/></div>
       {location && selectedRoute && <section><label>Automatische Konfiguration</label><div className={styles.nearbyStations}><div className={styles.nearbyStation}><div><strong>DB-Stationen werden automatisch bestimmt</strong><span>Streckennahe Beobachtungsbahnhöfe plus größere Bahnhöfe im Umkreis von bis zu 75 km für ICE/IC-Erkennung.</span></div></div><div className={styles.nearbyStation}><div><strong>Prognoseregeln werden automatisch erzeugt</strong><span>OSM-Streckenrelation, Strecken-Endpunkte, Stationen und Entfernung fließen in requiredRouteStops und throughRules ein.</span></div></div></div></section>}
       <div className={styles.grid}><Field label="Schließ-Offset (Sek.)" value={form.closeOffsetSeconds} onChange={(v) => update("closeOffsetSeconds", v)} /><Field label="Öffnungs-Offset (Sek.)" value={form.openOffsetSeconds} onChange={(v) => update("openOffsetSeconds", v)} /><Field label="Konfidenz" value={form.confidence} onChange={(v) => update("confidence", v)} /></div>
-    </div><footer className={styles.footer}><button className={styles.cancel} disabled={saving} onClick={() => setOpen(false)}>Abbrechen</button><button className={styles.primary} disabled={saving || !location || (railwayInfrastructure.candidates.length > 0 && !selectedRoute) || (selectedRoute && stationCandidates.length > 0 && selectedObservationStations.length === 0)} onClick={() => void save()}>{saving ? "Speichere…" : "Übergang speichern"}</button></footer></aside></div>}
+    </div><footer className={styles.footer}><button className={styles.cancel} disabled={saving} onClick={() => setOpen(false)}>Abbrechen</button><button className={styles.primary} disabled={saving || !location || (railwayInfrastructure.candidates.length > 0 && !selectedRoute)} onClick={() => void save()}>{saving ? "Speichere…" : "Übergang speichern"}</button></footer></aside></div>}
   </main>;
+}
+
+function ObservationStationPicker({ candidates, selected, loading, onSelect }: { candidates: StationCandidate[]; selected: SelectedObservationStation[]; loading: boolean; onSelect: (station: StationCandidate, side: "before" | "after") => void }) {
+  return <div style={{ marginTop: 18 }}>
+    <div className={styles.lineChipLabel}>Welche Stationen bilden die Grundanalyse?</div>
+    <small>Wähle relevante DB-Stationen unmittelbar vor und nach dem Übergang. Diese Stationen liefern die präzisesten Beobachtungen.</small>
+    {loading && <div className={styles.emptySmall}>Streckennahe DB-Stationen werden ermittelt…</div>}
+    {!loading && candidates.length === 0 && <div className={styles.emptySmall}>Keine streckennahen DB-Stationen gefunden.</div>}
+    {!loading && candidates.length > 0 && <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+      {candidates.map((station) => {
+        const current = selected.find((item) => item.eva === station.eva);
+        return <div key={station.eva} className={styles.nearbyStation}>
+          <div style={{ flex: 1 }}>
+            <strong>{station.stationName}</strong>
+            <span>EVA {station.eva} · {station.distanceKm.toFixed(1)} km vom BÜ · {Math.round(station.trackDistanceMeters)} m zur Strecke</span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button type="button" className={styles.secondary} aria-pressed={current?.side === "before"} onClick={() => onSelect(station, "before")}>{current?.side === "before" ? "✓ " : ""}Vorher</button>
+            <button type="button" className={styles.secondary} aria-pressed={current?.side === "after"} onClick={() => onSelect(station, "after")}>{current?.side === "after" ? "✓ " : ""}Nachher</button>
+          </div>
+        </div>;
+      })}
+    </div>}
+    {selected.length > 0 && <small style={{ display: "block", marginTop: 8 }}>Grundanalyse: {selected.map((station) => `${station.stationName} (${station.side === "before" ? "vorher" : "nachher"})`).join(" · ")}</small>}
+  </div>;
 }
 
 function TrainList({ trains }: { trains: any[] }) {
