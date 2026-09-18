@@ -21,14 +21,18 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const cached = await readCrossingForecastCache<any>(id, FORECAST_CACHE_TTL_MS);
   if (cached?.forecastVersion === FORECAST_VERSION) return Response.json(cached, { headers: { "X-Crossing-Forecast-Cache": "HIT" } });
   const osmRoute = await loadCrossingOsmRoute(id);
-  const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+  const result = await db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,rules,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
   const crossing: any = result.rows[0];
   if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
   const storedRouteStops = jsonArray(crossing.required_route_stops).map((v) => String(v || "").trim()).filter(Boolean);
   const osmRefs = Array.isArray(osmRoute?.railwayRefs) ? osmRoute.railwayRefs.map(String) : [];
   const infrastructureRefs = Array.from(new Set([...storedRouteStops.filter((value) => /^\d{2,6}$/.test(value)), ...osmRefs.filter((value) => /^\d{2,6}$/.test(value))]));
   const isInfrastructureForecast = infrastructureRefs.length > 0 || /strecke\s*2530/i.test(String(crossing.name || ""));
-  const lineHints = isInfrastructureForecast ? [infrastructureRefs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || "")) ? "S28" : ""].filter(Boolean) : Array.from(new Set([...(Array.isArray(osmRoute?.lineRelations) ? osmRoute.lineRelations.flatMap((relation: any) => [relation.ref, relation.name]).filter(Boolean) : []), ...storedRouteStops].map(String).filter(Boolean)));
+  const lineHints = explicitLineHints.length
+    ? explicitLineHints
+    : isInfrastructureForecast
+      ? [infrastructureRefs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || "")) ? "S28" : ""].filter(Boolean)
+      : Array.from(new Set([...(Array.isArray(osmRoute?.lineRelations) ? osmRoute.lineRelations.flatMap((relation: any) => [relation.ref, relation.name]).filter(Boolean) : []), ...storedRouteStops].map(String).filter(Boolean)));
   const stationLinks = await db.execute({ sql: `SELECT eva,station_name,role,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }).catch(() => ({ rows: [] as any[] }));
   const stationNameByEva = new Map<string, string>();
   for (const row of stationLinks.rows as any[]) { const eva = String(row.eva || "").trim(); if (eva) stationNameByEva.set(eva, String(row.station_name || eva)); }
@@ -36,6 +40,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if (crossing.eva && !allObservationEvas.includes(String(crossing.eva))) allObservationEvas.unshift(String(crossing.eva));
   const contextEvas = jsonArray(crossing.context_evas).map((v) => String(v || "").trim()).filter(Boolean);
   const storedThroughRules = jsonArray(crossing.through_rules).slice(0, MAX_RULE_STATIONS);
+  const storedRules = jsonArray(crossing.rules);
+  const explicitLineHints = Array.from(new Set(
+    storedRules.flatMap((rule: any) =>
+      Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
+    )
+  )).filter(Boolean);
   const observationEvas = allObservationEvas.slice(0, MAX_DIRECT_OBSERVATION_STATIONS);
   const now = Date.now();
   const trainsByKey = new Map<string, any>();
