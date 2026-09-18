@@ -5,6 +5,7 @@ export type DemandCrossing = {
   requiredRouteStops: string[];
   categories: string[];
   observationStations: string[];
+  lineHints: string[];
 };
 
 function normalize(value: string): string {
@@ -33,15 +34,26 @@ export function filterEventsByDemand(
   return events.filter(({ event }) => {
     const line = String(event.line || "").toUpperCase();
     const category = String(event.category || "").toUpperCase();
+    const normalizedLine = line.replace(/\s+/g, "");
+    const normalizedCategory = category.replace(/\s+/g, "");
     const route = (event.route || []).map(normalize).filter(Boolean);
     const calls = (event.calls || [])
       .map((call) => normalize(String(call?.name || "")))
       .filter(Boolean);
 
     return demand.some((crossing) => {
-      const categories = Array.isArray(crossing.categories)
-        ? crossing.categories
-        : [];
+      const categories = Array.isArray(crossing.categories) ? crossing.categories : [];
+      const lineHints = Array.isArray(crossing.lineHints) ? crossing.lineHints : [];
+      const lineHintMatch = !lineHints.length || lineHints.some((hint) => {
+        const wanted = String(hint || "").toUpperCase().replace(/\s+/g, "");
+        return wanted && (
+          normalizedLine === wanted ||
+          normalizedLine.includes(wanted) ||
+          wanted.includes(normalizedLine) ||
+          normalizedCategory === wanted
+        );
+      });
+      if (!lineHintMatch) return false;
 
       const categoryMatch =
         categories.length === 0 ||
