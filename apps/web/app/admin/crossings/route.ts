@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { db } from "../../../lib/db";
+import { db } from "../../lib/db";
 import { OpenLocationCode } from "open-location-code";
 
 type Point = { lat: number; lon: number };
