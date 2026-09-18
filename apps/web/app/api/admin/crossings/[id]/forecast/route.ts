@@ -27,6 +27,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const storedRouteStops = jsonArray(crossing.required_route_stops).map((v) => String(v || "").trim()).filter(Boolean);
   const osmRefs = Array.isArray(osmRoute?.railwayRefs) ? osmRoute.railwayRefs.map(String) : [];
   const infrastructureRefs = Array.from(new Set([...storedRouteStops.filter((value) => /^\d{2,6}$/.test(value)), ...osmRefs.filter((value) => /^\d{2,6}$/.test(value))]));
+  const storedThroughRules = jsonArray(crossing.through_rules).slice(0, MAX_RULE_STATIONS);
+  const storedRules = jsonArray(crossing.rules);
+  const explicitLineHints = Array.from(new Set(
+    storedRules.flatMap((rule: any) =>
+      Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
+    )
+  )).filter(Boolean);
   const isInfrastructureForecast = infrastructureRefs.length > 0 || /strecke\s*2530/i.test(String(crossing.name || ""));
   const lineHints = explicitLineHints.length
     ? explicitLineHints
@@ -39,13 +46,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const allObservationEvas = jsonArray(crossing.observation_evas).map((v) => String(v || "").trim()).filter(Boolean);
   if (crossing.eva && !allObservationEvas.includes(String(crossing.eva))) allObservationEvas.unshift(String(crossing.eva));
   const contextEvas = jsonArray(crossing.context_evas).map((v) => String(v || "").trim()).filter(Boolean);
-  const storedThroughRules = jsonArray(crossing.through_rules).slice(0, MAX_RULE_STATIONS);
-  const storedRules = jsonArray(crossing.rules);
-  const explicitLineHints = Array.from(new Set(
-    storedRules.flatMap((rule: any) =>
-      Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
-    )
-  )).filter(Boolean);
   const observationEvas = allObservationEvas.slice(0, MAX_DIRECT_OBSERVATION_STATIONS);
   const now = Date.now();
   const trainsByKey = new Map<string, any>();
