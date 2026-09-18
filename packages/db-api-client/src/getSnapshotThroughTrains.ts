@@ -81,7 +81,23 @@ function directionForRoute(route: string[], observationStation: string, required
   return "unknown" as const;
 }
 
-function ruleAllowsTrain(rule: any, train: { category?: string; line?: string }) {
+function lineHintsForCrossing(crossing: Crossing): string[] {
+  return Array.from(new Set(
+    (crossing.rules || []).flatMap((rule: any) =>
+      Array.isArray(rule?.lineHints) ? rule.lineHints.map(String) : []
+    )
+  )).filter(Boolean);
+}
+
+function ruleAllowsTrain(rule: any, train: { category?: string; line?: string }, lineHints: string[]) {
+  if (lineHints.length) {
+    const line = String(train.line || "").toUpperCase().replace(/\s+/g, "");
+    const category = String(train.category || "").toUpperCase().replace(/\s+/g, "");
+    return lineHints.some((hint) => {
+      const wanted = String(hint).toUpperCase().replace(/\s+/g, "");
+      return wanted && (line === wanted || line.includes(wanted) || wanted.includes(line) || category === wanted);
+    });
+  }
   const categories = Array.isArray(rule.categories) ? rule.categories : [];
   if (!categories.length) return true;
   const line = String(train.line || "").toUpperCase();
@@ -103,6 +119,7 @@ function snapshotCallsContain(calls: any[], station: string) {
 
 export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): Promise<SnapshotThroughTrain[] | null> {
   try {
+    const lineHints = lineHintsForCrossing(crossing);
     const rules = (crossing.throughRules?.length
       ? crossing.throughRules
       : crossing.observationEvas.map((eva: string) => ({ observationEva: eva, observationStation: eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }))) as any[];
@@ -130,7 +147,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       const train = { line: String(row.line || ""), category: String(row.category || "") };
 
       for (const rule of rules) {
-        if (!ruleAllowsTrain(rule, train)) continue;
+        if (!ruleAllowsTrain(rule, train, lineHints)) continue;
         const observationStation = String(rule.observationStation || "");
         if (!matchesRoute(route, observationStation, crossing.requiredRouteStops || [])) continue;
 
