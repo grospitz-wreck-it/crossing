@@ -33,12 +33,15 @@ async function loadCrossing(id: string): Promise<any | null> {
     const row: any = result.rows[0]; return row ? buildCrossingFromDb(row, stations.rows as any[]) : null;
   } catch (error) { console.error("[STATUS] loadCrossing failed:", error); return null; }
 }
-function lineHintsForCrossing(crossing: any): string[] {
-  const explicit = Array.from(new Set(
+function explicitLineHintsForCrossing(crossing: any): string[] {
+  return Array.from(new Set(
     jsonArray(crossing.rules).flatMap((rule: any) =>
       Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
     )
   )).filter(Boolean);
+}
+function lineHintsForCrossing(crossing: any): string[] {
+  const explicit = explicitLineHintsForCrossing(crossing);
   if (explicit.length) return explicit;
   const refs = (crossing.requiredRouteStops || []).map(String);
   return !crossing.eva && (refs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || ""))) ? ["S28"] : [];
@@ -59,8 +62,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
   const lineHints=lineHintsForCrossing(crossing);
 
-  // S28 has its dedicated infrastructure forecast. Keep this fast path intact.
-  if(lineHints.length){ try { const { GET: getInfrastructureForecast }=await import("../../../admin/crossings/[id]/forecast/route"); const response=await getInfrastructureForecast(_request,{params:Promise.resolve({id})}); if(response.ok){ const forecast:any=await response.json(); const payload={crossing:{id:crossing.id,name:crossing.name,lat:crossing.lat,lon:crossing.lon},state:forecast.state||"OPEN",nextCloseIn:forecast.nextClosure?.closeInSeconds||0,nextOpenIn:forecast.nextClosure?.openInSeconds||0,phase:forecast.nextClosure?{start:forecast.nextClosure.start,end:forecast.nextClosure.end,durationMinutes:Math.round((Date.parse(forecast.nextClosure.end)-Date.parse(forecast.nextClosure.start))/60000),trainCount:forecast.nextClosure.trains?.length||0,trains:forecast.nextClosure.trains||[]}:null,closureCount:Array.isArray(forecast.closures)?forecast.closures.length:0,closures:forecast.closures||[],trainCount:Array.isArray(forecast.trains)?forecast.trains.length:0,trains:forecast.trains||[],divertedTrains:[],lineHints:forecast.crossing?.lineHints||lineHints}; await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"infrastructure-forecast"}}); } } catch(error){ console.warn("[STATUS] infrastructure forecast failed",error); } }
+  // Keep the legacy infrastructure forecast only for the old implicit S28
+  // configuration. Explicitly selected lines are handled by the station/snapshot
+  // analysis so that adjacent stations remain the primary data source.
+  const useLegacyInfrastructureForecast = explicitLineHintsForCrossing(crossing).length === 0 && lineHints.length === 1 && lineHints[0] === "S28";
+  if(useLegacyInfrastructureForecast){ try { const { GET: getInfrastructureForecast }=await import("../../../admin/crossings/[id]/forecast/route"); const response=await getInfrastructureForecast(_request,{params:Promise.resolve({id})}); if(response.ok){ const forecast:any=await response.json(); const payload={crossing:{id:crossing.id,name:crossing.name,lat:crossing.lat,lon:crossing.lon},state:forecast.state||"OPEN",nextCloseIn:forecast.nextClosure?.closeInSeconds||0,nextOpenIn:forecast.nextClosure?.openInSeconds||0,phase:forecast.nextClosure?{start:forecast.nextClosure.start,end:forecast.nextClosure.end,durationMinutes:Math.round((Date.parse(forecast.nextClosure.end)-Date.parse(forecast.nextClosure.start))/60000),trainCount:forecast.nextClosure.trains?.length||0,trains:forecast.nextClosure.trains||[]}:null,closureCount:Array.isArray(forecast.closures)?forecast.closures.length:0,closures:forecast.closures||[],trainCount:Array.isArray(forecast.trains)?forecast.trains.length:0,trains:forecast.trains||[],divertedTrains:[],lineHints:forecast.crossing?.lineHints||lineHints}; await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"infrastructure-forecast"}}); } } catch(error){ console.warn("[STATUS] infrastructure forecast failed",error); } }
 
   // Primary path: use the worker-fed Mobilithek snapshot. This is a single Turso
   // query and does not contact the DB Timetables API or Overpass during page load.
