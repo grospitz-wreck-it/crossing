@@ -40,7 +40,18 @@ function routeIndex(route: string[], station: string) {
   });
 }
 
-function matchesRoute(trainRoute: string[], observationStation: string, requiredRouteStops: string[]) {
+function matchingStops(trainRoute: string[], calls: any[], observationStation: string, requiredRouteStops: string[]) {
+  const callRoute = calls
+    .map((call) => String(call?.name || "").trim())
+    .filter(Boolean);
+  const requiredAnchors = requiredRouteStops.filter((stop) => !/^\d{2,6}$/.test(String(stop).trim()));
+  const callHasObservation = routeIndex(callRoute, observationStation) >= 0;
+  const callAnchorCount = requiredAnchors.filter((stop) => routeIndex(callRoute, stop) >= 0).length;
+  return callRoute.length && (callHasObservation || callAnchorCount >= 2) ? callRoute : trainRoute;
+}
+
+function matchesRoute(trainRoute: string[], calls: any[], observationStation: string, requiredRouteStops: string[]) {
+  trainRoute = matchingStops(trainRoute, calls, observationStation, requiredRouteStops);
   if (!trainRoute.length) return false;
   const infrastructureRefs = requiredRouteStops.filter((stop) => /^\d{2,6}$/.test(String(stop).trim()));
   if (infrastructureRefs.length) return routeIndex(trainRoute, observationStation) >= 0;
@@ -149,7 +160,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       for (const rule of rules) {
         if (!ruleAllowsTrain(rule, train, lineHints)) continue;
         const observationStation = String(rule.observationStation || "");
-        if (!matchesRoute(route, observationStation, crossing.requiredRouteStops || [])) continue;
+        if (!matchesRoute(route, calls, observationStation, crossing.requiredRouteStops || [])) continue;
 
         const observationCall = snapshotCallsContain(calls, observationStation);
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
