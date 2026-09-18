@@ -3,6 +3,7 @@ import { getDb } from "./db.js";
 type DemandRule = {
   observationStation?: string;
   categories?: string[];
+  lineHints?: string[];
 };
 
 type DemandCrossing = {
@@ -10,6 +11,7 @@ type DemandCrossing = {
   requiredRouteStops: string[];
   categories: string[];
   observationStations: string[];
+  lineHints: string[];
 };
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -27,6 +29,9 @@ function collectRules(value: unknown): DemandRule[] {
       observationStation: String(rule.observationStation || "").trim() || undefined,
       categories: Array.isArray(rule.categories)
         ? rule.categories.map(String).map((item) => item.trim()).filter(Boolean)
+        : [],
+      lineHints: Array.isArray(rule.lineHints)
+        ? rule.lineHints.map(String).map((item) => item.trim()).filter(Boolean)
         : [],
     }));
 }
@@ -67,6 +72,9 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
     const categories = Array.from(
       new Set(rules.flatMap((rule) => rule.categories || [])),
     );
+    const lineHints = Array.from(
+      new Set(rules.flatMap((rule) => rule.lineHints || [])),
+    );
 
     const observationStations = Array.from(
       new Set(
@@ -81,6 +89,7 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       requiredRouteStops: parseJson<string[]>(row.required_route_stops, []).map(String),
       categories,
       observationStations,
+      lineHints,
     };
   });
 }
