@@ -11,5 +11,8 @@
     "fast-xml-parser": "^5.10.1",
     "gtfs-realtime-bindings": "^2.2.0",
     "protobufjs": "^8.7.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260917.1"
   }
 }

@@ -12,7 +12,10 @@ export interface Env {
   MOBILITHEK_SUBSCRIPTION_ID_3?: string;
   MOBILITHEK_SUBSCRIPTION_ID_4?: string;
   MOBILITHEK_SUBSCRIPTION_URL?: string;
+  MOBILITHEK_RELAY_URL?: string;
+  MOBILITHEK_RELAY_TOKEN?: string;
   MOBILITHEK_CLIENT: Fetcher;
+  MOBILITHEK_CLIENT_TEST: Fetcher;
 }
 
 function getSubscriptionIds(env: Env): string[] {
@@ -26,20 +29,27 @@ function getSubscriptionIds(env: Env): string[] {
     .filter(Boolean);
 }
 
-async function runMtlsTest(env: Env): Promise<Response> {
-  const subscriptionId = "1027362883041628160";
-  const url =
-    `https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription` +
-    `?subscriptionID=${subscriptionId}`;
+const TEST_URL_8443 =
+  "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
+const TEST_URL_443 =
+  "https://mobilithek.info/mobilithek/api/v1.0/container/subscription?subscriptionID=1027362883041628160";
+const PUBLIC_TEST_URL = "https://example.com/";
+
+async function probe(
+  label: string,
+  url: string,
+  fetcher: typeof fetch,
+): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
-
   try {
-    const response = await env.MOBILITHEK_CLIENT.fetch(url, {
+    const response = await fetcher(url, {
       method: "GET",
+      headers: { "user-agent": "Crossings-mTLS-Diagnostic/1.0" },
     });
-    const body = await response.text();
-
-    return Response.json({
+    const body = (await response.text()).slice(0, 4000);
+    return {
+      label,
+      url,
       ok: response.ok,
       status: response.status,
       statusText: response.statusText,
@@ -52,20 +62,57 @@ async function runMtlsTest(env: Env): Promise<Response> {
         date: response.headers.get("date"),
       },
       bodyLength: body.length,
-      bodyPreview: body.slice(0, 500),
-    });
+      bodyPreview: body.slice(0, 300),
+    };
   } catch (error) {
-    return Response.json(
-      {
-        ok: false,
-        durationMs: Date.now() - startedAt,
-        error: error instanceof Error ? error.message : String(error),
-        errorName: error instanceof Error ? error.name : undefined,
-        stack: error instanceof Error ? error.stack : undefined,
-      },
-      { status: 500 },
-    );
+    return {
+      label,
+      url,
+      ok: false,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+      errorName: error instanceof Error ? error.name : undefined,
+      stack: error instanceof Error ? error.stack : undefined,
+    };
   }
+}
+
+async function runMtlsCompare(env: Env): Promise<Response> {
+  const tests = [
+    await probe("global-fetch-example", PUBLIC_TEST_URL, fetch),
+    await probe(
+      "mtls-binding-example",
+      PUBLIC_TEST_URL,
+      env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
+    ),
+    await probe(
+      "mtls-binding-test-example",
+      PUBLIC_TEST_URL,
+      env.MOBILITHEK_CLIENT_TEST.fetch.bind(env.MOBILITHEK_CLIENT_TEST),
+    ),
+    await probe("global-fetch-8443", TEST_URL_8443, fetch),
+    await probe(
+      "mtls-binding-8443",
+      TEST_URL_8443,
+      env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
+    ),
+    await probe(
+      "mtls-binding-test-8443",
+      TEST_URL_8443,
+      env.MOBILITHEK_CLIENT_TEST.fetch.bind(env.MOBILITHEK_CLIENT_TEST),
+    ),
+    await probe(
+      "mtls-binding-443",
+      TEST_URL_443,
+      env.MOBILITHEK_CLIENT.fetch.bind(env.MOBILITHEK_CLIENT),
+    ),
+    await probe(
+      "mtls-binding-test-443",
+      TEST_URL_443,
+      env.MOBILITHEK_CLIENT_TEST.fetch.bind(env.MOBILITHEK_CLIENT_TEST),
+    ),
+  ];
+  return Response.json({ tests });
 }
 
 async function runRefresh(env: Env): Promise<Record<string, unknown>> {
@@ -86,7 +133,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
 
   console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
 
-  const result = await refreshOnce(env, subscriptionIds);
+  const result = await refreshOnce(env, subscriptionIds, demand);
   const demandedEvents = filterEventsByDemand(result.events, demand);
 
   console.log(
@@ -130,7 +177,7 @@ export default {
       return Response.json({ ok: true, service: "mobilithek-refresh" });
     }
     if (url.pathname === "/mtls-test") {
-      return runMtlsTest(env);
+      return runMtlsCompare(env);
     }
     if (url.pathname === "/run") {
       try {

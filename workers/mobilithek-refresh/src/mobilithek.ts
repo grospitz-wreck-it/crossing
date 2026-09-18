@@ -84,7 +84,7 @@ export async function refreshOnce(subscriptionIds: string[] = config.subscriptio
       console.log(`[Mobilithek] ${subscriptionId}: ${feed.kind}`);
 
       let events: MobilithekTrainEvent[] = [];
-      if (feed.kind === "siri-journey") events = parseBody(feed.bytes.toString("utf8"));
+      if (feed.kind === "siri-journey") events = parseBody(new TextDecoder().decode(feed.bytes));
       else if (feed.kind === "gtfs-rt") events = parseGtfsRtTripUpdates(feed.bytes);
 
       successful++;
