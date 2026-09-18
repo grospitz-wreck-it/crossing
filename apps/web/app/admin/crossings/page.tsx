@@ -74,7 +74,7 @@ export default function CrossingsAdmin() {
     if (railwayInfrastructure.candidates.length > 0 && !selectedRoute) { setLookupError("Bitte zuerst eine Bahnstrecke auf der Karte auswählen."); return; }
     setSaving(true); setLookupError("");
     try {
-      const route = selectedRoute; const payload = { ...form, lat: Number(form.lat), lon: Number(form.lon), closeOffsetSeconds: Number(form.closeOffsetSeconds), openOffsetSeconds: Number(form.openOffsetSeconds), confidence: Number(form.confidence), routeRef: route?.ref || "", routeName: route?.name || "", selectedRouteRef: route?.ref || "", selectedRouteName: route?.name || "", selectedRoute: route ? { ...route, segments: route.segments } : null, lineHints: selectedLineHints : null };
+      const route = selectedRoute; const payload = { ...form, lat: Number(form.lat), lon: Number(form.lon), closeOffsetSeconds: Number(form.closeOffsetSeconds), openOffsetSeconds: Number(form.openOffsetSeconds), confidence: Number(form.confidence), routeRef: route?.ref || "", routeName: route?.name || "", selectedRouteRef: route?.ref || "", selectedRouteName: route?.name || "", selectedRoute: route ? { ...route, segments: route.segments } : null, lineHints: selectedLineHints };
       const res = await fetch("/api/admin/crossings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }); const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Speichern fehlgeschlagen (${res.status})`);
       const savedId = String(data?.crossing?.id || data?.id || "").trim(); if (!savedId) throw new Error("Der Server hat keinen Datensatz bestätigt.");
