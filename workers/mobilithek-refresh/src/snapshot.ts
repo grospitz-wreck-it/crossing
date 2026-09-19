@@ -159,24 +159,33 @@ export async function writeSnapshot(
     incoming.set(row.id, row);
   }
 
-  const existingResult = await db.execute(`
-    SELECT
-      id,
-      line,
-      category,
-      journey_number,
-      journey_ref,
-      origin,
-      destination,
-      route_json,
-      calls_json,
-      delay_minutes,
-      actual_time,
-      scheduled_time,
-      direction,
-      source_subscription_id
-    FROM mobilithek_train_snapshot
-  `);
+  // Only diff subscriptions processed by this refresh. The previous full-table
+  // scan pulled the entire snapshot into the Worker and was unnecessarily CPU-heavy.
+  const subscriptionIds = [...new Set(events.map(({ subscriptionId }) => subscriptionId))];
+  if (subscriptionIds.length === 0) return;
+  const placeholders = subscriptionIds.map(() => "?").join(", ");
+  const existingResult = await db.execute({
+    sql: `
+      SELECT
+        id,
+        line,
+        category,
+        journey_number,
+        journey_ref,
+        origin,
+        destination,
+        route_json,
+        calls_json,
+        delay_minutes,
+        actual_time,
+        scheduled_time,
+        direction,
+        source_subscription_id
+      FROM mobilithek_train_snapshot
+      WHERE source_subscription_id IN (${placeholders})
+    `,
+    args: subscriptionIds,
+  });
 
   const existing = new Map<string, ExistingSnapshotRow>();
   for (const row of existingResult.rows as unknown as ExistingSnapshotRow[]) {
