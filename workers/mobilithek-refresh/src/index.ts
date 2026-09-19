@@ -154,11 +154,9 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     );
   }
 
-  await writeSnapshot(demandedEvents, startedAt, {
-    subscriptionCount: result.subscriptionCount,
-    successful: result.successful,
-    failed: result.failed,
-  });
+  // TEMPORÄRER DIAGNOSETEST: Snapshot-Schreiben komplett überspringen.
+  // Wenn /run damit funktioniert, liegt der CPU-Verbrauch im writeSnapshot-Diff/DB-Pfad.
+  console.log("[Mobilithek Worker] DIAG: skipping writeSnapshot");
 
   return {
     status: "success",
