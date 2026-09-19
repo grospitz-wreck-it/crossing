@@ -16,7 +16,7 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const throughRules = jsonArray(row.through_rules);
   const sourceRules = throughRules.length ? throughRules : observationEvas.map(eva => ({ observationEva: eva, observationStation: stationNameByEva.get(eva) || eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }));
   return {
-    id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas,
+    id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), referenceStations: jsonArray(row.reference_stations).map((value: any) => String(value).trim()).filter(Boolean), observationEvas,
     contextEvas: linkedContextEvas.length ? Array.from(new Set(linkedContextEvas)) : jsonArray(row.context_evas).map(String).filter(Boolean),
     requiredRouteStops: jsonArray(row.required_route_stops).map(String).filter(Boolean),
     lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20),
@@ -28,7 +28,7 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
 async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
-      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,rules,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
+      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,reference_stations,context_evas,required_route_stops,rules,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
       db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] })
     ]);
     const row: any = result.rows[0]; return row ? buildCrossingFromDb(row, stations.rows as any[]) : null;
@@ -62,6 +62,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const crossing=(await loadCrossing(id))||staticCrossings.find(c=>c.id===id);
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
   const lineHints=lineHintsForCrossing(crossing);
+  // PRIMARY is explicitly declared by reference_stations. Never treat automatically
+  // discovered observation_evas as primary; those remain legacy/context data.
+  const primaryEvas = Array.from(new Set((crossing.referenceStations || []).map((eva: string) => String(eva).trim()).filter(Boolean)));
+  if(!primaryEvas.length) console.warn("[STATUS] no explicit primary reference station",{crossingId:crossing.id});
 
   // Keep the legacy infrastructure forecast only for the old implicit S28
   // configuration. Explicitly selected lines are handled by the station/snapshot
@@ -73,10 +77,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   // query and does not contact the DB Timetables API or Overpass during page load.
   try {
     const trains:any[]=[];
-    if(crossing.observationEvas?.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
+    if(primaryEvas.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
       const rulesByEva=new Map<string,any>();
       for(const rule of (crossing.throughRules||[])) rulesByEva.set(String(rule.observationEva||"").trim(),rule);
-      const selectedEvas=Array.from(new Set(crossing.observationEvas.map((eva:string)=>String(eva).trim()).filter(Boolean))).slice(0,8);
+      const selectedEvas=primaryEvas.slice(0,4);
       const directResults=await Promise.all(selectedEvas.map(async(eva:string)=>({eva,events:await getStationTimetable(eva,1).catch(()=>[])})));
       for(const result of directResults) {
         const rule=rulesByEva.get(result.eva)||{};
