@@ -92,7 +92,7 @@ async function fetchRelayEvents(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45_000);
+  const timeout = setTimeout(() => controller.abort(), 20_000);
 
   let response: Response;
   try {
@@ -106,11 +106,13 @@ async function fetchRelayEvents(
       body: JSON.stringify({ subscriptionId, demand }),
       signal: controller.signal,
     });
-  } finally {
-    clearTimeout(timeout);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Mobilithek Relay ${subscriptionId} request failed: ${message}`);
   }
 
   if (!response.ok || !response.body) {
+    clearTimeout(timeout);
     const body = (await response.text()).slice(0, 2000);
     throw new Error(`Mobilithek Relay HTTP ${response.status}: ${body}`);
   }
@@ -162,6 +164,7 @@ async function fetchRelayEvents(
     buffer += decoder.decode();
     if (buffer.trim()) consumeLine(buffer);
   } finally {
+    clearTimeout(timeout);
     reader.releaseLock();
   }
 
@@ -191,58 +194,101 @@ export async function refreshOnce(
   let invalidActualTimeEvents = 0;
   let acceptedEvents = 0;
 
-  for (const subscriptionId of subscriptionIds) {
-    try {
-      console.log(`[Mobilithek] loading ${subscriptionId}`);
+  const results = await Promise.all(
+    subscriptionIds.map(async (subscriptionId) => {
+      try {
+        console.log(`[Mobilithek] loading ${subscriptionId}`);
 
-      if (
-        env.MOBILITHEK_RELAY_URL &&
-        env.MOBILITHEK_RELAY_TOKEN &&
-        demand.length
-      ) {
-        const relay = await fetchRelayEvents(env, subscriptionId, demand);
-        successful++;
-        parsedEvents += relay.parsedEvents;
-        acceptedEvents += relay.events.length;
-        snapshotEvents.push(...relay.events);
-        console.log(
-          `[Mobilithek] ${subscriptionId}: relay returned ${relay.parsedEvents} demanded events`,
-        );
-        continue;
-      }
-
-      const feed = await fetchDirectFeed(env, subscriptionId);
-      console.log(`[Mobilithek] ${subscriptionId}: ${feed.kind}`);
-
-      let events: MobilithekTrainEvent[] = [];
-      if (feed.kind === "siri-journey") {
-        events = parseBody(new TextDecoder().decode(feed.bytes));
-      } else if (feed.kind === "gtfs-rt") {
-        events = parseGtfsRtTripUpdates(feed.bytes);
-      }
-
-      successful++;
-      parsedEvents += events.length;
-      let subscriptionAccepted = 0;
-
-      for (const event of events) {
-        if (!isValidTrainTime(event.actualTime)) {
-          invalidActualTimeEvents++;
-          continue;
+        if (
+          env.MOBILITHEK_RELAY_URL &&
+          env.MOBILITHEK_RELAY_TOKEN &&
+          demand.length
+        ) {
+          const relay = await fetchRelayEvents(env, subscriptionId, demand);
+          console.log(
+            `[Mobilithek] ${subscriptionId}: relay returned ${relay.parsedEvents} demanded events`,
+          );
+          return {
+            subscriptionId,
+            successful: true,
+            parsedEvents: relay.parsedEvents,
+            acceptedEvents: relay.events.length,
+            invalidActualTimeEvents: 0,
+            events: relay.events,
+          };
         }
-        snapshotEvents.push({ subscriptionId, event });
-        acceptedEvents++;
-        subscriptionAccepted++;
-      }
 
-      console.log(
-        `[Mobilithek] ${subscriptionId}: ${events.length} parsed, ${subscriptionAccepted} accepted`,
-      );
-    } catch (error) {
+        const feed = await fetchDirectFeed(env, subscriptionId);
+        console.log(`[Mobilithek] ${subscriptionId}: ${feed.kind}`);
+
+        let events: MobilithekTrainEvent[] = [];
+        if (feed.kind === "siri-journey") {
+          events = parseBody(new TextDecoder().decode(feed.bytes));
+        } else if (feed.kind === "gtfs-rt") {
+          events = parseGtfsRtTripUpdates(feed.bytes);
+        }
+
+        let subscriptionAccepted = 0;
+        let subscriptionInvalid = 0;
+        const acceptedEvents: Array<{
+          subscriptionId: string;
+          event: MobilithekTrainEvent;
+        }> = [];
+
+        for (const event of events) {
+          if (!isValidTrainTime(event.actualTime)) {
+            subscriptionInvalid++;
+            continue;
+          }
+          acceptedEvents.push({ subscriptionId, event });
+          subscriptionAccepted++;
+        }
+
+        console.log(
+          `[Mobilithek] ${subscriptionId}: ${events.length} parsed, ${subscriptionAccepted} accepted`,
+        );
+
+        return {
+          subscriptionId,
+          successful: true,
+          parsedEvents: events.length,
+          acceptedEvents: subscriptionAccepted,
+          invalidActualTimeEvents: subscriptionInvalid,
+          events: acceptedEvents,
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[Mobilithek] ${subscriptionId} failed`, message);
+        return {
+          subscriptionId,
+          successful: false,
+          parsedEvents: 0,
+          acceptedEvents: 0,
+          invalidActualTimeEvents: 0,
+          events: [] as Array<{
+            subscriptionId: string;
+            event: MobilithekTrainEvent;
+          }>,
+          error: message,
+        };
+      }
+    }),
+  );
+
+  for (const result of results) {
+    parsedEvents += result.parsedEvents;
+    acceptedEvents += result.acceptedEvents;
+    invalidActualTimeEvents += result.invalidActualTimeEvents;
+    snapshotEvents.push(...result.events);
+
+    if (result.successful) {
+      successful++;
+    } else {
       failed++;
-      const message = error instanceof Error ? error.message : String(error);
-      errors.push({ subscriptionId, error: message });
-      console.error(`[Mobilithek] ${subscriptionId} failed`, message);
+      errors.push({
+        subscriptionId: result.subscriptionId,
+        error: result.error || "unknown error",
+      });
     }
   }
 
