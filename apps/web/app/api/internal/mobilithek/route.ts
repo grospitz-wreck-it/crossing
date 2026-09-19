@@ -41,7 +41,7 @@ function fetchMobilithek(
           "accept-encoding": "gzip",
           "user-agent": "Crossings/1.0 (meineschranke.com)",
         },
-        timeout: 60_000,
+        timeout: 15_000,
       },
       (response) => {
         const status = response.statusCode || 0;
@@ -169,6 +169,14 @@ async function processJourney(
   }
 }
 
+function relayErrorResponse(error: unknown): Response {
+  const message = error instanceof Error ? error.message : String(error);
+  return Response.json(
+    { error: "Mobilithek upstream failed", message },
+    { status: 502 },
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const token = request.headers.get("authorization");
@@ -279,9 +287,6 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("[Mobilithek Relay]", error);
-    return Response.json(
-      { error: error instanceof Error ? error.message : String(error) },
-      { status: 500 },
-    );
+    return relayErrorResponse(error);
   }
 }
