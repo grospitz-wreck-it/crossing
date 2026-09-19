@@ -85,13 +85,12 @@ export async function getSnapshotPrimaryTrains(
     if (!Array.isArray(calls) || !calls.length) continue;
 
     for (const eva of primaryEvas) {
-      const stationName = stationNames.get(eva);
-      if (!stationName) continue;
+      const stationName = stationNames.get(eva) || eva;
 
       const call = calls.find((item: any) =>
         refMatches(item?.stopPointRef, eva) ||
         refMatches(item?.stopPlaceRef, eva) ||
-        stationMatches(String(item?.name || ""), stationName),
+        (stationNames.has(eva) && stationMatches(String(item?.name || ""), stationName)),
       );
       if (!call) continue;
 
