@@ -72,6 +72,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   // Primary path: use the worker-fed Mobilithek snapshot. This is a single Turso
   // query and does not contact the DB Timetables API or Overpass during page load.
   try {
+    const trains:any[]=[];
     if(crossing.observationEvas?.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
       const rulesByEva=new Map<string,any>();
       for(const rule of (crossing.throughRules||[])) rulesByEva.set(String(rule.observationEva||"").trim(),rule);
