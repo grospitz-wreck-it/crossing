@@ -4,6 +4,7 @@ export type DemandCrossing = {
   id: string;
   requiredRouteStops: string[];
   primaryObservationStations: string[];
+  primaryObservationEvas: string[];
   secondaryObservationStations: string[];
   secondaryCategories: string[];
   secondaryLineHints: string[];
@@ -33,6 +34,19 @@ function stationMatches(event: MobilithekTrainEvent, station: string): boolean {
       const value = normalize(String(call?.name || ""));
       return value === wanted || value.includes(wanted) || wanted.includes(value);
     })
+  );
+}
+
+function primaryEvaMatches(event: MobilithekTrainEvent, evas: string[]): boolean {
+  if (!evas.length) return false;
+  return (event.calls || []).some((call: any) =>
+    evas.some((eva) => {
+      const wanted = String(eva || "").trim();
+      return wanted && (
+        String(call?.stopPointRef || "").trim() === wanted ||
+        String(call?.stopPlaceRef || "").trim() === wanted
+      );
+    }),
   );
 }
 
@@ -96,9 +110,11 @@ export function filterEventsByDemand(
     demand.some((crossing) => {
       // PRIMARY: retain every Mobilithek event that actually contains a
       // configured primary observation station. No category or line filter.
-      const primaryMatch = crossing.primaryObservationStations.some((station) =>
-        stationMatches(event, station),
-      );
+      const primaryMatch =
+        primaryEvaMatches(event, crossing.primaryObservationEvas || []) ||
+        crossing.primaryObservationStations.some((station) =>
+          stationMatches(event, station),
+        );
       if (primaryMatch) return true;
 
       // SECONDARY: retain only events anchored at an explicitly configured
