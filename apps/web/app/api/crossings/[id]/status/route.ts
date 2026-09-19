@@ -48,7 +48,7 @@ function lineHintsForCrossing(crossing: any): string[] {
 }
 function lineMatches(train: any, hints: string[]) { if (!hints.length) return true; const normalize=(v:any)=>String(v||"").toUpperCase().replace(/\s+/g,"").replace(/[._-]/g,""); const line=normalize(train.line),cat=normalize(train.category); return hints.some(h=>{const x=normalize(h);return line===x||line.includes(x)||x.includes(line)||cat===x;}); }
 function normalizeStationName(value: any) {
-  return String(value || "").toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g, "").replace(/\\([^)]*\\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim();
+  return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim();
 }
 function routeIndex(route: string[], station: string) {
   const target = normalizeStationName(station);
@@ -61,7 +61,7 @@ function routeIndex(route: string[], station: string) {
 function matchesCorridor(route: string[], observationStation: string, requiredRouteStops: string[]) {
   if (!Array.isArray(route) || !route.length) return false;
   const stops = requiredRouteStops.map(String).map((v) => v.trim()).filter(Boolean);
-  const infrastructureRefs = stops.filter((stop) => /^\\d{2,6}$/.test(stop));
+  const infrastructureRefs = stops.filter((stop) => /^\d{2,6}$/.test(stop));
   if (infrastructureRefs.length) return routeIndex(route, observationStation) >= 0;
   if (stops.length >= 2) {
     let previous = -1;
