@@ -1,5 +1,5 @@
 import { db } from "../../../../lib/db";
-import { getStationTimetable } from "../../../../../../../packages/db-api-client/src/getStationTimetable";
+import { getSnapshotPrimaryTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotPrimaryTrains";
 import { getSnapshotThroughTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotThroughTrains";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
@@ -77,27 +77,29 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   // query and does not contact the DB Timetables API or Overpass during page load.
   try {
     const trains:any[]=[];
-    if(primaryEvas.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
-      const rulesByEva=new Map<string,any>();
-      for(const rule of (crossing.throughRules||[])) rulesByEva.set(String(rule.observationEva||"").trim(),rule);
-      const selectedEvas=primaryEvas.slice(0,4);
-      const directResults=await Promise.all(selectedEvas.map(async(eva:string)=>({eva,events:await getStationTimetable(eva,1).catch(()=>[])})));
-      for(const result of directResults) {
-        const rule=rulesByEva.get(result.eva)||{};
-        const offsetSeconds=Math.max(0,Number(rule.fallbackOffsetSeconds||300));
-        for(const train of result.events.filter((t:any)=>!t.cancelled)) {
-          if(Array.isArray(train.route)&&train.route.length>=2) {
-            const routeStops=(crossing.requiredRouteStops||[]).map(String).filter(Boolean);
-            const anchors=routeStops.filter((stop:string)=>!/^\d{2,6}$/.test(stop));
-            const hasStation=train.route.some((stop:string)=>String(stop).toLowerCase()===String(rule.observationStation||result.eva).toLowerCase());
-            const hasAnchors=anchors.filter((stop:string)=>train.route.some((candidate:string)=>String(candidate).toLowerCase()===stop.toLowerCase())).length;
-            if(!hasStation && anchors.length && hasAnchors<Math.min(2,anchors.length)) continue;
-          }
-          const crossingTime=new Date(train.actualTime.getTime()+offsetSeconds*1000);
-          if(crossingTime.getTime()<Date.now()-60_000||crossingTime.getTime()>Date.now()+3*60*60_000)continue;
-          trains.push({id:`primary-${result.eva}-${train.category}-${train.journeyNumber}`,source:"primary-stop",line:train.line,category:train.category,journeyNumber:train.journeyNumber,origin:train.origin,destination:train.destination,platform:train.platform,isStoppingTrain:true,direction:getCrossingDirection(train.route||[]),directionLabel:train.destination?`Richtung ${train.destination}`:null,delayMinutes:train.delayMinutes,crossingTime:crossingTime.toISOString(),arrival:crossingTime.toISOString(),etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)});
-        }
-      }
+
+    // PRIMARY: only the explicitly declared reference station(s), read from the
+    // worker-fed Mobilithek snapshot. Automatically discovered observation EVAs
+    // are deliberately excluded.
+    const primarySnapshot=await getSnapshotPrimaryTrains(db,crossing);
+    for(const train of primarySnapshot) {
+      trains.push({
+        id:`primary-${train.stationEva}-${train.category}-${train.journeyNumber}`,
+        source:"primary-stop",
+        line:train.line,
+        category:train.category,
+        journeyNumber:train.journeyNumber,
+        origin:train.origin,
+        destination:train.destination,
+        platform:train.platform,
+        isStoppingTrain:true,
+        direction:getCrossingDirection([]),
+        directionLabel:train.destination?`Richtung ${train.destination}`:null,
+        delayMinutes:train.delayMinutes,
+        crossingTime:train.crossingTime,
+        arrival:train.arrival,
+        etaSeconds:Math.floor((Date.parse(train.crossingTime)-Date.now())/1000)
+      });
     }
 
     // SECONDARY: context stations are evaluated in parallel with the primary
