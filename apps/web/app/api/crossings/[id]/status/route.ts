@@ -7,16 +7,17 @@ import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
-  let observationEvas = jsonArray(row.observation_evas).map(String).filter(Boolean);
-  if (!observationEvas.length) observationEvas = stationRows.filter(s => !s.role || s.role === "observation" || s.role === "automatic").map(s => String(s.eva || "").trim()).filter(Boolean);
-  if (row.eva && !observationEvas.includes(String(row.eva))) observationEvas.unshift(String(row.eva));
+  const linkedObservationEvas = stationRows.filter(s => !s.role || s.role === "observation" || s.role === "automatic").map(s => String(s.eva || "").trim()).filter(Boolean);
+  const observationEvas = linkedObservationEvas.length ? Array.from(new Set(linkedObservationEvas)) : jsonArray(row.observation_evas).map(String).filter(Boolean);
+  if (row.eva && !observationEvas.length) observationEvas.unshift(String(row.eva));
+  const linkedContextEvas = stationRows.filter(s => s.role === "context").map(s => String(s.eva || "").trim()).filter(Boolean);
   const stationNameByEva = new Map<string, string>();
   for (const station of stationRows) { const eva = String(station.eva || "").trim(); if (eva) stationNameByEva.set(eva, String(station.station_name || station.name || eva)); }
   const throughRules = jsonArray(row.through_rules);
   const sourceRules = throughRules.length ? throughRules : observationEvas.map(eva => ({ observationEva: eva, observationStation: stationNameByEva.get(eva) || eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }));
   return {
     id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas,
-    contextEvas: jsonArray(row.context_evas).map(String).filter(Boolean),
+    contextEvas: linkedContextEvas.length ? Array.from(new Set(linkedContextEvas)) : jsonArray(row.context_evas).map(String).filter(Boolean),
     requiredRouteStops: jsonArray(row.required_route_stops).map(String).filter(Boolean),
     lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20),
     rules: jsonArray(row.rules),
@@ -71,15 +72,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   // Primary path: use the worker-fed Mobilithek snapshot. This is a single Turso
   // query and does not contact the DB Timetables API or Overpass during page load.
   try {
-    const snapshot=await getSnapshotThroughTrains(db,crossing);
-    const trains:any[]=[];
-    for(const train of (snapshot||[]).filter((t:any)=>lineMatches(t,lineHints))) {
-      const crossingTime=new Date(train.crossingTime);
-      trains.push({id:`${train.category}-${train.journeyNumber}-${train.observationEva}`,line:train.line,category:train.category,journeyNumber:train.journeyNumber,origin:train.origin,destination:train.destination,platform:undefined,isStoppingTrain:false,direction:train.direction||getCrossingDirection(train.route),directionLabel:train.direction==="unknown"?"Durchfahrt":`Richtung ${train.direction}`,delayMinutes:train.delayMinutes,crossingTime:crossingTime.toISOString(),arrival:crossingTime.toISOString(),etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)});
-    }
-    // If the snapshot is cold, use the explicitly selected observation stations
-    // as the precise base analysis. Each station gets its configured travel
-    // offset to the crossing; the route/snapshot path adds through-runs on top.
     if(crossing.observationEvas?.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
       const rulesByEva=new Map<string,any>();
       for(const rule of (crossing.throughRules||[])) rulesByEva.set(String(rule.observationEva||"").trim(),rule);
@@ -98,9 +90,33 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           }
           const crossingTime=new Date(train.actualTime.getTime()+offsetSeconds*1000);
           if(crossingTime.getTime()<Date.now()-60_000||crossingTime.getTime()>Date.now()+3*60*60_000)continue;
-          trains.push({id:`direct-${result.eva}-${train.category}-${train.journeyNumber}`,line:train.line,category:train.category,journeyNumber:train.journeyNumber,origin:train.origin,destination:train.destination,platform:train.platform,isStoppingTrain:true,direction:getCrossingDirection(train.route||[]),directionLabel:train.destination?`Richtung ${train.destination}`:null,delayMinutes:train.delayMinutes,crossingTime:crossingTime.toISOString(),arrival:crossingTime.toISOString(),etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)});
+          trains.push({id:`primary-${result.eva}-${train.category}-${train.journeyNumber}`,source:"primary-stop",line:train.line,category:train.category,journeyNumber:train.journeyNumber,origin:train.origin,destination:train.destination,platform:train.platform,isStoppingTrain:true,direction:getCrossingDirection(train.route||[]),directionLabel:train.destination?`Richtung ${train.destination}`:null,delayMinutes:train.delayMinutes,crossingTime:crossingTime.toISOString(),arrival:crossingTime.toISOString(),etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)});
         }
       }
+    }
+
+    // SECONDARY: context stations are evaluated in parallel with the primary
+    // station-stop analysis. These candidates represent through-runs.
+    const snapshot=await getSnapshotThroughTrains(db,crossing);
+    for(const train of (snapshot||[]).filter((t:any)=>lineMatches(t,lineHints))) {
+      const crossingTime=new Date(train.crossingTime);
+      trains.push({
+        id:`secondary-${train.category}-${train.journeyNumber}-${train.observationEva}`,
+        source:"secondary-through",
+        line:train.line,
+        category:train.category,
+        journeyNumber:train.journeyNumber,
+        origin:train.origin,
+        destination:train.destination,
+        platform:undefined,
+        isStoppingTrain:false,
+        direction:train.direction||getCrossingDirection(train.route),
+        directionLabel:train.direction==="unknown"?"Durchfahrt":`Richtung ${train.direction}`,
+        delayMinutes:train.delayMinutes,
+        crossingTime:crossingTime.toISOString(),
+        arrival:crossingTime.toISOString(),
+        etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)
+      });
     }
     const unique=Array.from(new Map(trains.map(t=>[`${t.line}-${t.category}-${t.journeyNumber}`,t])).values()); const payload=toPayload(crossing,unique,lineHints); await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
