@@ -80,7 +80,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // If the snapshot is cold, use the explicitly selected observation stations
     // as the precise base analysis. Each station gets its configured travel
     // offset to the crossing; the route/snapshot path adds through-runs on top.
-    if(crossing.observationEvas?.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
+    if(!snapshot?.length && crossing.observationEvas?.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
       const rulesByEva=new Map<string,any>();
       for(const rule of (crossing.throughRules||[])) rulesByEva.set(String(rule.observationEva||"").trim(),rule);
       const selectedEvas=Array.from(new Set(crossing.observationEvas.map((eva:string)=>String(eva).trim()).filter(Boolean))).slice(0,8);
