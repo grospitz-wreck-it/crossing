@@ -1,6 +1,5 @@
 import { configureDb } from "./db.js";
 import { loadDemandCrossings } from "./demand.js";
-import { filterEventsByDemand } from "./filterDemand.js";
 import { refreshOnce } from "./cloudflareMobilithek.js";
 import { writeSnapshot } from "./snapshot.js";
 
@@ -134,7 +133,9 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
 
   const result = await refreshOnce(env, subscriptionIds, demand);
-  const demandedEvents = filterEventsByDemand(result.events, demand);
+  // TEMPORÄRER DIAGNOSETEST: Das Vercel-Relay filtert bereits nach demand.
+  // Zweiten Filter bewusst überspringen, um dessen CPU-Kosten zu isolieren.
+  const demandedEvents = result.events;
 
   console.log(
     `[Mobilithek Worker] parsedEvents=${result.parsedEvents} ` +
