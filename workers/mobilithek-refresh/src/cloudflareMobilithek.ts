@@ -91,15 +91,24 @@ async function fetchRelayEvents(
     throw new Error("Mobilithek Relay ist nicht konfiguriert");
   }
 
-  const response = await fetch(relayUrl, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${relayToken}`,
-      "content-type": "application/json",
-      accept: "application/x-ndjson",
-    },
-    body: JSON.stringify({ subscriptionId, demand }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45_000);
+
+  let response: Response;
+  try {
+    response = await fetch(relayUrl, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${relayToken}`,
+        "content-type": "application/json",
+        accept: "application/x-ndjson",
+      },
+      body: JSON.stringify({ subscriptionId, demand }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok || !response.body) {
     const body = (await response.text()).slice(0, 2000);
