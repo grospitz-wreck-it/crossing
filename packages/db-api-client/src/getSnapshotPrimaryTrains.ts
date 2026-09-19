@@ -34,6 +34,15 @@ function stationMatches(value: string, wanted: string) {
   return Boolean(a && b && (a === b || a.includes(b) || b.includes(a)));
 }
 
+function refMatches(value: unknown, eva: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw || !eva) return false;
+  const normalizeRef = (v: string) => v.replace(/^\D+/, "").replace(/\D+$/, "");
+  const a = normalizeRef(raw);
+  const b = normalizeRef(eva);
+  return Boolean(a && b && (a === b || raw === eva));
+}
+
 export async function getSnapshotPrimaryTrains(
   db: any,
   crossing: any,
@@ -80,13 +89,18 @@ export async function getSnapshotPrimaryTrains(
       if (!stationName) continue;
 
       const call = calls.find((item: any) =>
+        refMatches(item?.stopPointRef, eva) ||
+        refMatches(item?.stopPlaceRef, eva) ||
         stationMatches(String(item?.name || ""), stationName),
       );
       if (!call) continue;
 
       // A primary candidate must have an explicit call at the declared
-      // reference station. We do not infer primary status from nearby stations,
-      // route anchors, line hints or automatically discovered observation EVAs.
+      // reference station. Prefer the Mobilithek EVA/reference match; station-name
+      // matching remains a compatibility fallback for older snapshot rows that
+      // were written before stopPointRef/stopPlaceRef was persisted.
+      // We do not infer primary status from nearby stations, route anchors,
+      // line hints or automatically discovered observation EVAs.
       const stationTime = call?.actual || call?.planned || row.actual_time;
       const parsedTime = new Date(stationTime);
       if (!Number.isFinite(parsedTime.getTime())) continue;
