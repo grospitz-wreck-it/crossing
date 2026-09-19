@@ -47,40 +47,6 @@ function lineHintsForCrossing(crossing: any): string[] {
   return !crossing.eva && (refs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || ""))) ? ["S28"] : [];
 }
 function lineMatches(train: any, hints: string[]) { if (!hints.length) return true; const normalize=(v:any)=>String(v||"").toUpperCase().replace(/\s+/g,"").replace(/[._-]/g,""); const line=normalize(train.line),cat=normalize(train.category); return hints.some(h=>{const x=normalize(h);return line===x||line.includes(x)||x.includes(line)||cat===x;}); }
-function normalizeStationName(value: any) {
-  return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim();
-}
-function routeIndex(route: string[], station: string) {
-  const target = normalizeStationName(station);
-  if (!target) return -1;
-  return route.findIndex((stop) => {
-    const value = normalizeStationName(stop);
-    return value === target || value.includes(target) || target.includes(value);
-  });
-}
-function matchesCorridor(route: string[], observationStation: string, requiredRouteStops: string[]) {
-  if (!Array.isArray(route) || !route.length) return false;
-  const stops = requiredRouteStops.map(String).map((v) => v.trim()).filter(Boolean);
-  const infrastructureRefs = stops.filter((stop) => /^\d{2,6}$/.test(stop));
-  if (infrastructureRefs.length) return routeIndex(route, observationStation) >= 0;
-  if (stops.length >= 2) {
-    let previous = -1;
-    for (const stop of stops) {
-      const index = routeIndex(route, stop);
-      if (index < 0 || index <= previous) return false;
-      previous = index;
-    }
-    const observation = routeIndex(route, observationStation);
-    if (observation >= 0) {
-      const first = routeIndex(route, stops[0]);
-      const last = routeIndex(route, stops[stops.length - 1]);
-      if (observation < first || observation > last) return false;
-    }
-    return true;
-  }
-  if (stops.length === 1) return routeIndex(route, stops[0]) >= 0;
-  return routeIndex(route, observationStation) >= 0;
-}
 function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   const now=Date.now(); trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
   const closures:any[]=[];
@@ -114,7 +80,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // If the snapshot is cold, use the explicitly selected observation stations
     // as the precise base analysis. Each station gets its configured travel
     // offset to the crossing; the route/snapshot path adds through-runs on top.
-    if(!snapshot?.length && crossing.observationEvas?.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
+    if(crossing.observationEvas?.length && process.env.DB_CLIENT_ID && process.env.DB_API_KEY) {
       const rulesByEva=new Map<string,any>();
       for(const rule of (crossing.throughRules||[])) rulesByEva.set(String(rule.observationEva||"").trim(),rule);
       const selectedEvas=Array.from(new Set(crossing.observationEvas.map((eva:string)=>String(eva).trim()).filter(Boolean))).slice(0,8);
@@ -123,7 +89,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         const rule=rulesByEva.get(result.eva)||{};
         const offsetSeconds=Math.max(0,Number(rule.fallbackOffsetSeconds||300));
         for(const train of result.events.filter((t:any)=>!t.cancelled && lineMatches(t,lineHints))) {
-          if(!matchesCorridor(train.route || [], String(rule.observationStation || result.eva), crossing.requiredRouteStops || [])) continue;\n          if(Array.isArray(train.route)&&train.route.length>=2) {
+          if(Array.isArray(train.route)&&train.route.length>=2) {
             const routeStops=(crossing.requiredRouteStops||[]).map(String).filter(Boolean);
             const anchors=routeStops.filter((stop:string)=>!/^\d{2,6}$/.test(stop));
             const hasStation=train.route.some((stop:string)=>String(stop).toLowerCase()===String(rule.observationStation||result.eva).toLowerCase());
