@@ -10,6 +10,7 @@ type DemandCrossing = {
   id: string;
   requiredRouteStops: string[];
   primaryObservationStations: string[];
+  primaryObservationEvas: string[];
   secondaryObservationStations: string[];
   secondaryCategories: string[];
   secondaryLineHints: string[];
@@ -129,6 +130,7 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       id: String(row.id),
       requiredRouteStops: parseJson<string[]>(row.required_route_stops, []).map(String),
       primaryObservationStations,
+      primaryObservationEvas: primaryEvas,
       secondaryObservationStations: Array.from(
         new Set(
           secondaryRules
