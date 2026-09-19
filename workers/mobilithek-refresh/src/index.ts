@@ -179,6 +179,37 @@ export default {
     if (url.pathname === "/mtls-test") {
       return runMtlsCompare(env);
     }
+    if (url.pathname === "/debug") {
+      try {
+        configureDb(env);
+        const demand = await loadDemandCrossings();
+        return Response.json({
+          status: "ok",
+          demandedCrossings: demand.length,
+          demand: demand.map((crossing) => ({
+            id: crossing.id,
+            primaryObservationEvas: crossing.primaryObservationEvas,
+            primaryObservationStations: crossing.primaryObservationStations,
+            secondaryObservationStations: crossing.secondaryObservationStations,
+            secondaryCategories: crossing.secondaryCategories,
+            secondaryLineHints: crossing.secondaryLineHints,
+          })),
+          subscriptions: getSubscriptionIds(env),
+        });
+      } catch (error) {
+        console.error(
+          "[Mobilithek Worker] debug failed",
+          error instanceof Error ? error.stack || error.message : String(error),
+        );
+        return Response.json(
+          {
+            status: "error",
+            error: error instanceof Error ? error.message : String(error),
+          },
+          { status: 500 },
+        );
+      }
+    }
     if (url.pathname === "/run") {
       try {
         const result = await runRefresh(env);
