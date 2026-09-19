@@ -1,5 +1,3 @@
-import type { Client } from "@libsql/client";
-
 export type SnapshotPrimaryTrain = {
   line: string;
   category: string;
@@ -37,7 +35,7 @@ function stationMatches(value: string, wanted: string) {
 }
 
 export async function getSnapshotPrimaryTrains(
-  db: Client,
+  db: any,
   crossing: any,
 ): Promise<SnapshotPrimaryTrain[]> {
   const primaryEvas = Array.from(new Set(
