@@ -175,6 +175,9 @@ export default {
     if (url.pathname === "/health") {
       return Response.json({ ok: true, service: "mobilithek-refresh" });
     }
+    if (url.pathname === "/diag") {
+      return Response.json({ ok: true, build: "333f172", snapshotWrite: "disabled", duplicateDemandFilter: "disabled" });
+    }
     if (url.pathname === "/mtls-test") {
       return runMtlsCompare(env);
     }
