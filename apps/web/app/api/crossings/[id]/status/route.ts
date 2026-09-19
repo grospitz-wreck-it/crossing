@@ -88,7 +88,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       for(const result of directResults) {
         const rule=rulesByEva.get(result.eva)||{};
         const offsetSeconds=Math.max(0,Number(rule.fallbackOffsetSeconds||300));
-        for(const train of result.events.filter((t:any)=>!t.cancelled && lineMatches(t,lineHints))) {
+        for(const train of result.events.filter((t:any)=>!t.cancelled)) {
           if(Array.isArray(train.route)&&train.route.length>=2) {
             const routeStops=(crossing.requiredRouteStops||[]).map(String).filter(Boolean);
             const anchors=routeStops.filter((stop:string)=>!/^\d{2,6}$/.test(stop));
