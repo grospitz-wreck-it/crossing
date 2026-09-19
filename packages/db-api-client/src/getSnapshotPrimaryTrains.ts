@@ -38,10 +38,10 @@ export async function getSnapshotPrimaryTrains(
   db: any,
   crossing: any,
 ): Promise<SnapshotPrimaryTrain[]> {
-  const primaryEvas = Array.from(new Set(
+  const primaryEvas: string[] = Array.from(new Set<string>(
     (crossing.referenceStations || [])
       .map((eva: unknown) => String(eva).trim())
-      .filter(Boolean),
+      .filter((eva: string) => Boolean(eva)),
   ));
   if (!primaryEvas.length) return [];
 
