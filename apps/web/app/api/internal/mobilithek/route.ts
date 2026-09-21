@@ -124,6 +124,18 @@ async function processJourney(
   subscriptionId: string,
   demand: DemandCrossing[],
 ): Promise<Array<{ subscriptionId: string; event: MobilithekTrainEvent }>> {
+  const rawKirchlengernHit =
+    /8003288|Kirchlengern/i.test(xml);
+
+  if (rawKirchlengernHit) {
+    const refMatches = xml.match(/.{0,180}(?:8003288|Kirchlengern).{0,300}/gi) || [];
+    console.log("[Mobilithek Relay] RAW Kirchlengern hit", {
+      subscriptionId,
+      xmlLength: xml.length,
+      matches: refMatches.slice(0, 5),
+    });
+  }
+
   let events: MobilithekTrainEvent[];
   try {
     events = parseBody(xml);
