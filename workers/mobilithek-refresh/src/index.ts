@@ -135,7 +135,17 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
 
   const result = await refreshOnce(env, subscriptionIds, demand);
 
-  const demandedEvents = filterEventsByDemand(result.events, demand);
+  // The mTLS relay already applies the demand filter before streaming NDJSON.
+  // Re-filtering thousands of parsed events here duplicates the expensive
+  // matching work and can exhaust the Worker's CPU budget. Only apply the
+  // local filter when the relay is not configured.
+  const relayActive = Boolean(
+    env.MOBILITHEK_RELAY_URL?.trim() &&
+    env.MOBILITHEK_RELAY_TOKEN?.trim(),
+  );
+  const demandedEvents = relayActive
+    ? result.events
+    : filterEventsByDemand(result.events, demand);
 
   console.log(
     `[Mobilithek Worker] parsedEvents=${result.parsedEvents} ` +
