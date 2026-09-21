@@ -11,6 +11,8 @@ import {
 const DEFAULT_URL =
   "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
 
+export const maxDuration = 60;
+
 function fetchMobilithek(
   subscriptionId: string,
 ): Promise<{
@@ -188,7 +190,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "Demand is required" }, { status: 400 });
     }
 
-    const upstream = await fetchMobilithek(subscriptionId);
+    console.log("[Mobilithek Relay] upstream start", { subscriptionId });
+  const upstream = await fetchMobilithek(subscriptionId);
+  console.log("[Mobilithek Relay] upstream response", {
+    subscriptionId,
+    contentType: upstream.contentType,
+    contentEncoding: upstream.contentEncoding,
+  });
     const source =
       upstream.contentEncoding.includes("gzip")
         ? upstream.source.pipe(createGunzip())
@@ -247,7 +255,12 @@ export async function POST(request: Request) {
               ? `${error.name}: ${error.message}`
               : String(error);
 
-          console.error("[Mobilithek Relay stream]", error);
+          console.error("[Mobilithek Relay stream]", {
+            subscriptionId,
+            message,
+            errorName: error instanceof Error ? error.name : undefined,
+            stack: error instanceof Error ? error.stack : undefined,
+          });
 
           controller.enqueue(
             encodeLine({
