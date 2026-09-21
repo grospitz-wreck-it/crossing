@@ -8,6 +8,19 @@ export type DemandCrossing = {
   primaryObservationEvas: string[];
 };
 
+function normalizeEva(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  const match = raw.match(/(?:^|[^0-9])(\d{7})(?:$|[^0-9])/);
+  return match?.[1] || raw;
+}
+
+function evaMatches(value: unknown, target: string): boolean {
+  const wanted = normalizeEva(target);
+  if (!wanted) return false;
+  return normalizeEva(value) === wanted;
+}
+
 function normalize(value: string): string {
   return String(value || "")
     .toLowerCase()
@@ -58,8 +71,8 @@ export function filterEventsByDemand(
       const primaryEvaMatch = primaryObservationEvas.length > 0 &&
         (event.calls || []).some((call) =>
           primaryObservationEvas.some((eva) =>
-            String(call?.stopPointRef || "").trim() === eva ||
-            String(call?.stopPlaceRef || "").trim() === eva,
+            evaMatches(call?.stopPointRef, eva) ||
+            evaMatches(call?.stopPlaceRef, eva),
           ),
         );
 
