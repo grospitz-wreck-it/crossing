@@ -259,6 +259,17 @@ export async function POST(request: Request) {
         let buffer = "";
         let parsedJourneys = 0;
         let demandedEvents = 0;
+        let rawRb61Journeys = 0;
+        let rawRe60Journeys = 0;
+        let rawKirchlengernJourneys = 0;
+        let rawEva8003288Journeys = 0;
+
+        const inspectRawJourney = (journey: string) => {
+          if (/RB\s*61/i.test(journey)) rawRb61Journeys++;
+          if (/RE\s*60/i.test(journey)) rawRe60Journeys++;
+          if (/Kirchlengern/i.test(journey)) rawKirchlengernJourneys++;
+          if (/8003288/.test(journey)) rawEva8003288Journeys++;
+        };
 
         try {
           for await (const chunk of source as AsyncIterable<Buffer | Uint8Array>) {
@@ -268,6 +279,7 @@ export async function POST(request: Request) {
 
             for (const journey of extracted.journeys) {
               parsedJourneys++;
+              inspectRawJourney(journey);
               const matches = await processJourney(
                 journey,
                 subscriptionId,
@@ -285,6 +297,7 @@ export async function POST(request: Request) {
           const final = takeJourneys(buffer);
           for (const journey of final.journeys) {
             parsedJourneys++;
+            inspectRawJourney(journey);
             const matches = await processJourney(
               journey,
               subscriptionId,
@@ -299,6 +312,14 @@ export async function POST(request: Request) {
           console.log(
             `[Mobilithek Relay] ${subscriptionId}: ${parsedJourneys} journeys parsed, ${demandedEvents} demanded events`,
           );
+          console.log("[Mobilithek Relay] raw feed inspection", {
+            subscriptionId,
+            parsedJourneys,
+            rawRb61Journeys,
+            rawRe60Journeys,
+            rawKirchlengernJourneys,
+            rawEva8003288Journeys,
+          });
           controller.close();
         } catch (error) {
           const message =
