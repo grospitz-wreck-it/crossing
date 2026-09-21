@@ -100,10 +100,33 @@ export function filterEventsByDemand(
 ) {
   if (!demand.length) return [];
 
+  const targetHits = events
+    .filter(({ event }) => {
+      const serialized = JSON.stringify(event);
+      return /RB\\s*61|RE\\s*60|8003288|Kirchlengern/i.test(serialized);
+    })
+    .slice(0, 5)
+    .map(({ subscriptionId, event }) => ({
+      subscriptionId,
+      line: event.line,
+      category: event.category,
+      journeyRef: event.journeyRef,
+      hasRB61: /RB\\s*61/i.test(JSON.stringify(event)),
+      hasRE60: /RE\\s*60/i.test(JSON.stringify(event)),
+      has8003288: /8003288/.test(JSON.stringify(event)),
+      hasKirchlengern: /Kirchlengern/i.test(JSON.stringify(event)),
+      calls: (event.calls || []).map((call) => ({
+        name: call.name,
+        stopPointRef: call.stopPointRef,
+        stopPlaceRef: call.stopPlaceRef,
+      })),
+    }));
+
   console.log("[Mobilithek filter] input", {
     events: events.length,
     demand: demand.length,
     firstDemand: demand[0],
+    targetHits,
   });
 
   return events.filter(({ event }) =>
