@@ -1,5 +1,6 @@
 import { db } from "../../../../lib/db";
 import { getStationTimetable } from "../../../../../../../packages/db-api-client/src/getStationTimetable";
+import { getSnapshotPrimaryTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotPrimaryTrains";
 import { getThroughTrains } from "../../../../../../../packages/db-api-client/src/getThroughTrains";
 import { getDivertedTrains } from "../../../../../../../packages/db-api-client/src/getDivertedTrains";
 import { getReroutedTrains } from "../../../../../../../packages/db-api-client/src/getReroutedTrains";
@@ -34,6 +35,11 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const throughRules = jsonArray(row.through_rules);
   const diversionRules = jsonArray(row.diversion_rules);
   const rerouteWatchRules = jsonArray(row.reroute_watch_rules);
+  const referenceStations = jsonArray(row.reference_stations).map(String).map((value) => value.trim()).filter(Boolean);
+  const primaryObservationEvas = Array.from(new Set(
+    (referenceStations.length ? referenceStations : stationRows.filter((s) => s.role === "primary" || s.role === "observation").map((s) => String(s.eva || "").trim())).filter(Boolean),
+  ));
+  if (!primaryObservationEvas.length && row.eva) primaryObservationEvas.push(String(row.eva).trim());
   const stationNameByEva = new Map<string, string>();
   for (const station of stationRows) {
     const eva = String(station.eva || "").trim();
@@ -41,12 +47,12 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   }
   const sourceRules = throughRules.length ? throughRules : observationEvas.map(eva => ({ observationEva: eva, observationStation: stationNameByEva.get(eva) || eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }));
   const normalizedThroughRules = sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva);
-  return { id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas, contextEvas, requiredRouteStops, lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [], throughRules: normalizedThroughRules, diversionRules, rerouteWatchRules, confidence: Number(row.confidence || 0.5) };
+  return { id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas, primaryObservationEvas, referenceStations, contextEvas, requiredRouteStops, lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [], throughRules: normalizedThroughRules, diversionRules, rerouteWatchRules, confidence: Number(row.confidence || 0.5) };
 }
 async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
-      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
+      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,reference_stations,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
       db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }),
     ]);
     const row: any = result.rows[0];
@@ -131,15 +137,30 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
   }
 
-  const localEventsPromise = crossing.eva ? (async () => { const started = performance.now(); const value = await getStationTimetable(crossing.eva, STATUS_TIMETABLE_HOURS).catch(() => []); timing.localEventsMs = performance.now() - started; return value; })() : Promise.resolve([]);
-  const observationEventsPromise = !crossing.eva && crossing.observationEvas?.length ? (async () => { const started = performance.now(); const sets = await Promise.all(crossing.observationEvas.map((eva: string) => getStationTimetable(eva, STATUS_TIMETABLE_HOURS).catch(() => []))); timing.observationEventsMs = performance.now() - started; return sets.flat(); })() : Promise.resolve([]);
+  const primaryObservationEvas: string[] = Array.from(new Set((crossing.primaryObservationEvas || []).map(String).map((value) => value.trim()).filter(Boolean)));
+  const primarySnapshotPromise = (async () => {
+    const started = performance.now();
+    const value = await getSnapshotPrimaryTrains(db, { ...crossing, observationEvas: primaryObservationEvas }).catch(() => null);
+    timing.observationEventsMs = performance.now() - started;
+    return value;
+  })();
+  const localEventsPromise = primarySnapshotPromise.then(async (snapshot) => {
+    if (snapshot !== null) return snapshot;
+    const eva = primaryObservationEvas[0];
+    if (!eva) return [];
+    const started = performance.now();
+    const value = await getStationTimetable(eva, STATUS_TIMETABLE_HOURS).catch(() => []);
+    timing.localEventsMs = performance.now() - started;
+    return value;
+  });
+  const observationEventsPromise = Promise.resolve([]);
   const throughPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing)).catch(() => []); timing.throughTrainsMs = performance.now() - started; return value; })();
   const divertedPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []); timing.divertedTrainsMs = performance.now() - started; return value; })();
   const reroutedPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []); timing.reroutedTrainsMs = performance.now() - started; return value; })();
   const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedPromise]);
   counts.localCandidates = localEvents.length; counts.observationCandidates = observationEvents.length; counts.throughCandidates = throughTrains.length; counts.divertedCandidates = divertedTrains.length; counts.reroutedCandidates = reroutedTrains.length;
   const trains: any[] = [];
-  const directBase = crossing.eva ? localEvents : observationEvents.map((train: any) => ({ ...train, source: "observation", detection: "station-observation" }));
+  const directBase = [...localEvents, ...observationEvents.map((train: any) => ({ ...train, source: "observation", detection: "station-observation" }))];
   const directEvents = directBase.filter((train: any) => !train.cancelled && lineMatchesHints(train, lineHints));
   counts.directFiltered = directEvents.length;
 
