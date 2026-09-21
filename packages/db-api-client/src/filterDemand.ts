@@ -111,7 +111,6 @@ export function filterEventsByDemand(
     events: events.length,
     demand: demand.length,
     firstDemand: demand[0],
-    targetHits,
   });
 
   return events.filter(({ event }) =>
