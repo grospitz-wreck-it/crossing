@@ -60,6 +60,14 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       )
   `);
 
+  const catalog = await db.execute(`SELECT eva, name FROM railway_station_catalog`);
+  const stationNamesByEva = new Map<string, string>();
+  for (const station of catalog.rows as any[]) {
+    const eva = String(station.eva || '').trim();
+    const name = String(station.name || '').trim();
+    if (eva && name) stationNamesByEva.set(eva, name);
+  }
+
   return (result.rows as any[]).map((row) => {
     const rules = [
       ...collectRules(row.through_rules),
@@ -80,10 +88,9 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       ),
     );
 
-    const primaryObservationStations = primaryObservationEvas.map((eva) => {
-      const nameRow = (result as any);
-      return String(eva);
-    });
+    const primaryObservationStations = primaryObservationEvas
+      .map((eva) => stationNamesByEva.get(eva))
+      .filter((value): value is string => Boolean(value));
 
     const observationStations = Array.from(
       new Set(
