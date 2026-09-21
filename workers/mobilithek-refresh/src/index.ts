@@ -138,8 +138,53 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
 
   console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
 
+  const primaryDebug = demand
+    .filter((item) =>
+      item.primaryObservationEvas?.includes("8003288") ||
+      item.primaryObservationStations?.some((name) =>
+        String(name).toLowerCase().includes("kirchlengern"),
+      ),
+    )
+    .map((item) => ({
+      id: item.id,
+      primaryObservationEvas: item.primaryObservationEvas,
+      primaryObservationStations: item.primaryObservationStations,
+    }));
+
+  console.log("[Mobilithek Worker] primary debug demand", primaryDebug);
+
   const result = await refreshOnce(env, subscriptionIds, demand);
   const demandedEvents = filterEventsByDemand(result.events, demand);
+
+  const primaryDebugEvents = result.events.filter(({ event }) =>
+    (event.calls || []).some((call) =>
+      ["8003288"].includes(String(call.stopPointRef || "").trim()) ||
+      ["8003288"].includes(String(call.stopPlaceRef || "").trim()) ||
+      String(call.name || "").toLowerCase().includes("kirchlengern"),
+    ),
+  );
+
+  console.log("[Mobilithek Worker] primary debug events", {
+    total: primaryDebugEvents.length,
+    sample: primaryDebugEvents.slice(0, 10).map(({ subscriptionId, event }) => ({
+      subscriptionId,
+      line: event.line,
+      category: event.category,
+      journeyRef: event.journeyRef,
+      calls: (event.calls || [])
+        .filter((call) =>
+          String(call.stopPointRef || "").trim() === "8003288" ||
+          String(call.stopPlaceRef || "").trim() === "8003288" ||
+          String(call.name || "").toLowerCase().includes("kirchlengern"),
+        )
+        .slice(0, 5)
+        .map((call) => ({
+          name: call.name,
+          stopPointRef: call.stopPointRef,
+          stopPlaceRef: call.stopPlaceRef,
+        })),
+    })),
+  });
 
   console.log(
     `[Mobilithek Worker] parsedEvents=${result.parsedEvents} ` +
