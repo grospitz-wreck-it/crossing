@@ -135,29 +135,6 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
 
   const result = await refreshOnce(env, subscriptionIds, demand);
 
-  const targetHits = result.events
-    .filter(({ event }) => {
-      const serialized = JSON.stringify(event);
-      return /8003288|Kirchlengern|RB\\s*61|RE\\s*60/i.test(serialized);
-    })
-    .slice(0, 10)
-    .map(({ subscriptionId, event }) => ({
-      subscriptionId,
-      line: event.line,
-      category: event.category,
-      journeyRef: event.journeyRef,
-      calls: (event.calls || []).map((call) => ({
-        name: call.name,
-        stopPointRef: call.stopPointRef,
-        stopPlaceRef: call.stopPlaceRef,
-      })),
-    }));
-
-  console.log("[Mobilithek Worker] targetHits", {
-    total: targetHits.length,
-    hits: targetHits,
-  });
-
   const demandedEvents = filterEventsByDemand(result.events, demand);
 
   console.log(
