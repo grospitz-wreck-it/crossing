@@ -10,6 +10,7 @@ type DemandCrossing = {
   requiredRouteStops: string[];
   categories: string[];
   observationStations: string[];
+  primaryObservationEvas: string[];
 };
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -38,6 +39,7 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
     SELECT DISTINCT
       c.id,
       c.required_route_stops,
+      c.reference_stations,
       c.through_rules,
       c.diversion_rules,
       c.reroute_watch_rules
@@ -68,6 +70,15 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       new Set(rules.flatMap((rule) => rule.categories || [])),
     );
 
+    const primaryObservationEvas = Array.from(
+      new Set(
+        parseJson<string[]>(row.reference_stations, [])
+          .map(String)
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    );
+
     const observationStations = Array.from(
       new Set(
         rules
@@ -81,6 +92,7 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       requiredRouteStops: parseJson<string[]>(row.required_route_stops, []).map(String),
       categories,
       observationStations,
+      primaryObservationEvas,
     };
   });
 }
