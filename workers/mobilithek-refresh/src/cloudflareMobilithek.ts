@@ -92,7 +92,8 @@ async function fetchRelayEvents(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20_000);
+  // The relay streams large Mobilithek feeds; 20s truncates slow subscriptions before later journeys arrive.
+  const timeout = setTimeout(() => controller.abort(), 120_000);
 
   let response: Response;
   try {
