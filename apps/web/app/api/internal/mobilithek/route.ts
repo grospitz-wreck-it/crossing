@@ -11,6 +11,10 @@ import {
 const DEFAULT_URL =
   "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
 
+// Mobilithek feeds can be hundreds of MB and may take >15s to stream.
+// Keep the relay alive long enough to consume the complete upstream feed.
+export const maxDuration = 300;
+
 function fetchMobilithek(
   subscriptionId: string,
 ): Promise<{
@@ -41,7 +45,7 @@ function fetchMobilithek(
           "accept-encoding": "gzip",
           "user-agent": "Crossings/1.0 (meineschranke.com)",
         },
-        timeout: 15_000,
+        timeout: 120_000,
       },
       (response) => {
         const status = response.statusCode || 0;
@@ -196,7 +200,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "Demand is required" }, { status: 400 });
     }
 
+    console.log("[Mobilithek Relay] upstream start", { subscriptionId });
     const upstream = await fetchMobilithek(subscriptionId);
+    console.log("[Mobilithek Relay] upstream response", {
+      subscriptionId,
+      contentType: upstream.contentType,
+      contentEncoding: upstream.contentEncoding,
+    });
     const source =
       upstream.contentEncoding.includes("gzip")
         ? upstream.source.pipe(createGunzip())
