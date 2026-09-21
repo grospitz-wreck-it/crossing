@@ -34,15 +34,16 @@ export function filterEventsByDemand(
   return events.filter(({ event }) => {
     const line = String(event.line || "").toUpperCase();
     const category = String(event.category || "").toUpperCase();
-    const primaryObservationEvas = Array.isArray((crossing as any).primaryObservationEvas)
-      ? (crossing as any).primaryObservationEvas.map((value: unknown) => String(value).trim()).filter(Boolean)
-      : [];
     const route = (event.route || []).map(normalize).filter(Boolean);
     const calls = (event.calls || [])
       .map((call) => normalize(String(call?.name || "")))
       .filter(Boolean);
 
     return demand.some((crossing) => {
+      const primaryObservationEvas = Array.isArray(crossing.primaryObservationEvas)
+        ? crossing.primaryObservationEvas.map((value: unknown) => String(value).trim()).filter(Boolean)
+        : [];
+
       const categories = Array.isArray(crossing.categories)
         ? crossing.categories
         : [];
