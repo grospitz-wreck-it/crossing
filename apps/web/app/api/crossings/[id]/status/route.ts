@@ -164,11 +164,37 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const directEvents = directBase.filter((train: any) => !train.cancelled && lineMatchesHints(train, lineHints));
   counts.directFiltered = directEvents.length;
 
-  const directResults = await Promise.all(directEvents.map(async (train: any) => { counts.allowCalls++; const started = performance.now(); const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing); timing.filterDirectMs += performance.now() - started; return { train, allowed }; }));
+  const directResults = await Promise.all(directEvents.map(async (train: any) => {
+    counts.allowCalls++;
+    if (train.detection === "snapshot-primary-stop") {
+      return { train, allowed: true };
+    }
+    const started = performance.now();
+    const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing);
+    timing.filterDirectMs += performance.now() - started;
+    return { train, allowed };
+  }));
   for (const { train, allowed } of directResults) {
     if (!allowed) { counts.rejected++; continue; }
-    counts.accepted++; const crossingTime = train.actualTime;
-    trains.push({ id: `${train.category}-${train.journeyNumber}-${train.id}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: train.platform, isStoppingTrain: train.platform === "1" || train.platform === "2", direction: getCrossingDirection(train.route), directionLabel: train.destination ? `Richtung ${train.destination}` : null, delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000) });
+    counts.accepted++;
+    const crossingTime = train.crossingTime instanceof Date ? train.crossingTime : new Date(train.crossingTime || train.actualTime);
+    if (!Number.isFinite(crossingTime.getTime())) continue;
+    trains.push({
+      id: `${train.category}-${train.journeyNumber}-${train.journeyRef || train.id || train.observationEva || ""}`,
+      line: train.line,
+      category: train.category,
+      journeyNumber: train.journeyNumber,
+      origin: train.origin,
+      destination: train.destination,
+      platform: train.platform,
+      isStoppingTrain: train.detection === "snapshot-primary-stop" || Boolean(train.platform),
+      direction: Array.isArray(train.route) ? getCrossingDirection(train.route) : "unknown",
+      directionLabel: train.destination ? `Richtung ${train.destination}` : null,
+      delayMinutes: train.delayMinutes,
+      crossingTime: crossingTime.toISOString(),
+      arrival: crossingTime.toISOString(),
+      etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000)
+    });
   }
 
   const throughFiltered = throughTrains.filter((train: any) => lineMatchesHints(train, lineHints));
