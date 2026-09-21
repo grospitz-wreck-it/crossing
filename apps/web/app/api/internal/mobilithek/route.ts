@@ -11,6 +11,8 @@ import {
 const DEFAULT_URL =
   "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
 
+export const maxDuration = 60;
+
 function fetchMobilithek(
   subscriptionId: string,
 ): Promise<{
@@ -41,7 +43,7 @@ function fetchMobilithek(
           "accept-encoding": "gzip",
           "user-agent": "Crossings/1.0 (meineschranke.com)",
         },
-        timeout: 15_000,
+        timeout: 60_000,
       },
       (response) => {
         const status = response.statusCode || 0;
@@ -169,14 +171,6 @@ async function processJourney(
   }
 }
 
-function relayErrorResponse(error: unknown): Response {
-  const message = error instanceof Error ? error.message : String(error);
-  return Response.json(
-    { error: "Mobilithek upstream failed", message },
-    { status: 502 },
-  );
-}
-
 export async function POST(request: Request) {
   try {
     const token = request.headers.get("authorization");
@@ -196,7 +190,13 @@ export async function POST(request: Request) {
       return Response.json({ error: "Demand is required" }, { status: 400 });
     }
 
-    const upstream = await fetchMobilithek(subscriptionId);
+    console.log("[Mobilithek Relay] upstream start", { subscriptionId });
+  const upstream = await fetchMobilithek(subscriptionId);
+  console.log("[Mobilithek Relay] upstream response", {
+    subscriptionId,
+    contentType: upstream.contentType,
+    contentEncoding: upstream.contentEncoding,
+  });
     const source =
       upstream.contentEncoding.includes("gzip")
         ? upstream.source.pipe(createGunzip())
@@ -255,7 +255,12 @@ export async function POST(request: Request) {
               ? `${error.name}: ${error.message}`
               : String(error);
 
-          console.error("[Mobilithek Relay stream]", error);
+          console.error("[Mobilithek Relay stream]", {
+            subscriptionId,
+            message,
+            errorName: error instanceof Error ? error.name : undefined,
+            stack: error instanceof Error ? error.stack : undefined,
+          });
 
           controller.enqueue(
             encodeLine({
@@ -287,6 +292,9 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     console.error("[Mobilithek Relay]", error);
-    return relayErrorResponse(error);
+    return Response.json(
+      { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 },
+    );
   }
 }
