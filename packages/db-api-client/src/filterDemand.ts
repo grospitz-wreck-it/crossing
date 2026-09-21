@@ -42,7 +42,12 @@ export function filterEventsByDemand(
   console.log("[Mobilithek filter] input", {
     events: events.length,
     demand: demand.length,
-    firstDemand: demand[0],
+    demands: demand.map((item) => ({
+      id: item.id,
+      primaryObservationEvas: item.primaryObservationEvas,
+      primaryObservationStations: item.primaryObservationStations,
+      observationStations: item.observationStations,
+    })),
   });
 
   return events.filter(({ event }) => {
@@ -87,7 +92,34 @@ export function filterEventsByDemand(
           calls.some((call) => call === station || call.includes(station) || station.includes(call)),
         );
 
-      if (primaryEvaMatch || primaryStationMatch) return true;
+      if (primaryEvaMatch || primaryStationMatch) {
+        console.log("[Mobilithek filter] PRIMARY MATCH", {
+          crossingId: crossing.id,
+          line: event.line,
+          journeyRef: event.journeyRef,
+          primaryEvaMatch,
+          primaryStationMatch,
+          primaryObservationEvas,
+          primaryObservationStations,
+          matchingCalls: (event.calls || [])
+            .filter((call) =>
+              primaryObservationEvas.some((eva) =>
+                evaMatches(call?.stopPointRef, eva) || evaMatches(call?.stopPlaceRef, eva),
+              ) ||
+              primaryObservationStations.some((station) => {
+                const callName = normalize(String(call?.name || ""));
+                return callName === station || callName.includes(station) || station.includes(callName);
+              }),
+            )
+            .slice(0, 3)
+            .map((call) => ({
+              name: call.name,
+              stopPointRef: call.stopPointRef,
+              stopPlaceRef: call.stopPlaceRef,
+            })),
+        });
+        return true;
+      }
       if (!categoryMatch) return false;
 
       const observationStations = Array.isArray(crossing.observationStations)
