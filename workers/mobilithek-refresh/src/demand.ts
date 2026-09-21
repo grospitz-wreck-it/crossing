@@ -11,6 +11,7 @@ type DemandCrossing = {
   categories: string[];
   observationStations: string[];
   primaryObservationEvas: string[];
+  primaryObservationStations: string[];
 };
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -79,6 +80,11 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       ),
     );
 
+    const primaryObservationStations = primaryObservationEvas.map((eva) => {
+      const nameRow = (result as any);
+      return String(eva);
+    });
+
     const observationStations = Array.from(
       new Set(
         rules
@@ -93,6 +99,7 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       categories,
       observationStations,
       primaryObservationEvas,
+      primaryObservationStations,
     };
   });
 }
