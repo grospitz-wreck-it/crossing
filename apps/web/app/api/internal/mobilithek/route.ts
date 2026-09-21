@@ -151,6 +151,35 @@ async function processJourney(
 
   if (!events.length) return [];
 
+  const kirchlengernCandidates = events.filter((event) =>
+    (event.calls || []).some((call) =>
+      String(call.name || "").toLowerCase().includes("kirchlengern"),
+    ),
+  );
+
+  if (kirchlengernCandidates.length > 0) {
+    console.log("[Mobilithek Relay] Kirchlengern candidates", {
+      subscriptionId,
+      count: kirchlengernCandidates.length,
+      sample: kirchlengernCandidates.slice(0, 10).map((event) => ({
+        line: event.line,
+        category: event.category,
+        journeyRef: event.journeyRef,
+        calls: (event.calls || [])
+          .filter((call) =>
+            String(call.name || "").toLowerCase().includes("kirchlengern"),
+          )
+          .map((call) => ({
+            name: call.name,
+            stopPointRef: call.stopPointRef,
+            stopPlaceRef: call.stopPlaceRef,
+            planned: call.planned?.toISOString(),
+            actual: call.actual?.toISOString(),
+          })),
+      })),
+    });
+  }
+
   try {
     return filterEventsByDemand(
       events.map((event) => ({ subscriptionId, event })),
