@@ -6,6 +6,7 @@ export type DemandCrossing = {
   categories: string[];
   observationStations: string[];
   primaryObservationEvas: string[];
+  primaryObservationStations: string[];
 };
 
 function normalizeEva(value: unknown): string {
@@ -76,7 +77,17 @@ export function filterEventsByDemand(
           ),
         );
 
-      if (primaryEvaMatch) return true;
+      const primaryObservationStations = Array.isArray(crossing.primaryObservationStations)
+        ? crossing.primaryObservationStations.map(normalize).filter(Boolean)
+        : [];
+
+      const primaryStationMatch = primaryObservationStations.length > 0 &&
+        primaryObservationStations.some((station) =>
+          route.some((stop) => stop === station || stop.includes(station) || station.includes(stop)) ||
+          calls.some((call) => call === station || call.includes(station) || station.includes(call)),
+        );
+
+      if (primaryEvaMatch || primaryStationMatch) return true;
       if (!categoryMatch) return false;
 
       const observationStations = Array.isArray(crossing.observationStations)
