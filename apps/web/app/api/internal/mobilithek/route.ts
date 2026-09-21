@@ -221,10 +221,43 @@ async function processJourney(
   }
 
   try {
-    return filterEventsByDemand(
+    const parsed = filterEventsByDemand(
       events.map((event) => ({ subscriptionId, event })),
       demand,
     );
+
+    // Some Mobilithek SIRI journeys expose the primary EVA only as an XML
+    // attribute. Keep an exact raw-EVA fallback so a valid primary-stop
+    // journey cannot be lost because the feed encoded StopPointRef/Ref
+    // differently from the parsed object.
+    const primaryEvas = Array.from(
+      new Set(
+        demand.flatMap((crossing) =>
+          Array.isArray(crossing.primaryObservationEvas)
+            ? crossing.primaryObservationEvas
+                .map((eva) => String(eva).trim())
+                .filter(Boolean)
+            : [],
+        ),
+      ),
+    );
+
+    if (!primaryEvas.length) return parsed;
+
+    const rawPrimaryMatch = primaryEvas.some((eva) => xml.includes(eva));
+    if (!rawPrimaryMatch) return parsed;
+
+    const parsedKeys = new Set(
+      parsed.map(({ event }) => `${event.journeyRef}|${event.id}`),
+    );
+
+    const rawPrimaryEvents = events
+      .filter(({ event }) => !parsedKeys.has(`${event.journeyRef}|${event.id}`))
+      .map((event) => ({ subscriptionId, event }));
+
+    return rawPrimaryEvents.length
+      ? [...parsed, ...rawPrimaryEvents]
+      : parsed;
   } catch (error) {
     const message =
       error instanceof Error
