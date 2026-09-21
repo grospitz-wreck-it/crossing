@@ -11,7 +11,9 @@ import {
 const DEFAULT_URL =
   "https://mobilithek.info:8443/mobilithek/api/v1.0/container/subscription";
 
-export const maxDuration = 60;
+// Mobilithek subscriptions can be several MB and may take longer than the old 60s ceiling.
+// Vercel Hobby now permits up to 300s for Fluid Compute functions.
+export const maxDuration = 300;
 
 function fetchMobilithek(
   subscriptionId: string,
@@ -43,7 +45,7 @@ function fetchMobilithek(
           "accept-encoding": "gzip",
           "user-agent": "Crossings/1.0 (meineschranke.com)",
         },
-        timeout: 60_000,
+        timeout: 300_000,
       },
       (response) => {
         const status = response.statusCode || 0;
