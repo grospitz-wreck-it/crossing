@@ -22,3 +22,6 @@ export type {
 } from "./mobilithekTimetable";
 export type { DemandCrossing } from "./filterDemand";
 export type { SnapshotThroughTrain } from "./getSnapshotThroughTrains";
+
+export { getSnapshotPrimaryTrains } from "./getSnapshotPrimaryTrains";
+export type { SnapshotPrimaryTrain } from "./getSnapshotPrimaryTrains";
