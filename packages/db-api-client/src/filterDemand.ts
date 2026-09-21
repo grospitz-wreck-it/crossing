@@ -5,6 +5,7 @@ export type DemandCrossing = {
   requiredRouteStops: string[];
   categories: string[];
   observationStations: string[];
+  primaryObservationEvas: string[];
 };
 
 function normalize(value: string): string {
@@ -33,6 +34,9 @@ export function filterEventsByDemand(
   return events.filter(({ event }) => {
     const line = String(event.line || "").toUpperCase();
     const category = String(event.category || "").toUpperCase();
+    const primaryObservationEvas = Array.isArray((crossing as any).primaryObservationEvas)
+      ? (crossing as any).primaryObservationEvas.map((value: unknown) => String(value).trim()).filter(Boolean)
+      : [];
     const route = (event.route || []).map(normalize).filter(Boolean);
     const calls = (event.calls || [])
       .map((call) => normalize(String(call?.name || "")))
@@ -50,6 +54,15 @@ export function filterEventsByDemand(
           return category === wanted || line.includes(wanted);
         });
 
+      const primaryEvaMatch = primaryObservationEvas.length > 0 &&
+        (event.calls || []).some((call) =>
+          primaryObservationEvas.some((eva) =>
+            String(call?.stopPointRef || "").trim() === eva ||
+            String(call?.stopPlaceRef || "").trim() === eva,
+          ),
+        );
+
+      if (primaryEvaMatch) return true;
       if (!categoryMatch) return false;
 
       const observationStations = Array.isArray(crossing.observationStations)
