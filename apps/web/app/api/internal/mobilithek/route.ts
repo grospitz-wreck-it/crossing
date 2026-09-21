@@ -248,11 +248,11 @@ async function processJourney(
     if (!rawPrimaryMatch) return parsed;
 
     const parsedKeys = new Set(
-      parsed.map(({ event }) => `${event.journeyRef}|${event.id}`),
+      parsed.map(({ event }) => String(event.journeyRef) + "|" + String(event.id)),
     );
 
     const rawPrimaryEvents = events
-      .filter(({ event }) => !parsedKeys.has(`${event.journeyRef}|${event.id}`))
+      .filter(({ event }) => !parsedKeys.has(String(event.journeyRef) + "|" + String(event.id)))
       .map((event) => ({ subscriptionId, event }));
 
     return rawPrimaryEvents.length
