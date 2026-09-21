@@ -120,7 +120,12 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   configureDb(env);
 
   const demand = await loadDemandCrossings();
-  console.log(`[Mobilithek Worker] demanded crossings=${demand.length}`);
+  console.log("[Mobilithek Worker] demanded crossings", demand.map((item) => ({
+    id: item.id,
+    primaryObservationEvas: item.primaryObservationEvas,
+    primaryObservationStations: item.primaryObservationStations,
+    observationStations: item.observationStations,
+  })));
 
   if (demand.length === 0) {
     return { status: "idle", demandedCrossings: 0 };
