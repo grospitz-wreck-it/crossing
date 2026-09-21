@@ -42,9 +42,16 @@ function primaryEvaMatches(event: MobilithekTrainEvent, evas: string[]): boolean
   return (event.calls || []).some((call: any) =>
     evas.some((eva) => {
       const wanted = String(eva || "").trim();
-      return wanted && (
+      if (!wanted) return false;
+
+      // Mobilithek/SIRI feeds are inconsistent: some feeds expose the EVA
+      // as a StopPointRef/StopPlaceRef attribute, others expose the same
+      // value as the call name. Treat an exact call-name EVA as primary
+      // evidence as well, but never use fuzzy station-name matching here.
+      return (
         String(call?.stopPointRef || "").trim() === wanted ||
-        String(call?.stopPlaceRef || "").trim() === wanted
+        String(call?.stopPlaceRef || "").trim() === wanted ||
+        String(call?.name || "").trim() === wanted
       );
     }),
   );
@@ -100,28 +107,6 @@ export function filterEventsByDemand(
 ) {
   if (!demand.length) return [];
 
-  const targetHits = events
-    .filter(({ event }) => {
-      const serialized = JSON.stringify(event);
-      return /RB\\s*61|RE\\s*60|8003288|Kirchlengern/i.test(serialized);
-    })
-    .slice(0, 5)
-    .map(({ subscriptionId, event }) => ({
-      subscriptionId,
-      line: event.line,
-      category: event.category,
-      journeyRef: event.journeyRef,
-      hasRB61: /RB\\s*61/i.test(JSON.stringify(event)),
-      hasRE60: /RE\\s*60/i.test(JSON.stringify(event)),
-      has8003288: /8003288/.test(JSON.stringify(event)),
-      hasKirchlengern: /Kirchlengern/i.test(JSON.stringify(event)),
-      calls: (event.calls || []).map((call) => ({
-        name: call.name,
-        stopPointRef: call.stopPointRef,
-        stopPlaceRef: call.stopPlaceRef,
-      })),
-    }));
-
   console.log("[Mobilithek filter] input", {
     events: events.length,
     demand: demand.length,
@@ -133,11 +118,12 @@ export function filterEventsByDemand(
     demand.some((crossing) => {
       // PRIMARY: retain every Mobilithek event that actually contains a
       // configured primary observation station. No category or line filter.
-      const primaryMatch =
-        primaryEvaMatches(event, crossing.primaryObservationEvas || []) ||
-        crossing.primaryObservationStations.some((station) =>
-          stationMatches(event, station),
-        );
+      const primaryEvas = crossing.primaryObservationEvas || [];
+      const primaryMatch = primaryEvas.length
+        ? primaryEvaMatches(event, primaryEvas)
+        : crossing.primaryObservationStations.some((station) =>
+            stationMatches(event, station),
+          );
       if (primaryMatch) return true;
 
       // SECONDARY: retain only events anchored at an explicitly configured
