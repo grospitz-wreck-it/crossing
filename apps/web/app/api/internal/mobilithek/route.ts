@@ -252,7 +252,12 @@ async function processJourney(
     );
 
     const rawPrimaryEvents = events
-      .filter(({ event }) => !parsedKeys.has(String(event.journeyRef) + "|" + String(event.id)))
+      .filter(
+        (event) =>
+          !parsedKeys.has(
+            String(event.journeyRef) + "|" + String(event.id),
+          ),
+      )
       .map((event) => ({ subscriptionId, event }));
 
     return rawPrimaryEvents.length
