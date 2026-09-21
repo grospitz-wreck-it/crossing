@@ -1,4 +1,5 @@
 import { configureDb } from "./db.js";
+import { filterEventsByDemand } from "./filterDemand.js";
 import { loadDemandCrossings } from "./demand.js";
 import { refreshOnce } from "./cloudflareMobilithek.js";
 import { writeSnapshot } from "./snapshot.js";
@@ -133,9 +134,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
 
   const result = await refreshOnce(env, subscriptionIds, demand);
-  // TEMPORÄRER DIAGNOSETEST: Das Vercel-Relay filtert bereits nach demand.
-  // Zweiten Filter bewusst überspringen, um dessen CPU-Kosten zu isolieren.
-  const demandedEvents = result.events;
+  const demandedEvents = filterEventsByDemand(result.events, demand);
 
   console.log(
     `[Mobilithek Worker] parsedEvents=${result.parsedEvents} ` +
@@ -154,9 +153,11 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     );
   }
 
-  // TEMPORÄRER DIAGNOSETEST: Snapshot-Schreiben komplett überspringen.
-  // Wenn /run damit funktioniert, liegt der CPU-Verbrauch im writeSnapshot-Diff/DB-Pfad.
-  console.log("[Mobilithek Worker] DIAG: skipping writeSnapshot");
+  await writeSnapshot(demandedEvents, startedAt, {
+    subscriptionCount: result.subscriptionCount,
+    successful: result.successful,
+    failed: result.failed,
+  });
 
   return {
     status: "success",
@@ -174,9 +175,6 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/health") {
       return Response.json({ ok: true, service: "mobilithek-refresh" });
-    }
-    if (url.pathname === "/diag") {
-      return Response.json({ ok: true, build: "333f172", snapshotWrite: "disabled", duplicateDemandFilter: "disabled" });
     }
     if (url.pathname === "/mtls-test") {
       return runMtlsCompare(env);
