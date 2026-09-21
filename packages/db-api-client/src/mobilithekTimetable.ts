@@ -146,7 +146,14 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
         journey,
         ["DatedVehicleJourneyRef", "VehicleJourneyRef", "VehicleJourneyName"],
       ) || `${line}-${index}`;
-    const calls = findAll(journey, "EstimatedCall").map((call) => {
+    const calls = findAll(journey, "EstimatedCall").map((call, callIndex) => {
+      if (index < 2 && callIndex < 3) {
+        console.log("[Mobilithek RAW EstimatedCall]", {
+          journeyIndex: index,
+          callIndex,
+          raw: JSON.stringify(call),
+        });
+      }
       const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef"]) || "";
       const stopPointRef = firstText(call, ["StopPointRef"]);
       const stopPlaceRef = firstText(call, ["StopPlaceRef"]);
@@ -174,7 +181,21 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
         }
       }
 
-      return { name, planned, actual, stopPointRef, stopPlaceRef };
+      const mapped = { name, planned, actual, stopPointRef, stopPlaceRef };
+      if (index < 2 && callIndex < 3) {
+        console.log("[Mobilithek MAPPED EstimatedCall]", {
+          journeyIndex: index,
+          callIndex,
+          mapped: {
+            name: mapped.name,
+            stopPointRef: mapped.stopPointRef,
+            stopPlaceRef: mapped.stopPlaceRef,
+            planned: mapped.planned?.toISOString(),
+            actual: mapped.actual?.toISOString(),
+          },
+        });
+      }
+      return mapped;
     }).filter((call) => call.name && (call.planned || call.actual));
     if (!calls.length) continue;
     const route = calls.map((call) => call.name);
