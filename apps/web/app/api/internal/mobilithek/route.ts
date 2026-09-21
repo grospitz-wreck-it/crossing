@@ -149,7 +149,52 @@ async function processJourney(
     );
   }
 
-  if (!events.length) return [];
+  if (!events.length) {
+    if (xml.includes("8003288") || /Kirchlengern/i.test(xml)) {
+      console.log("[Mobilithek Relay] primary raw candidate parsed zero", {
+        subscriptionId,
+        xmlLength: xml.length,
+        hasEva: xml.includes("8003288"),
+        hasKirchlengern: /Kirchlengern/i.test(xml),
+      });
+    }
+    return [];
+  }
+
+  const primaryParsed = events.filter((event) =>
+    (event.calls || []).some((call) =>
+      String(call.stopPointRef || "").trim() === "8003288" ||
+      String(call.stopPlaceRef || "").trim() === "8003288" ||
+      String(call.name || "").toLowerCase().includes("kirchlengern"),
+    ),
+  );
+
+  if (primaryParsed.length > 0 || xml.includes("8003288") || /Kirchlengern/i.test(xml)) {
+    console.log("[Mobilithek Relay] primary raw/parsed candidate", {
+      subscriptionId,
+      xmlLength: xml.length,
+      rawHasEva: xml.includes("8003288"),
+      rawHasKirchlengern: /Kirchlengern/i.test(xml),
+      parsedPrimaryCount: primaryParsed.length,
+      parsedPrimarySample: primaryParsed.slice(0, 3).map((event) => ({
+        line: event.line,
+        category: event.category,
+        journeyRef: event.journeyRef,
+        calls: event.calls
+          .filter((call) =>
+            String(call.stopPointRef || "").trim() === "8003288" ||
+            String(call.stopPlaceRef || "").trim() === "8003288" ||
+            String(call.name || "").toLowerCase().includes("kirchlengern"),
+          )
+          .slice(0, 5)
+          .map((call) => ({
+            name: call.name,
+            stopPointRef: call.stopPointRef,
+            stopPlaceRef: call.stopPlaceRef,
+          })),
+      })),
+    });
+  }
 
   try {
     return filterEventsByDemand(
