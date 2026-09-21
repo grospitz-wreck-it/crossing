@@ -192,6 +192,31 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
     const scheduledTime = relevant.planned || relevant.actual;
     if (!actualTime || !scheduledTime) continue;
     const lineName = line || firstText(journey, ["PublishedServiceName", "VehicleJourneyName"]) || "unknown";
+
+    // Temporary, narrowly scoped Kirchlengern parser trace. This deliberately
+    // logs only a single known journey (20364) or an RB61/RE60 journey that
+    // already contains the target station/reference, so we do not scan or
+    // retain the full feed for diagnostics.
+    if (
+      String(journeyRef) === "20364" ||
+      ((lineName === "RB 61" || lineName === "RE 60") &&
+        calls.some(
+          (call) =>
+            String(call.stopPointRef || "").trim() === "8003288" ||
+            String(call.stopPlaceRef || "").trim() === "8003288" ||
+            String(call.name || "").toLowerCase().includes("kirchlengern"),
+        ))
+    ) {
+      console.log(
+        "[TRACE Kirchlengern parser]",
+        JSON.stringify({
+          journeyRef,
+          line: lineName,
+          calls,
+        }),
+      );
+    }
+
     const destination = firstText(journey, ["DestinationName", "DestinationText", "DestinationDisplay"]) || calls[calls.length - 1]?.name;
     const origin = firstText(journey, ["OriginName", "OriginText"]) || calls[0]?.name;
     const delayMinutes = Math.round((actualTime.getTime() - scheduledTime.getTime()) / 60000);
