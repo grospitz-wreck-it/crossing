@@ -12,7 +12,13 @@ const PARSED_CACHE_TTL_MS = 25_000;
 const LAST_GOOD_CACHE_TTL_MS = 120_000;
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
 
-type Call = { name: string; planned?: Date; actual?: Date };
+type Call = {
+  name: string;
+  planned?: Date;
+  actual?: Date;
+  stopPointRef?: string;
+  stopPlaceRef?: string;
+};
 export function normalizeMobilithekLine(value: unknown): string | null {
   if (value == null) return null;
 
@@ -142,6 +148,8 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
       ) || `${line}-${index}`;
     const calls = findAll(journey, "EstimatedCall").map((call) => {
       const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef"]) || "";
+      const stopPointRef = firstText(call, ["StopPointRef"]);
+      const stopPlaceRef = firstText(call, ["StopPlaceRef"]);
       const planned = dateValue(call, ["AimedArrivalTime", "AimedDepartureTime", "PlannedArrivalTime", "PlannedDepartureTime"]);
       let actual = dateValue(call, ["ExpectedArrivalTime", "ExpectedDepartureTime", "EstimatedArrivalTime", "EstimatedDepartureTime", "ActualArrivalTime", "ActualDepartureTime"]);
 
@@ -166,7 +174,7 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
         }
       }
 
-      return { name, planned, actual };
+      return { name, planned, actual, stopPointRef, stopPlaceRef };
     }).filter((call) => call.name && (call.planned || call.actual));
     if (!calls.length) continue;
     const route = calls.map((call) => call.name);
@@ -247,7 +255,7 @@ export function parseGtfsRtTripUpdates(bytes: Buffer): MobilithekTrainEvent[] {
       const departure = departureSeconds != null && Number(departureSeconds) > 0 ? new Date(Number(departureSeconds) * 1000) : undefined;
       const actual = arrival || departure;
       if (!stopId || !actual) continue;
-      calls.push({ name: String(stopId), actual, planned: undefined });
+      calls.push({ name: String(stopId), actual, planned: undefined, stopPointRef: String(stopId) });
     }
     if (!calls.length) continue;
     const first = calls[0];
