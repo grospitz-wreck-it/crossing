@@ -1,6 +1,6 @@
 import { configureDb } from "./db.js";
 import { loadDemandCrossings } from "./demand.js";
-import { fetchRelayEvents, refreshOnce } from "./cloudflareMobilithek.js";
+import { fetchRelayDiagnostics, fetchRelayEvents, refreshOnce } from "./cloudflareMobilithek.js";
 import {
   cleanupSubscriptionSnapshots,
   finalizeRefreshStatus,
@@ -223,7 +223,7 @@ export default {
           for (const subscriptionId of subscriptionIds) {
             const startedAt = Date.now();
             try {
-              const result = await fetchRelayEvents(
+              const result = await fetchRelayDiagnostics(
                 env,
                 subscriptionId,
                 demand,
@@ -231,8 +231,7 @@ export default {
               probes.push({
                 subscriptionId,
                 durationMs: Date.now() - startedAt,
-                parsedEvents: result.parsedEvents,
-                metrics: result.debug ?? null,
+                ...result,
               });
             } catch (error) {
               probes.push({
