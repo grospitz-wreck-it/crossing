@@ -141,6 +141,72 @@ function upsertStatement(row: SnapshotRow) {
   };
 }
 
+export async function writeSubscriptionSnapshot(
+  events: SnapshotEvent[],
+  subscriptionId: string,
+  refreshStartedAt: string,
+) {
+  const db = getDb();
+  const refreshedAt = new Date().toISOString();
+  const incoming = new Map<string, SnapshotRow>();
+  for (const { subscriptionId: eventSubscriptionId, event } of events) {
+    if (eventSubscriptionId !== subscriptionId) continue;
+    const row = toSnapshotRow(subscriptionId, event, refreshedAt);
+    incoming.set(row.id, row);
+  }
+  const existingResult = await db.execute({
+    sql: `SELECT id, line, category, journey_number, journey_ref, origin, destination,
+      route_json, calls_json, delay_minutes, actual_time, scheduled_time,
+      direction, source_subscription_id FROM mobilithek_train_snapshot
+      WHERE source_subscription_id = ?`,
+    args: [subscriptionId],
+  });
+  const existing = new Map<string, ExistingSnapshotRow>();
+  for (const row of existingResult.rows as unknown as ExistingSnapshotRow[]) existing.set(row.id, row);
+  const changed: SnapshotRow[] = [];
+  for (const row of incoming.values()) {
+    const previous = existing.get(row.id);
+    if (!previous || !sameSnapshotRow(previous, row)) changed.push(row);
+  }
+  for (let offset = 0; offset < changed.length; offset += BATCH_SIZE) {
+    const chunk = changed.slice(offset, offset + BATCH_SIZE).map(upsertStatement);
+    if (chunk.length) await db.batch(chunk, "write");
+  }
+  console.log(`[Mobilithek Worker] subscription snapshot: ${subscriptionId} incoming=${incoming.size} existing=${existing.size} changed=${changed.length}`);
+}
+
+export async function cleanupSubscriptionSnapshots(subscriptionIds: string[], refreshedAt: string) {
+  if (!subscriptionIds.length) return;
+  const db = getDb();
+  const placeholders = subscriptionIds.map(() => "?").join(", ");
+  await db.execute({
+    sql: `DELETE FROM mobilithek_train_snapshot
+      WHERE source_subscription_id IN (${placeholders}) AND refreshed_at < ?`,
+    args: [...subscriptionIds, refreshedAt],
+  });
+  console.log(`[Mobilithek Worker] subscription snapshot cleanup: ${subscriptionIds.length} subscriptions`);
+}
+
+export async function finalizeRefreshStatus(
+  refreshStartedAt: string,
+  refreshedAt: string,
+  stats: { subscriptionCount: number; successful: number; failed: number; eventCount: number },
+) {
+  const db = getDb();
+  await db.execute({
+    sql: `INSERT INTO mobilithek_refresh_status (
+      id, started_at, finished_at, status, subscription_count,
+      successful_subscriptions, failed_subscriptions, event_count, error
+    ) VALUES (1, ?, ?, "success", ?, ?, ?, ?, NULL)
+    ON CONFLICT(id) DO UPDATE SET started_at = excluded.started_at,
+      finished_at = excluded.finished_at, status = excluded.status,
+      subscription_count = excluded.subscription_count,
+      successful_subscriptions = excluded.successful_subscriptions,
+      failed_subscriptions = excluded.failed_subscriptions,
+      event_count = excluded.event_count, error = NULL`,
+    args: [refreshStartedAt, refreshedAt, stats.subscriptionCount, stats.successful, stats.failed, stats.eventCount],
+  });
+}
 export async function writeSnapshot(
   events: SnapshotEvent[],
   refreshStartedAt: string,
