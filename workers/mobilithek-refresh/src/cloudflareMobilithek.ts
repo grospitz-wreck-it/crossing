@@ -125,7 +125,22 @@ async function fetchRelayEvents(
   const consumeLine = async (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    const value = JSON.parse(trimmed) as { subscriptionId: string; event: MobilithekTrainEvent };
+    const value = JSON.parse(trimmed) as
+      | { subscriptionId: string; event: MobilithekTrainEvent }
+      | {
+          __debug: "mobilithek-demand";
+          subscriptionId: string;
+          parsedJourneys: number;
+          debugScopeViolations: number;
+          fromNormalFilter: number;
+          fromRawFallback: number;
+        };
+
+    if ("__debug" in value && value.__debug === "mobilithek-demand") {
+      console.log("[Mobilithek DEBUG] demand metrics", value);
+      return;
+    }
+
     parsedEvents++;
     batch.push({
       subscriptionId: value.subscriptionId,
