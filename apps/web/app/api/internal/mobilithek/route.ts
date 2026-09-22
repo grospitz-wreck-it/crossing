@@ -280,6 +280,25 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json().catch(() => ({}));
+
+    if (url.searchParams.get("ping") === "1") {
+      return Response.json(
+        {
+          status: "ok",
+          mode: "ping",
+          version: "2026-09-22-ping-2",
+        },
+        {
+          status: 200,
+          headers: {
+            "Cache-Control": "no-store",
+            "X-Mobilithek-Diagnostic": "1",
+            "X-Mobilithek-Relay-Version": "2026-09-22-ping-2",
+          },
+        },
+      );
+    }
+
     const subscriptionId = String(body?.subscriptionId || "").trim();
     const demand = Array.isArray(body?.demand)
       ? (body.demand as DemandCrossing[])
