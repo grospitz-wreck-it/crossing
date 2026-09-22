@@ -103,6 +103,10 @@ async function fetchRelayEvents(
         authorization: `Bearer ${relayToken}`,
         "content-type": "application/json",
         accept: "application/x-ndjson",
+        // Do not let the platform transparently gzip/decode the large NDJSON
+        // relay response. The feed is already streamed line-by-line and
+        // compression here can force a large decode buffer in Workers.
+        "accept-encoding": "identity",
       },
       body: JSON.stringify({ subscriptionId, demand }),
       signal: controller.signal,
