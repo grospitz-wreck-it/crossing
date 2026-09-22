@@ -96,9 +96,10 @@ function secondaryMatches(
     return false;
   }
 
-  return crossing.secondaryObservationStations.some((station) =>
-    stationMatches(event, station),
-  );
+  const stations = Array.isArray(crossing.secondaryObservationStations)
+    ? crossing.secondaryObservationStations
+    : [];
+  return stations.some((station) => stationMatches(event, station));
 }
 
 export type DemandMatch = {
@@ -113,12 +114,15 @@ export function getDemandMatches(
   if (!demand.length) return [];
 
   return demand.flatMap((crossing): DemandMatch[] => {
-    const primaryEvas = crossing.primaryObservationEvas || [];
+    const primaryEvas = Array.isArray(crossing.primaryObservationEvas)
+      ? crossing.primaryObservationEvas
+      : [];
+    const primaryStations = Array.isArray(crossing.primaryObservationStations)
+      ? crossing.primaryObservationStations
+      : [];
     const primaryMatch = primaryEvas.length
       ? primaryEvaMatches(event, primaryEvas)
-      : crossing.primaryObservationStations.some((station) =>
-          stationMatches(event, station),
-        );
+      : primaryStations.some((station) => stationMatches(event, station));
 
     if (primaryMatch) {
       return [{ crossingId: crossing.id, kind: "primary" as const }];
