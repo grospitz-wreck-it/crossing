@@ -113,7 +113,11 @@ export async function fetchRelayDiagnostics(
       throw new Error(`Mobilithek Relay diagnostic HTTP ${response.status}: ${body.slice(0, 2000)}`);
     }
     if (response.headers.get("x-mobilithek-diagnostic") !== "1") {
-      throw new Error(`Mobilithek Relay did not enter diagnostic mode; content-type=${response.headers.get("content-type") || ""}; body=${body.slice(0, 500)}`);
+      const relayVersion =
+        response.headers.get("x-mobilithek-relay-version") || "MISSING";
+      throw new Error(
+        `Mobilithek Relay did not enter diagnostic mode; relayVersion=${relayVersion}; content-type=${response.headers.get("content-type") || ""}; body=${body.slice(0, 500)}`,
+      );
     }
     return JSON.parse(body) as Record<string, unknown>;
   } finally {
