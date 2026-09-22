@@ -3,6 +3,7 @@ import type { ClientRequest } from "node:http";
 import { createGunzip } from "node:zlib";
 import {
   filterEventsByDemand,
+  getDemandMatches,
   parseBody,
   type DemandCrossing,
   type MobilithekTrainEvent,
@@ -218,6 +219,38 @@ async function processJourney(
   }
 }
 
+async function processJourneyDiagnostic(
+  xml: string,
+  subscriptionId: string,
+  demand: DemandCrossing[],
+): Promise<{
+  events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
+  fromNormalFilter: number;
+  fromRawFallback: number;
+  journeyCount: number;
+}> {
+  const events = parseBody(xml);
+  const journeyCount = (xml.match(/<EstimatedVehicleJourney/g) || []).length;
+  if (!events.length) return { events: [], fromNormalFilter: 0, fromRawFallback: 0, journeyCount };
+  const parsed = filterEventsByDemand(events.map((event) => ({ subscriptionId, event })), demand);
+  const primaryEvas = Array.from(new Set(demand.flatMap((crossing) =>
+    Array.isArray(crossing.primaryObservationEvas)
+      ? crossing.primaryObservationEvas.map((eva) => String(eva).trim()).filter(Boolean)
+      : [],
+  )));
+  const parsedKeys = new Set(parsed.map(({ event }) => String(event.journeyRef) + "|" + String(event.id)));
+  const rawPrimaryEvents = primaryEvas.some((eva) => xml.includes(eva))
+    ? events.filter((event) => !parsedKeys.has(String(event.journeyRef) + "|" + String(event.id)))
+        .map((event) => ({ subscriptionId, event }))
+    : [];
+  return {
+    events: rawPrimaryEvents.length ? [...parsed, ...rawPrimaryEvents] : parsed,
+    fromNormalFilter: parsed.length,
+    fromRawFallback: rawPrimaryEvents.length,
+    journeyCount,
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const token = request.headers.get("authorization");
@@ -248,6 +281,89 @@ export async function POST(request: Request) {
       upstream.contentEncoding.includes("gzip")
         ? upstream.source.pipe(createGunzip())
         : upstream.source;
+
+    const diagnostic =
+      body?.mode === "diagnostic" ||
+      request.headers.get("x-mobilithek-diagnostic") === "1" ||
+      new URL(request.url).searchParams.get("diagnostic") === "1";
+
+    if (diagnostic) {
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let parsedJourneys = 0;
+      let demandedEvents = 0;
+      let rawRb61Journeys = 0;
+      let rawRe60Journeys = 0;
+      let rawKirchlengernJourneys = 0;
+      let rawEva8003288Journeys = 0;
+      let scopeViolations = 0;
+      let normalFilterEvents = 0;
+      let rawFallbackEvents = 0;
+      const crossingBreakdown = new Map<string, { events: number; primary: number; secondary: number }>();
+
+      const inspect = async (journey: string) => {
+        parsedJourneys++;
+        if (/RB\s*61/i.test(journey)) rawRb61Journeys++;
+        if (/RE\s*60/i.test(journey)) rawRe60Journeys++;
+        if (/Kirchlengern/i.test(journey)) rawKirchlengernJourneys++;
+        if (/8003288/.test(journey)) rawEva8003288Journeys++;
+
+        const result = await processJourneyDiagnostic(journey, subscriptionId, demand);
+        normalFilterEvents += result.fromNormalFilter;
+        rawFallbackEvents += result.fromRawFallback;
+        if (result.journeyCount !== 1) scopeViolations++;
+        demandedEvents += result.events.length;
+
+        for (const item of result.events) {
+          for (const match of getDemandMatches(item.event, demand)) {
+            const current = crossingBreakdown.get(match.crossingId) || { events: 0, primary: 0, secondary: 0 };
+            current.events++;
+            current[match.kind]++;
+            crossingBreakdown.set(match.crossingId, current);
+          }
+        }
+      };
+
+      try {
+        for await (const chunk of source as AsyncIterable<Buffer | Uint8Array>) {
+          buffer += decoder.decode(chunk, { stream: true });
+          const extracted = takeJourneys(buffer);
+          buffer = extracted.rest;
+          for (const journey of extracted.journeys) await inspect(journey);
+        }
+        buffer += decoder.decode();
+        const final = takeJourneys(buffer);
+        for (const journey of final.journeys) await inspect(journey);
+        upstream.request.destroy();
+
+        return new Response(JSON.stringify({
+          status: "ok",
+          mode: "diagnostic",
+          subscriptionId,
+          parsedJourneys,
+          demandedEvents,
+          scopeViolations,
+          fromNormalFilter: normalFilterEvents,
+          fromRawFallback: rawFallbackEvents,
+          rawRb61Journeys,
+          rawRe60Journeys,
+          rawKirchlengernJourneys,
+          rawEva8003288Journeys,
+          crossingBreakdown: Object.fromEntries(crossingBreakdown),
+        }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store",
+            "X-Mobilithek-Diagnostic": "1",
+            "X-Mobilithek-Relay-Version": "2026-09-22-diagnostic-2",
+          },
+        });
+      } catch (error) {
+        upstream.request.destroy();
+        throw error;
+      }
+    }
 
     const output = new ReadableStream<Uint8Array>({
       async start(controller) {
