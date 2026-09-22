@@ -1,8 +1,11 @@
 import { configureDb } from "./db.js";
 import { loadDemandCrossings } from "./demand.js";
-import { filterEventsByDemand } from "./filterDemand.js";
 import { refreshOnce } from "./cloudflareMobilithek.js";
-import { writeSnapshot } from "./snapshot.js";
+import {
+  cleanupSubscriptionSnapshots,
+  finalizeRefreshStatus,
+  writeSubscriptionSnapshot,
+} from "./snapshot.js";
 
 export interface Env {
   TURSO_DATABASE_URL: string;
@@ -133,23 +136,24 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
 
   console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
 
-  const result = await refreshOnce(env, subscriptionIds, demand);
+  const refreshedAt = new Date().toISOString();
+  const successfulSubscriptionIds: string[] = [];
 
-  // The mTLS relay already applies the demand filter before streaming NDJSON.
-  // Re-filtering thousands of parsed events here duplicates the expensive
-  // matching work and can exhaust the Worker's CPU budget. Only apply the
-  // local filter when the relay is not configured.
-  const relayActive = Boolean(
-    env.MOBILITHEK_RELAY_URL?.trim() &&
-    env.MOBILITHEK_RELAY_TOKEN?.trim(),
+  const result = await refreshOnce(
+    env,
+    subscriptionIds,
+    demand,
+    async (subscriptionId, events) => {
+      successfulSubscriptionIds.push(subscriptionId);
+      await writeSubscriptionSnapshot(events, subscriptionId, startedAt);
+    },
   );
-  const demandedEvents = relayActive
-    ? result.events
-    : filterEventsByDemand(result.events, demand);
+
+  const demandedEventCount = result.acceptedEvents;
 
   console.log(
     `[Mobilithek Worker] parsedEvents=${result.parsedEvents} ` +
-      `accepted=${result.acceptedEvents} demandedEvents=${demandedEvents.length}`,
+      `accepted=${result.acceptedEvents} demandedEvents=${demandedEventCount}`,
   );
 
   if (result.successful === 0) {
@@ -158,16 +162,22 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     );
   }
 
-  if (demandedEvents.length === 0) {
+  if (demandedEventCount === 0) {
     throw new Error(
       "Mobilithek lieferte keine Zugdaten für die aktuell nachgefragten BÜs",
     );
   }
 
-  await writeSnapshot(demandedEvents, startedAt, {
+  await cleanupSubscriptionSnapshots(
+    successfulSubscriptionIds,
+    refreshedAt,
+  );
+
+  await finalizeRefreshStatus(startedAt, refreshedAt, {
     subscriptionCount: result.subscriptionCount,
     successful: result.successful,
     failed: result.failed,
+    eventCount: demandedEventCount,
   });
 
   return {
@@ -177,7 +187,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     successful: result.successful,
     failed: result.failed,
     parsedEvents: result.parsedEvents,
-    demandedEvents: demandedEvents.length,
+    demandedEvents: demandedEventCount,
   };
 }
 
