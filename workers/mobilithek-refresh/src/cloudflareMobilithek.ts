@@ -78,6 +78,35 @@ async function fetchDirectFeed(
 }
 
 
+export async function fetchRelayPing(
+  env: MobilithekEnv,
+): Promise<Record<string, unknown>> {
+  const relayUrl = env.MOBILITHEK_RELAY_URL?.trim();
+  const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
+  if (!relayUrl || !relayToken) throw new Error("Mobilithek Relay ist nicht konfiguriert");
+
+  const pingUrl = relayUrl.includes("?")
+    ? relayUrl + "&ping=1"
+    : relayUrl + "?ping=1";
+  const response = await fetch(pingUrl, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${relayToken}`,
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: "{}"
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    throw new Error(`Mobilithek Relay ping HTTP ${response.status}: ${body.slice(0, 2000)}`);
+  }
+  if (response.headers.get("x-mobilithek-diagnostic") !== "1") {
+    throw new Error(`Mobilithek Relay ping missing diagnostic header; body=${body.slice(0, 500)}`);
+  }
+  return JSON.parse(body) as Record<string, unknown>;
+}
+
 export async function fetchRelayDiagnostics(
   env: MobilithekEnv,
   subscriptionId: string,
