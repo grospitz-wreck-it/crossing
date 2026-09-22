@@ -347,6 +347,16 @@ export async function POST(request: Request) {
             rawKirchlengernJourneys,
             rawEva8003288Journeys,
           });
+          controller.enqueue(
+            encodeLine({
+              __meta: "mobilithek-demand-debug",
+              subscriptionId,
+              parsedJourneys,
+              scopeViolations: debugScopeViolations,
+              fromNormalFilter: debugNormalFilterEvents,
+              fromRawFallback: debugRawFallbackEvents,
+            }),
+          );
           controller.close();
         } catch (error) {
           const message =
