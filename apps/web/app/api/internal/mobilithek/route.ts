@@ -259,7 +259,7 @@ export async function POST(request: Request) {
       return Response.json({ error: "Demand is required" }, { status: 400 });
     }
 
-    const diagnostic = body?.mode === "diagnostic";
+    const diagnostic =\n      body?.mode === "diagnostic" ||\n      request.headers.get("x-mobilithek-diagnostic") === "1";
     console.log("[Mobilithek Relay] upstream start", { subscriptionId, diagnostic });
 
     const upstream = await fetchMobilithek(subscriptionId);
