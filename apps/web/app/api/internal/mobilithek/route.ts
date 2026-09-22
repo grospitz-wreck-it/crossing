@@ -261,7 +261,8 @@ export async function POST(request: Request) {
 
     const diagnostic =
       body?.mode === "diagnostic" ||
-      request.headers.get("x-mobilithek-diagnostic") === "1";
+      request.headers.get("x-mobilithek-diagnostic") === "1" ||
+      new URL(request.url).searchParams.get("diagnostic") === "1";
     console.log("[Mobilithek Relay] upstream start", { subscriptionId, diagnostic });
 
     const upstream = await fetchMobilithek(subscriptionId);
