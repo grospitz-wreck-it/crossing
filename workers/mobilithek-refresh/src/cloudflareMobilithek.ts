@@ -87,7 +87,7 @@ async function fetchRelayEvents(
   const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
   if (!relayUrl || !relayToken) throw new Error("Mobilithek Relay ist nicht konfiguriert");
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
+  // Mobilithek subscriptions can legitimately take several minutes. The relay streams the response, so use the full Vercel function window rather than aborting at 120s.
   let response: Response;
   try {
     response = await fetch(relayUrl, {
