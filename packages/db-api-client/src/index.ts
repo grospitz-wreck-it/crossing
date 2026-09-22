@@ -13,7 +13,7 @@ export {
   parseGtfsRtTripUpdates,
   filterMobilithekTrains,
 } from "./mobilithekTimetable";
-export { filterEventsByDemand } from "./filterDemand";
+export { filterEventsByDemand, getDemandMatches } from "./filterDemand";
 export { getSnapshotThroughTrains } from "./getSnapshotThroughTrains";
 
 export type {
