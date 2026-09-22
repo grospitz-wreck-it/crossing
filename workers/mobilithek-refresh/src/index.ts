@@ -254,10 +254,6 @@ export default {
         }
 
         return Response.json({
-      try {
-        configureDb(env);
-        const demand = await loadDemandCrossings();
-        return Response.json({
           status: "ok",
           demandedCrossings: demand.length,
           demand: demand.map((crossing) => ({
