@@ -252,9 +252,28 @@ export default {
           });
         }
 
+        let relayConfig: Record<string, unknown> = {
+          configured: Boolean(env.MOBILITHEK_RELAY_URL),
+        };
+        if (env.MOBILITHEK_RELAY_URL) {
+          try {
+            const relayUrl = new URL(env.MOBILITHEK_RELAY_URL);
+            relayConfig = {
+              configured: true,
+              protocol: relayUrl.protocol,
+              host: relayUrl.host,
+              pathname: relayUrl.pathname,
+              hasQuery: relayUrl.search.length > 0,
+            };
+          } catch {
+            relayConfig = { configured: true, url: "invalid-url" };
+          }
+        }
+
         return Response.json({
           status: "ok",
           demandedCrossings: demand.length,
+          relayConfig,
           demand: demand.map((crossing) => ({
             id: crossing.id,
             primaryObservationEvas: crossing.primaryObservationEvas,
