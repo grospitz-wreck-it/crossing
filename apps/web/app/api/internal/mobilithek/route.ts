@@ -270,22 +270,77 @@ export async function POST(request: Request) {
       return Response.json({ error: "Demand is required" }, { status: 400 });
     }
 
-    console.log("[Mobilithek Relay] upstream start", { subscriptionId });
-  const upstream = await fetchMobilithek(subscriptionId);
-  console.log("[Mobilithek Relay] upstream response", {
-    subscriptionId,
-    contentType: upstream.contentType,
-    contentEncoding: upstream.contentEncoding,
-  });
-    const source =
-      upstream.contentEncoding.includes("gzip")
-        ? upstream.source.pipe(createGunzip())
-        : upstream.source;
-
     const diagnostic =
       body?.mode === "diagnostic" ||
       request.headers.get("x-mobilithek-diagnostic") === "1" ||
       new URL(request.url).searchParams.get("diagnostic") === "1";
+
+    console.log("[Mobilithek Relay] upstream start", {
+      subscriptionId,
+      diagnostic,
+    });
+
+    let upstream: Awaited<ReturnType<typeof fetchMobilithek>>;
+    try {
+      upstream = await fetchMobilithek(subscriptionId);
+    } catch (error) {
+      const err = error as {
+        name?: unknown;
+        message?: unknown;
+        code?: unknown;
+        cause?: { name?: unknown; message?: unknown; code?: unknown };
+      };
+
+      console.error("[Mobilithek Relay] upstream fetch failed", {
+        subscriptionId,
+        errorName: error instanceof Error ? error.name : typeof error,
+        message: error instanceof Error ? error.message : String(error),
+        code: err?.code,
+        causeName: err?.cause?.name,
+        causeMessage: err?.cause?.message,
+        causeCode: err?.cause?.code,
+      });
+
+      if (diagnostic) {
+        return Response.json(
+          {
+            status: "error",
+            mode: "diagnostic",
+            subscriptionId,
+            stage: "mobilithek-upstream-connect",
+            error: {
+              name: error instanceof Error ? error.name : typeof error,
+              message: error instanceof Error ? error.message : String(error),
+              code: err?.code,
+              causeName: err?.cause?.name,
+              causeMessage: err?.cause?.message,
+              causeCode: err?.cause?.code,
+            },
+          },
+          {
+            status: 502,
+            headers: {
+              "Cache-Control": "no-store",
+              "X-Mobilithek-Diagnostic": "1",
+              "X-Mobilithek-Relay-Version": "2026-09-22-diagnostic-3",
+            },
+          },
+        );
+      }
+
+      throw error;
+    }
+
+    console.log("[Mobilithek Relay] upstream response", {
+      subscriptionId,
+      contentType: upstream.contentType,
+      contentEncoding: upstream.contentEncoding,
+    });
+
+    const source =
+      upstream.contentEncoding.includes("gzip")
+        ? upstream.source.pipe(createGunzip())
+        : upstream.source;
 
     if (diagnostic) {
       const decoder = new TextDecoder();
