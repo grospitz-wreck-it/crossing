@@ -124,18 +124,6 @@ async function processJourney(
   subscriptionId: string,
   demand: DemandCrossing[],
 ): Promise<Array<{ subscriptionId: string; event: MobilithekTrainEvent }>> {
-  const rawKirchlengernHit =
-    /8003288|Kirchlengern/i.test(xml);
-
-  if (rawKirchlengernHit) {
-    const refMatches = xml.match(/.{0,180}(?:8003288|Kirchlengern).{0,300}/gi) || [];
-    console.log("[Mobilithek Relay] RAW Kirchlengern hit", {
-      subscriptionId,
-      xmlLength: xml.length,
-      matches: refMatches.slice(0, 5),
-    });
-  }
-
   let events: MobilithekTrainEvent[];
   try {
     events = parseBody(xml);
@@ -162,63 +150,6 @@ async function processJourney(
   }
 
   if (!events.length) return [];
-
-  const kirchlengernCandidates = events.filter((event) =>
-    (event.calls || []).some((call) =>
-      String(call.name || "").toLowerCase().includes("kirchlengern"),
-    ),
-  );
-
-  if (kirchlengernCandidates.length > 0) {
-    console.log("[Mobilithek Relay] Kirchlengern candidates", {
-      subscriptionId,
-      count: kirchlengernCandidates.length,
-      sample: kirchlengernCandidates.slice(0, 10).map((event) => ({
-        line: event.line,
-        category: event.category,
-        journeyRef: event.journeyRef,
-        calls: (event.calls || [])
-          .filter((call) =>
-            String(call.name || "").toLowerCase().includes("kirchlengern"),
-          )
-          .map((call) => ({
-            name: call.name,
-            stopPointRef: call.stopPointRef,
-            stopPlaceRef: call.stopPlaceRef,
-            planned: call.planned?.toISOString(),
-            actual: call.actual?.toISOString(),
-          })),
-      })),
-    });
-  }
-
-  const targetJourneys = events.filter((event) => {
-    const serialized = JSON.stringify(event);
-    return /RB\\s*61|RE\\s*60|8003288|Kirchlengern/i.test(serialized);
-  });
-
-  if (targetJourneys.length > 0) {
-    console.log("[Mobilithek Relay] TARGET JOURNEY", {
-      subscriptionId,
-      matches: targetJourneys.slice(0, 10).map((event) => {
-        const serialized = JSON.stringify(event);
-        return {
-          line: event.line,
-          category: event.category,
-          journeyRef: event.journeyRef,
-          hasRB61: /RB\\s*61/i.test(serialized),
-          hasRE60: /RE\\s*60/i.test(serialized),
-          has8003288: /8003288/.test(serialized),
-          hasKirchlengern: /Kirchlengern/i.test(serialized),
-          calls: (event.calls || []).map((call) => ({
-            name: call.name,
-            stopPointRef: call.stopPointRef,
-            stopPlaceRef: call.stopPlaceRef,
-          })),
-        };
-      }),
-    });
-  }
 
   try {
     const parsed = filterEventsByDemand(
