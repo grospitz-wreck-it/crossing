@@ -101,6 +101,37 @@ function secondaryMatches(
   );
 }
 
+export type DemandMatch = {
+  crossingId: string;
+  kind: "primary" | "secondary";
+};
+
+export function getDemandMatches(
+  event: MobilithekTrainEvent,
+  demand: DemandCrossing[],
+): DemandMatch[] {
+  if (!demand.length) return [];
+
+  return demand.flatMap((crossing) => {
+    const primaryEvas = crossing.primaryObservationEvas || [];
+    const primaryMatch = primaryEvas.length
+      ? primaryEvaMatches(event, primaryEvas)
+      : crossing.primaryObservationStations.some((station) =>
+          stationMatches(event, station),
+        );
+
+    if (primaryMatch) {
+      return [{ crossingId: crossing.id, kind: "primary" as const }];
+    }
+
+    if (secondaryMatches(event, crossing)) {
+      return [{ crossingId: crossing.id, kind: "secondary" as const }];
+    }
+
+    return [];
+  });
+}
+
 export function filterEventsByDemand(
   events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>,
   demand: DemandCrossing[],
@@ -117,39 +148,14 @@ export function filterEventsByDemand(
   let secondaryMatchCount = 0;
 
   const filtered = events.filter(({ event }) => {
-    let matchedPrimary = false;
-    let matchedSecondary = false;
+    const matches = getDemandMatches(event, demand);
+    const matchedPrimary = matches.some((match) => match.kind === "primary");
+    const matchedSecondary = matches.some((match) => match.kind === "secondary");
 
-    const matched = demand.some((crossing) => {
-      // PRIMARY: retain every Mobilithek event that actually contains a
-      // configured primary observation station. No category or line filter.
-      const primaryEvas = crossing.primaryObservationEvas || [];
-      const primaryMatch = primaryEvas.length
-        ? primaryEvaMatches(event, primaryEvas)
-        : crossing.primaryObservationStations.some((station) =>
-            stationMatches(event, station),
-          );
-      if (primaryMatch) {
-        matchedPrimary = true;
-        return true;
-      }
+    if (matchedPrimary) primaryMatches++;
+    else if (matchedSecondary) secondaryMatchCount++;
 
-      // SECONDARY: retain only events anchored at an explicitly configured
-      // secondary observation station and matching its optional constraints.
-      if (secondaryMatches(event, crossing)) {
-        matchedSecondary = true;
-        return true;
-      }
-
-      return false;
-    });
-
-    if (matched) {
-      if (matchedPrimary) primaryMatches++;
-      else if (matchedSecondary) secondaryMatchCount++;
-    }
-
-    return matched;
+    return matches.length > 0;
   });
 
   console.log("[Mobilithek filter] result", {
