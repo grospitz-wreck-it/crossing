@@ -82,7 +82,15 @@ async function fetchRelayEvents(
   subscriptionId: string,
   demand: DemandCrossing[],
   onEvents?: (events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>) => Promise<void>,
-): Promise<{ parsedEvents: number }> {
+): Promise<{
+  parsedEvents: number;
+  debug?: {
+    parsedJourneys: number;
+    scopeViolations: number;
+    fromNormalFilter: number;
+    fromRawFallback: number;
+  };
+}> {
   const relayUrl = env.MOBILITHEK_RELAY_URL?.trim();
   const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
   if (!relayUrl || !relayToken) throw new Error("Mobilithek Relay ist nicht konfiguriert");
@@ -115,6 +123,12 @@ async function fetchRelayEvents(
   const decoder = new TextDecoder();
   let buffer = "";
   let parsedEvents = 0;
+  let debug: {
+    parsedJourneys: number;
+    scopeViolations: number;
+    fromNormalFilter: number;
+    fromRawFallback: number;
+  } | undefined;
   const batch: Array<{ subscriptionId: string; event: MobilithekTrainEvent }> = [];
   const BATCH_SIZE = 250;
   const flush = async () => {
@@ -137,6 +151,13 @@ async function fetchRelayEvents(
         };
 
     if ("__debug" in value && value.__debug === "mobilithek-demand") {
+      console.log("[Mobilithek DEBUG] demand metrics", value);
+      debug = {
+        parsedJourneys: value.parsedJourneys,
+        scopeViolations: value.debugScopeViolations,
+        fromNormalFilter: value.fromNormalFilter,
+        fromRawFallback: value.fromRawFallback,
+      };
       console.log("[Mobilithek DEBUG] demand metrics", value);
       return;
     }
@@ -176,7 +197,7 @@ async function fetchRelayEvents(
     clearTimeout(timeout);
     reader.releaseLock();
   }
-  return { parsedEvents };
+  return { parsedEvents, debug };
 }
 function isValidTrainTime(value: Date): boolean {
   const timestamp = value.getTime();
