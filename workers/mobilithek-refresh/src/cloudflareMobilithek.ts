@@ -94,6 +94,7 @@ export async function fetchRelayPing(
       authorization: `Bearer ${relayToken}`,
       "content-type": "application/json",
       accept: "application/json",
+      "x-mobilithek-ping": "1",
     },
     body: "{}"
   });
