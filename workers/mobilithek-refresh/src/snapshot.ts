@@ -176,7 +176,7 @@ export async function finalizeRefreshStatus(
     sql: `INSERT INTO mobilithek_refresh_status (
       id, started_at, finished_at, status, subscription_count,
       successful_subscriptions, failed_subscriptions, event_count, error
-    ) VALUES (1, ?, ?, "success", ?, ?, ?, ?, NULL)
+    ) VALUES (1, ?, ?, 'success', ?, ?, ?, ?, NULL)
     ON CONFLICT(id) DO UPDATE SET started_at = excluded.started_at,
       finished_at = excluded.finished_at, status = excluded.status,
       subscription_count = excluded.subscription_count,
