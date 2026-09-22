@@ -112,7 +112,7 @@ export function getDemandMatches(
 ): DemandMatch[] {
   if (!demand.length) return [];
 
-  return demand.flatMap((crossing) => {
+  return demand.flatMap((crossing): DemandMatch[] => {
     const primaryEvas = crossing.primaryObservationEvas || [];
     const primaryMatch = primaryEvas.length
       ? primaryEvaMatches(event, primaryEvas)
