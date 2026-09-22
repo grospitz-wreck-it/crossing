@@ -142,7 +142,7 @@ export async function fetchRelayEvents(
     const value = JSON.parse(trimmed) as
       | { subscriptionId: string; event: MobilithekTrainEvent }
       | {
-          __debug: "mobilithek-demand";
+          __meta: "mobilithek-demand-debug";
           subscriptionId: string;
           parsedJourneys: number;
           debugScopeViolations: number;
@@ -150,7 +150,7 @@ export async function fetchRelayEvents(
           fromRawFallback: number;
         };
 
-    if ("__debug" in value && value.__debug === "mobilithek-demand") {
+    if ("__meta" in value && value.__meta === "mobilithek-demand-debug") {
       console.log("[Mobilithek DEBUG] demand metrics", value);
       debug = {
         parsedJourneys: value.parsedJourneys,
