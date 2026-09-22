@@ -195,8 +195,21 @@ export async function refreshOnce(
   let invalidActualTimeEvents = 0;
   let acceptedEvents = 0;
 
-  const results = await Promise.all(
-    subscriptionIds.map(async (subscriptionId) => {
+  // Process subscriptions sequentially. Promise.all() kept every subscription's full
+  // relay result in memory at once and caused scheduled runs to hit Cloudflare's
+  // memory limit when the feeds returned tens of thousands of events.
+  const results: Array<{
+    subscriptionId: string;
+    successful: boolean;
+    parsedEvents: number;
+    acceptedEvents: number;
+    invalidActualTimeEvents: number;
+    events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
+    error?: string;
+  }> = [];
+
+  for (const subscriptionId of subscriptionIds) {
+    const result = await (async () => {
       try {
         console.log(`[Mobilithek] loading ${subscriptionId}`);
 
@@ -273,8 +286,9 @@ export async function refreshOnce(
           error: message,
         };
       }
-    }),
-  );
+    })();
+    results.push(result);
+  }
 
   for (const result of results) {
     parsedEvents += result.parsedEvents;
