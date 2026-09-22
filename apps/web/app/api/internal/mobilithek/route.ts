@@ -318,11 +318,11 @@ export async function POST(request: Request) {
             },
           },
           {
-            status: 502,
+            status: 200,
             headers: {
               "Cache-Control": "no-store",
               "X-Mobilithek-Diagnostic": "1",
-              "X-Mobilithek-Relay-Version": "2026-09-22-diagnostic-3",
+              "X-Mobilithek-Relay-Version": "2026-09-22-diagnostic-4",
             },
           },
         );
