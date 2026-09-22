@@ -151,6 +151,12 @@ async function processJourney(
 
   if (!events.length) return [];
 
+  console.log("[DEBUG] xml scope check:", {
+    subscriptionId,
+    length: xml.length,
+    journeyCount: (xml.match(/<EstimatedVehicleJourney/g) || []).length,
+  });
+
   try {
     const parsed = filterEventsByDemand(
       events.map((event) => ({ subscriptionId, event })),
@@ -190,6 +196,12 @@ async function processJourney(
           ),
       )
       .map((event) => ({ subscriptionId, event }));
+
+    console.log("[DEBUG] fallback contribution:", {
+      subscriptionId,
+      fromNormalFilter: parsed.length,
+      fromRawFallback: rawPrimaryEvents.length,
+    });
 
     return rawPrimaryEvents.length
       ? [...parsed, ...rawPrimaryEvents]
