@@ -300,7 +300,7 @@ export async function refreshOnce(
 
   return {
     subscriptionCount: subscriptionIds.length,
-    eventCount: snapshotEvents.length,
+    eventCount: acceptedEvents,
     parsedEvents,
     invalidActualTimeEvents,
     acceptedEvents,
