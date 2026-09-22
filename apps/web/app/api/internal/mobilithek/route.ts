@@ -319,20 +319,30 @@ export async function POST(request: Request) {
 
         upstream.request.destroy();
 
-        return Response.json({
-          status: "ok",
-          mode: "diagnostic",
-          subscriptionId,
-          parsedJourneys,
-          demandedEvents,
-          scopeViolations,
-          fromNormalFilter: normalFilterEvents,
-          fromRawFallback: rawFallbackEvents,
-          rawRb61Journeys,
-          rawRe60Journeys,
-          rawKirchlengernJourneys,
-          rawEva8003288Journeys,
-        });
+        return new Response(
+          JSON.stringify({
+            status: "ok",
+            mode: "diagnostic",
+            subscriptionId,
+            parsedJourneys,
+            demandedEvents,
+            scopeViolations,
+            fromNormalFilter: normalFilterEvents,
+            fromRawFallback: rawFallbackEvents,
+            rawRb61Journeys,
+            rawRe60Journeys,
+            rawKirchlengernJourneys,
+            rawEva8003288Journeys,
+          }),
+          {
+            status: 200,
+            headers: {
+              "Content-Type": "application/json; charset=utf-8",
+              "Cache-Control": "no-store",
+              "X-Mobilithek-Diagnostic": "1",
+            },
+          },
+        );
       } catch (error) {
         upstream.request.destroy();
         throw error;
