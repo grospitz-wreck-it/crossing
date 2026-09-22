@@ -45,7 +45,7 @@ function fetchMobilithek(
           "accept-encoding": "gzip",
           "user-agent": "Crossings/1.0 (meineschranke.com)",
         },
-        timeout: 120_000,
+        // Allow the complete Mobilithek feed to stream within the Vercel maxDuration window.\n        timeout: 300_000,
       },
       (response) => {
         const status = response.statusCode || 0;
