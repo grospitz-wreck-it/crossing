@@ -89,7 +89,10 @@ export async function fetchRelayDiagnostics(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 300_000);
   try {
-    const response = await fetch(relayUrl, {
+    const diagnosticUrl = relayUrl.includes("?")
+      ? relayUrl + "&diagnostic=1"
+      : relayUrl + "?diagnostic=1";
+    const response = await fetch(diagnosticUrl, {
       method: "POST",
       headers: {
         authorization: `Bearer ${relayToken}`,
