@@ -260,6 +260,25 @@ export async function POST(request: Request) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const url = new URL(request.url);
+    if (url.searchParams.get("ping") === "1") {
+      return Response.json(
+        {
+          status: "ok",
+          mode: "ping",
+          version: "2026-09-22-ping-1",
+        },
+        {
+          status: 200,
+          headers: {
+            "Cache-Control": "no-store",
+            "X-Mobilithek-Diagnostic": "1",
+            "X-Mobilithek-Relay-Version": "2026-09-22-ping-1",
+          },
+        },
+      );
+    }
+
     const body = await request.json().catch(() => ({}));
     const subscriptionId = String(body?.subscriptionId || "").trim();
     const demand = Array.isArray(body?.demand)
