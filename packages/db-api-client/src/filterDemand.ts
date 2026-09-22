@@ -113,8 +113,14 @@ export function filterEventsByDemand(
     firstDemand: demand[0],
   });
 
-  return events.filter(({ event }) =>
-    demand.some((crossing) => {
+  let primaryMatches = 0;
+  let secondaryMatches = 0;
+
+  const filtered = events.filter(({ event }) => {
+    let matchedPrimary = false;
+    let matchedSecondary = false;
+
+    const matched = demand.some((crossing) => {
       // PRIMARY: retain every Mobilithek event that actually contains a
       // configured primary observation station. No category or line filter.
       const primaryEvas = crossing.primaryObservationEvas || [];
@@ -123,11 +129,36 @@ export function filterEventsByDemand(
         : crossing.primaryObservationStations.some((station) =>
             stationMatches(event, station),
           );
-      if (primaryMatch) return true;
+      if (primaryMatch) {
+        matchedPrimary = true;
+        return true;
+      }
 
       // SECONDARY: retain only events anchored at an explicitly configured
       // secondary observation station and matching its optional constraints.
-      return secondaryMatches(event, crossing);
-    }),
-  );
+      if (secondaryMatches(event, crossing)) {
+        matchedSecondary = true;
+        return true;
+      }
+
+      return false;
+    });
+
+    if (matched) {
+      if (matchedPrimary) primaryMatches++;
+      else if (matchedSecondary) secondaryMatches++;
+    }
+
+    return matched;
+  });
+
+  console.log("[Mobilithek filter] result", {
+    input: events.length,
+    output: filtered.length,
+    primaryMatches,
+    secondaryMatches,
+    rejected: events.length - filtered.length,
+  });
+
+  return filtered;
 }
