@@ -1,7 +1,7 @@
 import { configureDb } from "./db.js";
 import { filterEventsByDemand } from "./filterDemand.js";
 import { loadDemandCrossings } from "./demand.js";
-import { fetchRelayDiagnostics, refreshOnce } from "./cloudflareMobilithek.js";
+import { fetchRelayDiagnostics, fetchRelayPing, refreshOnce } from "./cloudflareMobilithek.js";
 import { writeSnapshot } from "./snapshot.js";
 
 export interface Env {
@@ -233,6 +233,31 @@ export default {
       try {
         configureDb(env);
         const demand = await loadDemandCrossings();
+
+        if (url.searchParams.get("ping") === "1") {
+          const startedAt = Date.now();
+          try {
+            const result = await fetchRelayPing(env);
+            return Response.json({
+              status: "ok",
+              mode: "read-only-ping",
+              durationMs: Date.now() - startedAt,
+              relayConfig: {
+                configured: Boolean(env.MOBILITHEK_RELAY_URL),
+              },
+              relay: result,
+              note: "No Mobilithek upstream call and no Turso snapshot writes were performed.",
+            });
+          } catch (error) {
+            return Response.json({
+              status: "error",
+              mode: "read-only-ping",
+              durationMs: Date.now() - startedAt,
+              error: error instanceof Error ? error.message : String(error),
+              note: "No Mobilithek upstream call and no Turso snapshot writes were performed.",
+            }, { status: 502 });
+          }
+        }
 
         if (url.searchParams.get("probe") === "1") {
           const requestedSubscription = url.searchParams.get("subscription")?.trim();
