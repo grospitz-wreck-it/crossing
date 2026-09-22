@@ -259,7 +259,9 @@ export async function POST(request: Request) {
       return Response.json({ error: "Demand is required" }, { status: 400 });
     }
 
-    console.log("[Mobilithek Relay] upstream start", { subscriptionId });
+    const diagnostic = body?.mode === "diagnostic";
+    console.log("[Mobilithek Relay] upstream start", { subscriptionId, diagnostic });
+
     const upstream = await fetchMobilithek(subscriptionId);
     console.log("[Mobilithek Relay] upstream response", {
       subscriptionId,
@@ -270,6 +272,70 @@ export async function POST(request: Request) {
       upstream.contentEncoding.includes("gzip")
         ? upstream.source.pipe(createGunzip())
         : upstream.source;
+
+    if (diagnostic) {
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let parsedJourneys = 0;
+      let demandedEvents = 0;
+      let rawRb61Journeys = 0;
+      let rawRe60Journeys = 0;
+      let rawKirchlengernJourneys = 0;
+      let rawEva8003288Journeys = 0;
+      let scopeViolations = 0;
+      let normalFilterEvents = 0;
+      let rawFallbackEvents = 0;
+
+      const inspectRawJourney = (journey: string) => {
+        if (/RB\s*61/i.test(journey)) rawRb61Journeys++;
+        if (/RE\s*60/i.test(journey)) rawRe60Journeys++;
+        if (/Kirchlengern/i.test(journey)) rawKirchlengernJourneys++;
+        if (/8003288/.test(journey)) rawEva8003288Journeys++;
+      };
+
+      const inspect = async (journey: string) => {
+        parsedJourneys++;
+        inspectRawJourney(journey);
+        const result = await processJourney(journey, subscriptionId, demand);
+        normalFilterEvents += result.debug.fromNormalFilter;
+        rawFallbackEvents += result.debug.fromRawFallback;
+        if (result.debug.journeyCount !== 1) scopeViolations++;
+        demandedEvents += result.events.length;
+      };
+
+      try {
+        for await (const chunk of source as AsyncIterable<Buffer | Uint8Array>) {
+          buffer += decoder.decode(chunk, { stream: true });
+          const extracted = takeJourneys(buffer);
+          buffer = extracted.rest;
+          for (const journey of extracted.journeys) await inspect(journey);
+        }
+
+        buffer += decoder.decode();
+        const final = takeJourneys(buffer);
+        for (const journey of final.journeys) await inspect(journey);
+
+        upstream.request.destroy();
+
+        return Response.json({
+          status: "ok",
+          mode: "diagnostic",
+          subscriptionId,
+          parsedJourneys,
+          demandedEvents,
+          scopeViolations,
+          fromNormalFilter: normalFilterEvents,
+          fromRawFallback: rawFallbackEvents,
+          rawRb61Journeys,
+          rawRe60Journeys,
+          rawKirchlengernJourneys,
+          rawEva8003288Journeys,
+        });
+      } catch (error) {
+        upstream.request.destroy();
+        throw error;
+      }
+    }
 
     const output = new ReadableStream<Uint8Array>({
       async start(controller) {
