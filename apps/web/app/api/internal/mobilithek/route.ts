@@ -1,6 +1,7 @@
 import https from "node:https";
 import type { ClientRequest } from "node:http";
 import { createGunzip } from "node:zlib";
+import { createHash } from "node:crypto";
 import {
   filterEventsByDemand,
   parseBody,
@@ -246,6 +247,35 @@ export async function POST(request: Request) {
     const expectedToken = process.env.MOBILITHEK_RELAY_TOKEN;
 
     if (!expectedToken || token !== `Bearer ${expectedToken}`) {
+      const diagnostic =
+        request.headers.get("x-mobilithek-diagnostic") === "1" ||
+        new URL(request.url).searchParams.get("diagnostic") === "1";
+      if (diagnostic) {
+        const receivedToken = token?.startsWith("Bearer ")
+          ? token.slice("Bearer ".length)
+          : token || "";
+        const fingerprint = (value: string) =>
+          value
+            ? createHash("sha256").update(value, "utf8").digest("hex").slice(0, 12)
+            : null;
+        return Response.json(
+          {
+            error: "Unauthorized",
+            diagnostic: {
+              expectedConfigured: Boolean(expectedToken),
+              receivedBearer: Boolean(token?.startsWith("Bearer ")),
+              expectedLength: expectedToken?.length ?? 0,
+              receivedLength: receivedToken.length,
+              expectedFingerprint: fingerprint(expectedToken || ""),
+              receivedFingerprint: fingerprint(receivedToken),
+              fingerprintsMatch:
+                Boolean(expectedToken) &&
+                fingerprint(expectedToken || "") === fingerprint(receivedToken),
+            },
+          },
+          { status: 401 },
+        );
+      }
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
