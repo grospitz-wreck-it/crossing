@@ -77,7 +77,7 @@ async function fetchDirectFeed(
   }
 }
 
-async function fetchRelayEvents(
+export async function fetchRelayEvents(
   env: MobilithekEnv,
   subscriptionId: string,
   demand: DemandCrossing[],
