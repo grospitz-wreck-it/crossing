@@ -123,7 +123,15 @@ async function processJourney(
   xml: string,
   subscriptionId: string,
   demand: DemandCrossing[],
-): Promise<Array<{ subscriptionId: string; event: MobilithekTrainEvent }>> {
+): Promise<{
+  events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
+  debug: {
+    xmlLength: number;
+    journeyCount: number;
+    fromNormalFilter: number;
+    fromRawFallback: number;
+  };
+}> {
   let events: MobilithekTrainEvent[];
   try {
     events = parseBody(xml);
@@ -149,13 +157,16 @@ async function processJourney(
     );
   }
 
-  if (!events.length) return [];
-
-  console.log("[DEBUG] xml scope check:", {
-    subscriptionId,
-    length: xml.length,
+  const debug = {
+    xmlLength: xml.length,
     journeyCount: (xml.match(/<EstimatedVehicleJourney/g) || []).length,
-  });
+    fromNormalFilter: 0,
+    fromRawFallback: 0,
+  };
+
+  if (!events.length) {
+    return { events: [], debug };
+  }
 
   try {
     const parsed = filterEventsByDemand(
@@ -179,10 +190,10 @@ async function processJourney(
       ),
     );
 
-    if (!primaryEvas.length) return parsed;
+    if (!primaryEvas.length) return { events: parsed, debug: { ...debug, fromNormalFilter: parsed.length } };
 
     const rawPrimaryMatch = primaryEvas.some((eva) => xml.includes(eva));
-    if (!rawPrimaryMatch) return parsed;
+    if (!rawPrimaryMatch) return { events: parsed, debug: { ...debug, fromNormalFilter: parsed.length } };
 
     const parsedKeys = new Set(
       parsed.map(({ event }) => String(event.journeyRef) + "|" + String(event.id)),
@@ -197,15 +208,13 @@ async function processJourney(
       )
       .map((event) => ({ subscriptionId, event }));
 
-    console.log("[DEBUG] fallback contribution:", {
-      subscriptionId,
-      fromNormalFilter: parsed.length,
-      fromRawFallback: rawPrimaryEvents.length,
-    });
+    debug.fromNormalFilter = parsed.length;
+    debug.fromRawFallback = rawPrimaryEvents.length;
 
-    return rawPrimaryEvents.length
-      ? [...parsed, ...rawPrimaryEvents]
-      : parsed;
+    return {
+      events: rawPrimaryEvents.length ? [...parsed, ...rawPrimaryEvents] : parsed,
+      debug,
+    };
   } catch (error) {
     const message =
       error instanceof Error
@@ -272,6 +281,9 @@ export async function POST(request: Request) {
         let rawRe60Journeys = 0;
         let rawKirchlengernJourneys = 0;
         let rawEva8003288Journeys = 0;
+        let debugScopeViolations = 0;
+        let debugNormalFilterEvents = 0;
+        let debugRawFallbackEvents = 0;
 
         const inspectRawJourney = (journey: string) => {
           if (/RB\s*61/i.test(journey)) rawRb61Journeys++;
@@ -289,13 +301,16 @@ export async function POST(request: Request) {
             for (const journey of extracted.journeys) {
               parsedJourneys++;
               inspectRawJourney(journey);
-              const matches = await processJourney(
+              const result = await processJourney(
                 journey,
                 subscriptionId,
                 demand,
               );
 
-              for (const match of matches) {
+              debugNormalFilterEvents += result.debug.fromNormalFilter;
+              debugRawFallbackEvents += result.debug.fromRawFallback;
+              if (result.debug.journeyCount !== 1) debugScopeViolations++;
+              for (const match of result.events) {
                 demandedEvents++;
                 controller.enqueue(encodeLine(match));
               }
@@ -307,12 +322,15 @@ export async function POST(request: Request) {
           for (const journey of final.journeys) {
             parsedJourneys++;
             inspectRawJourney(journey);
-            const matches = await processJourney(
+            const result = await processJourney(
               journey,
               subscriptionId,
               demand,
             );
-            for (const match of matches) {
+            debugNormalFilterEvents += result.debug.fromNormalFilter;
+            debugRawFallbackEvents += result.debug.fromRawFallback;
+            if (result.debug.journeyCount !== 1) debugScopeViolations++;
+            for (const match of result.events) {
               demandedEvents++;
               controller.enqueue(encodeLine(match));
             }
@@ -329,6 +347,16 @@ export async function POST(request: Request) {
             rawKirchlengernJourneys,
             rawEva8003288Journeys,
           });
+          controller.enqueue(
+            encodeLine({
+              __debug: "mobilithek-demand",
+              subscriptionId,
+              parsedJourneys,
+              debugScopeViolations,
+              fromNormalFilter: debugNormalFilterEvents,
+              fromRawFallback: debugRawFallbackEvents,
+            }),
+          );
           controller.close();
         } catch (error) {
           const message =
