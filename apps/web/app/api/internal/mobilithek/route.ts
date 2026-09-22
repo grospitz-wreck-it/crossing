@@ -4,6 +4,7 @@ import { createGunzip } from "node:zlib";
 import { createHash } from "node:crypto";
 import {
   filterEventsByDemand,
+  getDemandMatches,
   parseBody,
   type DemandCrossing,
   type MobilithekTrainEvent,
@@ -334,6 +335,14 @@ export async function POST(request: Request) {
         rawFallbackEvents += result.debug.fromRawFallback;
         if (result.debug.journeyCount !== 1) scopeViolations++;
         demandedEvents += result.events.length;
+        for (const item of result.events) {
+          for (const match of getDemandMatches(item.event, demand)) {
+            const current = crossingBreakdown.get(match.crossingId) || { events: 0, primary: 0, secondary: 0 };
+            current.events++;
+            current[match.kind]++;
+            crossingBreakdown.set(match.crossingId, current);
+          }
+        }
       };
 
       try {
@@ -364,6 +373,7 @@ export async function POST(request: Request) {
             rawRe60Journeys,
             rawKirchlengernJourneys,
             rawEva8003288Journeys,
+            crossingBreakdown: Object.fromEntries(crossingBreakdown),
           }),
           {
             status: 200,
