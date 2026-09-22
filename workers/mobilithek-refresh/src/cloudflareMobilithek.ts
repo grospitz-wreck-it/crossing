@@ -109,7 +109,9 @@ export async function fetchRelayDiagnostics(
     if (!response.ok) {
       throw new Error(`Mobilithek Relay diagnostic HTTP ${response.status}: ${body.slice(0, 2000)}`);
     }
-
+    if (response.headers.get("x-mobilithek-diagnostic") !== "1") {
+      throw new Error(`Mobilithek Relay did not enter diagnostic mode; content-type=${response.headers.get("content-type") || ""}; body=${body.slice(0, 500)}`);
+    }
     return JSON.parse(body) as Record<string, unknown>;
   } finally {
     clearTimeout(timeout);
