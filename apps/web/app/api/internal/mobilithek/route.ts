@@ -471,6 +471,7 @@ export async function POST(request: Request) {
         "Content-Type": "application/x-ndjson; charset=utf-8",
         "Cache-Control": "no-store",
         "X-Mobilithek-Subscription": subscriptionId,
+        "X-Mobilithek-Relay-Version": "2026-09-22-diagnostic-1",
       },
     });
   } catch (error) {
