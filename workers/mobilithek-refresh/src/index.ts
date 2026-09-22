@@ -213,7 +213,7 @@ export default {
         configureDb(env);
         const demand = await loadDemandCrossings();
 
-        // Read-only diagnostic: with ?probe=1, fetch each configured relay feed,
+        // Read-only diagnostic: with ?probe=1, call the isolated relay diagnostic for each feed,
         // run the exact production demand filter, and return only metrics.
         // No snapshot writes and no cleanup/finalization are performed.
         if (url.searchParams.get("probe") === "1") {
