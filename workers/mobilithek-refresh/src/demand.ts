@@ -3,6 +3,7 @@ import { getDb } from "./db.js";
 type DemandRule = {
   observationStation?: string;
   categories?: string[];
+  lineHints?: string[];
 };
 
 type DemandCrossing = {
@@ -12,6 +13,9 @@ type DemandCrossing = {
   observationStations: string[];
   primaryObservationEvas: string[];
   primaryObservationStations: string[];
+  secondaryObservationStations: string[];
+  secondaryCategories: string[];
+  secondaryLineHints: string[];
 };
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -29,6 +33,9 @@ function collectRules(value: unknown): DemandRule[] {
       observationStation: String(rule.observationStation || "").trim() || undefined,
       categories: Array.isArray(rule.categories)
         ? rule.categories.map(String).map((item) => item.trim()).filter(Boolean)
+        : [],
+      lineHints: Array.isArray(rule.lineHints)
+        ? rule.lineHints.map(String).map((item) => item.trim()).filter(Boolean)
         : [],
     }));
 }
@@ -63,22 +70,12 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
   const catalog = await db.execute(`SELECT eva, name FROM railway_station_catalog`);
   const stationNamesByEva = new Map<string, string>();
   for (const station of catalog.rows as any[]) {
-    const eva = String(station.eva || '').trim();
-    const name = String(station.name || '').trim();
+    const eva = String(station.eva || "").trim();
+    const name = String(station.name || "").trim();
     if (eva && name) stationNamesByEva.set(eva, name);
   }
 
   return (result.rows as any[]).map((row) => {
-    const rules = [
-      ...collectRules(row.through_rules),
-      ...collectRules(row.diversion_rules),
-      ...collectRules(row.reroute_watch_rules),
-    ];
-
-    const categories = Array.from(
-      new Set(rules.flatMap((rule) => rule.categories || [])),
-    );
-
     const primaryObservationEvas = Array.from(
       new Set(
         parseJson<string[]>(row.reference_stations, [])
@@ -92,11 +89,44 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       .map((eva) => stationNamesByEva.get(eva))
       .filter((value): value is string => Boolean(value));
 
+    const rules = [
+      ...collectRules(row.through_rules),
+      ...collectRules(row.diversion_rules),
+      ...collectRules(row.reroute_watch_rules),
+    ];
+
+    const categories = Array.from(
+      new Set(rules.flatMap((rule) => rule.categories || [])),
+    );
+
     const observationStations = Array.from(
       new Set(
         rules
           .map((rule) => rule.observationStation)
           .filter((value): value is string => !!value),
+      ),
+    );
+
+    // Secondary observation is deliberately separate from the primary
+    // observation EVAs. This is important for feeds such as S28 where the
+    // route can expose the stop name but not the configured DB EVA.
+    const secondaryObservationStations = Array.from(
+      new Set(
+        rules
+          .map((rule) => rule.observationStation)
+          .filter((value): value is string => !!value),
+      ),
+    );
+
+    const secondaryCategories = Array.from(
+      new Set(
+        rules.flatMap((rule) => rule.categories || []),
+      ),
+    );
+
+    const secondaryLineHints = Array.from(
+      new Set(
+        rules.flatMap((rule) => rule.lineHints || []),
       ),
     );
 
@@ -107,6 +137,9 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       observationStations,
       primaryObservationEvas,
       primaryObservationStations,
+      secondaryObservationStations,
+      secondaryCategories,
+      secondaryLineHints,
     };
   });
 }
