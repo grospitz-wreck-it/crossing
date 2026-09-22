@@ -212,6 +212,54 @@ export default {
       try {
         configureDb(env);
         const demand = await loadDemandCrossings();
+
+        // Read-only diagnostic: with ?probe=1, fetch each configured relay feed,
+        // run the exact production demand filter, and return only metrics.
+        // No snapshot writes and no cleanup/finalization are performed.
+        if (url.searchParams.get("probe") === "1") {
+          const subscriptionIds = getSubscriptionIds(env);
+          const probes: Array<Record<string, unknown>> = [];
+
+          for (const subscriptionId of subscriptionIds) {
+            const startedAt = Date.now();
+            try {
+              const result = await refreshOnce(
+                env,
+                [subscriptionId],
+                demand,
+              );
+              probes.push({
+                subscriptionId,
+                durationMs: Date.now() - startedAt,
+                parsedEvents: result.parsedEvents,
+                acceptedEvents: result.acceptedEvents,
+                successful: result.successful,
+                failed: result.failed,
+                error: result.errors[0]?.error ?? null,
+              });
+            } catch (error) {
+              probes.push({
+                subscriptionId,
+                durationMs: Date.now() - startedAt,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
+          return Response.json({
+            status: "ok",
+            mode: "read-only-probe",
+            demandedCrossings: demand.length,
+            subscriptions: subscriptionIds,
+            probes,
+            note: "No Turso snapshot writes were performed.",
+          });
+        }
+
+        return Response.json({
+      try {
+        configureDb(env);
+        const demand = await loadDemandCrossings();
         return Response.json({
           status: "ok",
           demandedCrossings: demand.length,
