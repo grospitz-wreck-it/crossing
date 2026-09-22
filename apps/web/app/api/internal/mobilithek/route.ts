@@ -254,7 +254,7 @@ async function processJourneyDiagnostic(
 export async function POST(request: Request) {
   try {
     const token = request.headers.get("authorization");
-    const expectedToken = process.env.MOBILITHEK_RELAY_TOKEN;
+    const expectedToken = process.env.MOBILITHEK_RELAY_TOKEN);
 
     if (!expectedToken || token !== `Bearer ${expectedToken}`) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -369,8 +369,10 @@ export async function POST(request: Request) {
       let demandedEvents = 0;
       let rawRb61Journeys = 0;
       let rawRe60Journeys = 0;
+      let rawS28Journeys = 0;
       let rawKirchlengernJourneys = 0;
       let rawEva8003288Journeys = 0;
+      let rawKaarstEvaJourneys = 0;
       let scopeViolations = 0;
       let normalFilterEvents = 0;
       let rawFallbackEvents = 0;
@@ -380,8 +382,16 @@ export async function POST(request: Request) {
         parsedJourneys++;
         if (/RB\s*61/i.test(journey)) rawRb61Journeys++;
         if (/RE\s*60/i.test(journey)) rawRe60Journeys++;
+        if (/S28/i.test(journey)) rawS28Journeys++;
         if (/Kirchlengern/i.test(journey)) rawKirchlengernJourneys++;
         if (/8003288/.test(journey)) rawEva8003288Journeys++;
+
+        const kaarstEvas = demand
+          .filter((crossing) => /ka[a]r?st/i.test(crossing.id) || crossing.primaryObservationStations.some((station) => /kaarst/i.test(station)))
+          .flatMap((crossing) => Array.isArray(crossing.primaryObservationEvas) ? crossing.primaryObservationEvas : [])
+          .map((eva) => String(eva).trim())
+          .filter(Boolean);
+        if (kaarstEvas.some((eva) => journey.includes(eva))) rawKaarstEvaJourneys++;
 
         const result = await processJourneyDiagnostic(journey, subscriptionId, demand);
         normalFilterEvents += result.fromNormalFilter;
@@ -422,8 +432,10 @@ export async function POST(request: Request) {
           fromRawFallback: rawFallbackEvents,
           rawRb61Journeys,
           rawRe60Journeys,
+          rawS28Journeys,
           rawKirchlengernJourneys,
           rawEva8003288Journeys,
+          rawKaarstEvaJourneys,
           crossingBreakdown: Object.fromEntries(crossingBreakdown),
         }), {
           status: 200,
