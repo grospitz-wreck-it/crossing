@@ -217,7 +217,11 @@ export default {
         // run the exact production demand filter, and return only metrics.
         // No snapshot writes and no cleanup/finalization are performed.
         if (url.searchParams.get("probe") === "1") {
-          const subscriptionIds = getSubscriptionIds(env);
+          const requestedSubscription = url.searchParams.get("subscription")?.trim();
+          const allSubscriptionIds = getSubscriptionIds(env);
+          const subscriptionIds = requestedSubscription
+            ? allSubscriptionIds.filter((id) => id === requestedSubscription)
+            : allSubscriptionIds;
           const probes: Array<Record<string, unknown>> = [];
 
           for (const subscriptionId of subscriptionIds) {
