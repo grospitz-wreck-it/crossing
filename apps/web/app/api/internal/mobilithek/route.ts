@@ -254,7 +254,7 @@ async function processJourneyDiagnostic(
 export async function POST(request: Request) {
   try {
     const token = request.headers.get("authorization");
-    const expectedToken = process.env.MOBILITHEK_RELAY_TOKEN);
+    const expectedToken = process.env.MOBILITHEK_RELAY_TOKEN;
 
     if (!expectedToken || token !== `Bearer ${expectedToken}`) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -377,6 +377,22 @@ export async function POST(request: Request) {
       let normalFilterEvents = 0;
       let rawFallbackEvents = 0;
       const crossingBreakdown = new Map<string, { events: number; primary: number; secondary: number }>();
+      const kaarstEvas = Array.from(new Set(
+        demand
+          .filter((crossing) =>
+            (Array.isArray(crossing.primaryObservationStations)
+              ? crossing.primaryObservationStations
+              : []
+            ).some((station) => /kaarst/i.test(String(station))),
+          )
+          .flatMap((crossing) =>
+            Array.isArray(crossing.primaryObservationEvas)
+              ? crossing.primaryObservationEvas
+              : [],
+          )
+          .map((eva) => String(eva).trim())
+          .filter(Boolean),
+      ));
 
       const inspect = async (journey: string) => {
         parsedJourneys++;
@@ -386,11 +402,6 @@ export async function POST(request: Request) {
         if (/Kirchlengern/i.test(journey)) rawKirchlengernJourneys++;
         if (/8003288/.test(journey)) rawEva8003288Journeys++;
 
-        const kaarstEvas = demand
-          .filter((crossing) => /ka[a]r?st/i.test(crossing.id) || crossing.primaryObservationStations.some((station) => /kaarst/i.test(station)))
-          .flatMap((crossing) => Array.isArray(crossing.primaryObservationEvas) ? crossing.primaryObservationEvas : [])
-          .map((eva) => String(eva).trim())
-          .filter(Boolean);
         if (kaarstEvas.some((eva) => journey.includes(eva))) rawKaarstEvaJourneys++;
 
         const result = await processJourneyDiagnostic(journey, subscriptionId, demand);
