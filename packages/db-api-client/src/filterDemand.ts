@@ -114,7 +114,7 @@ export function filterEventsByDemand(
   });
 
   let primaryMatches = 0;
-  let secondaryMatches = 0;
+  let secondaryMatchCount = 0;
 
   const filtered = events.filter(({ event }) => {
     let matchedPrimary = false;
@@ -146,7 +146,7 @@ export function filterEventsByDemand(
 
     if (matched) {
       if (matchedPrimary) primaryMatches++;
-      else if (matchedSecondary) secondaryMatches++;
+      else if (matchedSecondary) secondaryMatchCount++;
     }
 
     return matched;
@@ -156,7 +156,7 @@ export function filterEventsByDemand(
     input: events.length,
     output: filtered.length,
     primaryMatches,
-    secondaryMatches,
+    secondaryMatches: secondaryMatchCount,
     rejected: events.length - filtered.length,
   });
 
