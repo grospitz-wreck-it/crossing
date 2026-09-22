@@ -187,6 +187,10 @@ export async function refreshOnce(
   env: MobilithekEnv,
   subscriptionIds: string[],
   demand: DemandCrossing[] = [],
+  onSubscriptionEvents?: (
+    subscriptionId: string,
+    events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>,
+  ) => Promise<void>,
 ): Promise<RefreshResult> {
   const snapshotEvents: Array<{
     subscriptionId: string;
@@ -202,16 +206,6 @@ export async function refreshOnce(
   // Process subscriptions sequentially. Promise.all() kept every subscription's full
   // relay result in memory at once and caused scheduled runs to hit Cloudflare's
   // memory limit when the feeds returned tens of thousands of events.
-  const results: Array<{
-    subscriptionId: string;
-    successful: boolean;
-    parsedEvents: number;
-    acceptedEvents: number;
-    invalidActualTimeEvents: number;
-    events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
-    error?: string;
-  }> = [];
-
   for (const subscriptionId of subscriptionIds) {
     const result = await (async () => {
       try {
@@ -291,17 +285,17 @@ export async function refreshOnce(
         };
       }
     })();
-    results.push(result);
-  }
-
-  for (const result of results) {
     parsedEvents += result.parsedEvents;
     acceptedEvents += result.acceptedEvents;
     invalidActualTimeEvents += result.invalidActualTimeEvents;
-    snapshotEvents.push(...result.events);
 
     if (result.successful) {
       successful++;
+      if (onSubscriptionEvents) {
+        await onSubscriptionEvents(result.subscriptionId, result.events);
+      } else {
+        snapshotEvents.push(...result.events);
+      }
     } else {
       failed++;
       errors.push({
