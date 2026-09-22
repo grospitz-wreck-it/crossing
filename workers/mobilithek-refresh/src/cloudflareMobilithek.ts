@@ -94,7 +94,8 @@ export async function fetchRelayDiagnostics(
       headers: {
         authorization: `Bearer ${relayToken}`,
         "content-type": "application/json",
-        accept: "application/json",\n        "x-mobilithek-diagnostic": "1",
+        accept: "application/json",
+        "x-mobilithek-diagnostic": "1",
       },
       body: JSON.stringify({
         subscriptionId,
