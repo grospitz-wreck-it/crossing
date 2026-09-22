@@ -4,7 +4,7 @@ import { refreshOnce } from "./cloudflareMobilithek.js";
 import {
   cleanupSubscriptionSnapshots,
   finalizeRefreshStatus,
-  writeSubscriptionSnapshot,
+  writeSubscriptionBatch,
 } from "./snapshot.js";
 
 export interface Env {
@@ -137,16 +137,24 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
 
   const refreshedAt = new Date().toISOString();
-  const successfulSubscriptionIds: string[] = [];
-
   const result = await refreshOnce(
     env,
     subscriptionIds,
     demand,
     async (subscriptionId, events) => {
-      successfulSubscriptionIds.push(subscriptionId);
-      await writeSubscriptionSnapshot(events, subscriptionId, startedAt);
+      await writeSubscriptionBatch(
+        events,
+        subscriptionId,
+        refreshedAt,
+      );
     },
+  );
+
+  const failedSubscriptionIds = new Set(
+    result.errors.map((error) => error.subscriptionId),
+  );
+  const successfulSubscriptionIds = subscriptionIds.filter(
+    (subscriptionId) => !failedSubscriptionIds.has(subscriptionId),
   );
 
   const demandedEventCount = result.acceptedEvents;
