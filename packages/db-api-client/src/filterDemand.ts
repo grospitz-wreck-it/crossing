@@ -3,24 +3,12 @@ import type { MobilithekTrainEvent } from "./mobilithekTimetable";
 export type DemandCrossing = {
   id: string;
   requiredRouteStops: string[];
-  categories: string[];
-  observationStations: string[];
-  primaryObservationEvas: string[];
   primaryObservationStations: string[];
+  primaryObservationEvas: string[];
+  secondaryObservationStations: string[];
+  secondaryCategories: string[];
+  secondaryLineHints: string[];
 };
-
-function normalizeEva(value: unknown): string {
-  const raw = String(value ?? "").trim();
-  if (!raw) return "";
-  const match = raw.match(/(?:^|[^0-9])(\d{7})(?:$|[^0-9])/);
-  return match?.[1] || raw;
-}
-
-function evaMatches(value: unknown, target: string): boolean {
-  const wanted = normalizeEva(target);
-  if (!wanted) return false;
-  return normalizeEva(value) === wanted;
-}
 
 function normalize(value: string): string {
   return String(value || "")
@@ -33,6 +21,117 @@ function normalize(value: string): string {
     .trim();
 }
 
+function stationMatches(event: MobilithekTrainEvent, station: string): boolean {
+  const wanted = normalize(station);
+  if (!wanted) return false;
+
+  return (
+    (event.route || []).some((stop) => {
+      const value = normalize(stop);
+      return value === wanted || value.includes(wanted) || wanted.includes(value);
+    }) ||
+    (event.calls || []).some((call) => {
+      const value = normalize(String(call?.name || ""));
+      return value === wanted || value.includes(wanted) || wanted.includes(value);
+    })
+  );
+}
+
+function primaryEvaMatches(event: MobilithekTrainEvent, evas: string[]): boolean {
+  if (!evas.length) return false;
+  return (event.calls || []).some((call: any) =>
+    evas.some((eva) => {
+      const wanted = String(eva || "").trim();
+      if (!wanted) return false;
+
+      // Mobilithek/SIRI feeds are inconsistent: some feeds expose the EVA
+      // as a StopPointRef/StopPlaceRef attribute, others expose the same
+      // value as the call name. Treat an exact call-name EVA as primary
+      // evidence as well, but never use fuzzy station-name matching here.
+      return (
+        String(call?.stopPointRef || "").trim() === wanted ||
+        String(call?.stopPlaceRef || "").trim() === wanted ||
+        String(call?.name || "").trim() === wanted
+      );
+    }),
+  );
+}
+
+function secondaryMatches(
+  event: MobilithekTrainEvent,
+  crossing: DemandCrossing,
+): boolean {
+  const categories = Array.isArray(crossing.secondaryCategories)
+    ? crossing.secondaryCategories
+    : [];
+  const lineHints = Array.isArray(crossing.secondaryLineHints)
+    ? crossing.secondaryLineHints
+    : [];
+
+  const line = String(event.line || "").toUpperCase();
+  const category = String(event.category || "").toUpperCase();
+  const normalizedLine = line.replace(/\s+/g, "");
+  const normalizedCategory = category.replace(/\s+/g, "");
+
+  if (lineHints.length) {
+    const match = lineHints.some((hint) => {
+      const wanted = String(hint || "").toUpperCase().replace(/\s+/g, "");
+      return wanted && (
+        normalizedLine === wanted ||
+        normalizedLine.includes(wanted) ||
+        wanted.includes(normalizedLine) ||
+        normalizedCategory === wanted
+      );
+    });
+    if (!match) return false;
+  }
+
+  if (
+    categories.length &&
+    !categories.some((value) => {
+      const wanted = String(value).toUpperCase();
+      return category === wanted || line.includes(wanted);
+    })
+  ) {
+    return false;
+  }
+
+  return crossing.secondaryObservationStations.some((station) =>
+    stationMatches(event, station),
+  );
+}
+
+export type DemandMatch = {
+  crossingId: string;
+  kind: "primary" | "secondary";
+};
+
+export function getDemandMatches(
+  event: MobilithekTrainEvent,
+  demand: DemandCrossing[],
+): DemandMatch[] {
+  if (!demand.length) return [];
+
+  return demand.flatMap((crossing) => {
+    const primaryEvas = crossing.primaryObservationEvas || [];
+    const primaryMatch = primaryEvas.length
+      ? primaryEvaMatches(event, primaryEvas)
+      : crossing.primaryObservationStations.some((station) =>
+          stationMatches(event, station),
+        );
+
+    if (primaryMatch) {
+      return [{ crossingId: crossing.id, kind: "primary" as const }];
+    }
+
+    if (secondaryMatches(event, crossing)) {
+      return [{ crossingId: crossing.id, kind: "secondary" as const }];
+    }
+
+    return [];
+  });
+}
+
 export function filterEventsByDemand(
   events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>,
   demand: DemandCrossing[],
@@ -42,117 +141,30 @@ export function filterEventsByDemand(
   console.log("[Mobilithek filter] input", {
     events: events.length,
     demand: demand.length,
-    demands: demand.map((item) => ({
-      id: item.id,
-      primaryObservationEvas: item.primaryObservationEvas,
-      primaryObservationStations: item.primaryObservationStations,
-      observationStations: item.observationStations,
-    })),
+    firstDemand: demand[0],
   });
 
-  return events.filter(({ event }) => {
-    const line = String(event.line || "").toUpperCase();
-    const category = String(event.category || "").toUpperCase();
-    const route = (event.route || []).map(normalize).filter(Boolean);
-    const calls = (event.calls || [])
-      .map((call) => normalize(String(call?.name || "")))
-      .filter(Boolean);
+  let primaryMatches = 0;
+  let secondaryMatchCount = 0;
 
-    return demand.some((crossing) => {
-      const primaryObservationEvas = Array.isArray(crossing.primaryObservationEvas)
-        ? crossing.primaryObservationEvas.map((value: unknown) => String(value).trim()).filter(Boolean)
-        : [];
+  const filtered = events.filter(({ event }) => {
+    const matches = getDemandMatches(event, demand);
+    const matchedPrimary = matches.some((match) => match.kind === "primary");
+    const matchedSecondary = matches.some((match) => match.kind === "secondary");
 
-      const categories = Array.isArray(crossing.categories)
-        ? crossing.categories
-        : [];
+    if (matchedPrimary) primaryMatches++;
+    else if (matchedSecondary) secondaryMatchCount++;
 
-      const categoryMatch =
-        categories.length === 0 ||
-        categories.some((value) => {
-          const wanted = String(value).toUpperCase();
-          return category === wanted || line.includes(wanted);
-        });
-
-      const primaryEvaMatch = primaryObservationEvas.length > 0 &&
-        (event.calls || []).some((call) =>
-          primaryObservationEvas.some((eva) =>
-            evaMatches(call?.stopPointRef, eva) ||
-            evaMatches(call?.stopPlaceRef, eva),
-          ),
-        );
-
-      const primaryObservationStations = Array.isArray(crossing.primaryObservationStations)
-        ? crossing.primaryObservationStations.map(normalize).filter(Boolean)
-        : [];
-
-      const primaryStationMatch = primaryObservationStations.length > 0 &&
-        primaryObservationStations.some((station) =>
-          route.some((stop) => stop === station || stop.includes(station) || station.includes(stop)) ||
-          calls.some((call) => call === station || call.includes(station) || station.includes(call)),
-        );
-
-      if (primaryEvaMatch || primaryStationMatch) {
-        console.log("[Mobilithek filter] PRIMARY MATCH", {
-          crossingId: crossing.id,
-          line: event.line,
-          journeyRef: event.journeyRef,
-          primaryEvaMatch,
-          primaryStationMatch,
-          primaryObservationEvas,
-          primaryObservationStations,
-          matchingCalls: (event.calls || [])
-            .filter((call) =>
-              primaryObservationEvas.some((eva) =>
-                evaMatches(call?.stopPointRef, eva) || evaMatches(call?.stopPlaceRef, eva),
-              ) ||
-              primaryObservationStations.some((station) => {
-                const callName = normalize(String(call?.name || ""));
-                return callName === station || callName.includes(station) || station.includes(callName);
-              }),
-            )
-            .slice(0, 3)
-            .map((call) => ({
-              name: call.name,
-              stopPointRef: call.stopPointRef,
-              stopPlaceRef: call.stopPlaceRef,
-            })),
-        });
-        return true;
-      }
-      if (!categoryMatch) return false;
-
-      const observationStations = Array.isArray(crossing.observationStations)
-        ? crossing.observationStations
-        : [];
-
-      const requiredRouteStops = Array.isArray(crossing.requiredRouteStops)
-        ? crossing.requiredRouteStops
-        : [];
-
-      const stations = [
-        ...observationStations,
-        ...requiredRouteStops,
-      ]
-        .map(normalize)
-        .filter(Boolean);
-
-      if (!stations.length) return true;
-
-      return stations.some((station) =>
-        route.some(
-          (stop) =>
-            stop === station ||
-            stop.includes(station) ||
-            station.includes(stop),
-        ) ||
-        calls.some(
-          (call) =>
-            call === station ||
-            call.includes(station) ||
-            station.includes(call),
-        ),
-      );
-    });
+    return matches.length > 0;
   });
+
+  console.log("[Mobilithek filter] result", {
+    input: events.length,
+    output: filtered.length,
+    primaryMatches,
+    secondaryMatches: secondaryMatchCount,
+    rejected: events.length - filtered.length,
+  });
+
+  return filtered;
 }
