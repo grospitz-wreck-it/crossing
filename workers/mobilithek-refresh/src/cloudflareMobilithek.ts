@@ -77,6 +77,60 @@ async function fetchDirectFeed(
   }
 }
 
+
+export async function fetchRelayDiagnostics(
+  env: MobilithekEnv,
+  subscriptionId: string,
+  demand: DemandCrossing[],
+): Promise<Record<string, unknown>> {
+  const relayUrl = env.MOBILITHEK_RELAY_URL?.trim();
+  const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
+  if (!relayUrl || !relayToken) throw new Error("Mobilithek Relay ist nicht konfiguriert");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 300_000);
+  try {
+    const diagnosticUrl = relayUrl.includes("?")
+      ? relayUrl + "&diagnostic=1"
+      : relayUrl + "?diagnostic=1";
+
+    const response = await fetch(diagnosticUrl, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${relayToken}`,
+        "content-type": "application/json",
+        accept: "application/json",
+        "x-mobilithek-diagnostic": "1",
+      },
+      body: JSON.stringify({
+        subscriptionId,
+        demand,
+        mode: "diagnostic",
+      }),
+      signal: controller.signal,
+    });
+
+    const body = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        `Mobilithek Relay diagnostic HTTP ${response.status}: ${body.slice(0, 2000)}`,
+      );
+    }
+
+    if (response.headers.get("x-mobilithek-diagnostic") !== "1") {
+      const relayVersion =
+        response.headers.get("x-mobilithek-relay-version") || "MISSING";
+      throw new Error(
+        `Mobilithek Relay did not enter diagnostic mode; relayVersion=${relayVersion}; content-type=${response.headers.get("content-type") || ""}; body=${body.slice(0, 500)}`,
+      );
+    }
+
+    return JSON.parse(body) as Record<string, unknown>;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function fetchRelayEvents(
   env: MobilithekEnv,
   subscriptionId: string,
