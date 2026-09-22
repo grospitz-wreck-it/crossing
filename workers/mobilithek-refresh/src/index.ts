@@ -1,7 +1,7 @@
 import { configureDb } from "./db.js";
 import { filterEventsByDemand } from "./filterDemand.js";
 import { loadDemandCrossings } from "./demand.js";
-import { refreshOnce } from "./cloudflareMobilithek.js";
+import { fetchRelayDiagnostics, refreshOnce } from "./cloudflareMobilithek.js";
 import { writeSnapshot } from "./snapshot.js";
 
 export interface Env {
@@ -228,6 +228,96 @@ export default {
     }
     if (url.pathname === "/mtls-test") {
       return runMtlsCompare(env);
+    }
+    if (url.pathname === "/debug") {
+      try {
+        configureDb(env);
+        const demand = await loadDemandCrossings();
+
+        if (url.searchParams.get("probe") === "1") {
+          const requestedSubscription = url.searchParams.get("subscription")?.trim();
+          const allSubscriptionIds = getSubscriptionIds(env);
+          const subscriptionIds = requestedSubscription
+            ? allSubscriptionIds.filter((id) => id === requestedSubscription)
+            : allSubscriptionIds;
+
+          const probes: Array<Record<string, unknown>> = [];
+          for (const subscriptionId of subscriptionIds) {
+            const startedAt = Date.now();
+            try {
+              const result = await fetchRelayDiagnostics(env, subscriptionId, demand);
+              probes.push({
+                subscriptionId,
+                durationMs: Date.now() - startedAt,
+                ...result,
+              });
+            } catch (error) {
+              probes.push({
+                subscriptionId,
+                durationMs: Date.now() - startedAt,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+
+          let relayConfig: Record<string, unknown> = {
+            configured: Boolean(env.MOBILITHEK_RELAY_URL),
+          };
+          if (env.MOBILITHEK_RELAY_URL) {
+            try {
+              const relayUrl = new URL(env.MOBILITHEK_RELAY_URL);
+              relayConfig = {
+                configured: true,
+                protocol: relayUrl.protocol,
+                host: relayUrl.host,
+                pathname: relayUrl.pathname,
+                hasQuery: relayUrl.search.length > 0,
+              };
+            } catch {
+              relayConfig = { configured: true, url: "invalid-url" };
+            }
+          }
+
+          return Response.json({
+            status: "ok",
+            mode: "read-only-probe",
+            demandedCrossings: demand.length,
+            subscriptions: subscriptionIds,
+            relayConfig,
+            probes,
+            note: "No Turso snapshot writes were performed.",
+          });
+        }
+
+        return Response.json({
+          status: "ok",
+          demandedCrossings: demand.length,
+          subscriptions: getSubscriptionIds(env),
+          relayConfig: {
+            configured: Boolean(env.MOBILITHEK_RELAY_URL),
+          },
+          demand: demand.map((crossing) => ({
+            id: crossing.id,
+            primaryObservationEvas: crossing.primaryObservationEvas,
+            primaryObservationStations: crossing.primaryObservationStations,
+            secondaryObservationStations: crossing.secondaryObservationStations,
+            secondaryCategories: crossing.secondaryCategories,
+            secondaryLineHints: crossing.secondaryLineHints,
+          })),
+        });
+      } catch (error) {
+        console.error(
+          "[Mobilithek Worker] debug failed",
+          error instanceof Error ? error.stack || error.message : String(error),
+        );
+        return Response.json(
+          {
+            status: "error",
+            error: error instanceof Error ? error.message : String(error),
+          },
+          { status: 500 },
+        );
+      }
     }
     if (url.pathname === "/run") {
       try {
