@@ -77,6 +77,44 @@ async function fetchDirectFeed(
   }
 }
 
+export async function fetchRelayDiagnostics(
+  env: MobilithekEnv,
+  subscriptionId: string,
+  demand: DemandCrossing[],
+): Promise<Record<string, unknown>> {
+  const relayUrl = env.MOBILITHEK_RELAY_URL?.trim();
+  const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
+  if (!relayUrl || !relayToken) throw new Error("Mobilithek Relay ist nicht konfiguriert");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 300_000);
+  try {
+    const response = await fetch(relayUrl, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${relayToken}`,
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        subscriptionId,
+        demand,
+        mode: "diagnostic",
+      }),
+      signal: controller.signal,
+    });
+
+    const body = await response.text();
+    if (!response.ok) {
+      throw new Error(`Mobilithek Relay diagnostic HTTP ${response.status}: ${body.slice(0, 2000)}`);
+    }
+
+    return JSON.parse(body) as Record<string, unknown>;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function fetchRelayEvents(
   env: MobilithekEnv,
   subscriptionId: string,
