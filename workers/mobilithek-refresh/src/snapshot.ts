@@ -141,40 +141,19 @@ function upsertStatement(row: SnapshotRow) {
   };
 }
 
-export async function writeSubscriptionSnapshot(
+export async function writeSubscriptionBatch(
   events: SnapshotEvent[],
   subscriptionId: string,
-  refreshStartedAt: string,
+  refreshedAt: string,
 ) {
+  if (!events.length) return;
   const db = getDb();
-  const refreshedAt = new Date().toISOString();
-  const incoming = new Map<string, SnapshotRow>();
-  for (const { subscriptionId: eventSubscriptionId, event } of events) {
-    if (eventSubscriptionId !== subscriptionId) continue;
-    const row = toSnapshotRow(subscriptionId, event, refreshedAt);
-    incoming.set(row.id, row);
-  }
-  const existingResult = await db.execute({
-    sql: `SELECT id, line, category, journey_number, journey_ref, origin, destination,
-      route_json, calls_json, delay_minutes, actual_time, scheduled_time,
-      direction, source_subscription_id FROM mobilithek_train_snapshot
-      WHERE source_subscription_id = ?`,
-    args: [subscriptionId],
-  });
-  const existing = new Map<string, ExistingSnapshotRow>();
-  for (const row of existingResult.rows as unknown as ExistingSnapshotRow[]) existing.set(row.id, row);
-  const changed: SnapshotRow[] = [];
-  for (const row of incoming.values()) {
-    const previous = existing.get(row.id);
-    if (!previous || !sameSnapshotRow(previous, row)) changed.push(row);
-  }
-  for (let offset = 0; offset < changed.length; offset += BATCH_SIZE) {
-    const chunk = changed.slice(offset, offset + BATCH_SIZE).map(upsertStatement);
-    if (chunk.length) await db.batch(chunk, "write");
-  }
-  console.log(`[Mobilithek Worker] subscription snapshot: ${subscriptionId} incoming=${incoming.size} existing=${existing.size} changed=${changed.length}`);
+  const statements = events
+    .filter(({ subscriptionId: eventSubscriptionId }) => eventSubscriptionId === subscriptionId)
+    .map(({ event }) => toSnapshotRow(subscriptionId, event, refreshedAt))
+    .map(upsertStatement);
+  if (statements.length) await db.batch(statements, "write");
 }
-
 export async function cleanupSubscriptionSnapshots(subscriptionIds: string[], refreshedAt: string) {
   if (!subscriptionIds.length) return;
   const db = getDb();
