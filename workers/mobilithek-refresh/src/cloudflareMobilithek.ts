@@ -81,20 +81,13 @@ async function fetchRelayEvents(
   env: MobilithekEnv,
   subscriptionId: string,
   demand: DemandCrossing[],
-): Promise<{
-  events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
-  parsedEvents: number;
-}> {
+  onEvents?: (events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>) => Promise<void>,
+): Promise<{ parsedEvents: number }> {
   const relayUrl = env.MOBILITHEK_RELAY_URL?.trim();
   const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
-  if (!relayUrl || !relayToken) {
-    throw new Error("Mobilithek Relay ist nicht konfiguriert");
-  }
-
+  if (!relayUrl || !relayToken) throw new Error("Mobilithek Relay ist nicht konfiguriert");
   const controller = new AbortController();
-  // The relay streams large Mobilithek feeds; 20s truncates slow subscriptions before later journeys arrive.
   const timeout = setTimeout(() => controller.abort(), 120_000);
-
   let response: Response;
   try {
     response = await fetch(relayUrl, {
@@ -103,9 +96,6 @@ async function fetchRelayEvents(
         authorization: `Bearer ${relayToken}`,
         "content-type": "application/json",
         accept: "application/x-ndjson",
-        // Do not let the platform transparently gzip/decode the large NDJSON
-        // relay response. The feed is already streamed line-by-line and
-        // compression here can force a large decode buffer in Workers.
         "accept-encoding": "identity",
       },
       body: JSON.stringify({ subscriptionId, demand }),
@@ -115,31 +105,28 @@ async function fetchRelayEvents(
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Mobilithek Relay ${subscriptionId} request failed: ${message}`);
   }
-
   if (!response.ok || !response.body) {
     clearTimeout(timeout);
     const body = (await response.text()).slice(0, 2000);
     throw new Error(`Mobilithek Relay HTTP ${response.status}: ${body}`);
   }
-
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   let parsedEvents = 0;
-  const events: Array<{
-    subscriptionId: string;
-    event: MobilithekTrainEvent;
-  }> = [];
-
-  const consumeLine = (line: string) => {
+  const batch: Array<{ subscriptionId: string; event: MobilithekTrainEvent }> = [];
+  const BATCH_SIZE = 250;
+  const flush = async () => {
+    if (!batch.length || !onEvents) return;
+    const items = batch.splice(0, batch.length);
+    await onEvents(items);
+  };
+  const consumeLine = async (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    const value = JSON.parse(trimmed) as {
-      subscriptionId: string;
-      event: MobilithekTrainEvent;
-    };
+    const value = JSON.parse(trimmed) as { subscriptionId: string; event: MobilithekTrainEvent };
     parsedEvents++;
-    events.push({
+    batch.push({
       subscriptionId: value.subscriptionId,
       event: {
         ...value.event,
@@ -152,8 +139,8 @@ async function fetchRelayEvents(
         })),
       },
     });
+    if (batch.length >= BATCH_SIZE) await flush();
   };
-
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -161,21 +148,20 @@ async function fetchRelayEvents(
       buffer += decoder.decode(value, { stream: true });
       let newline = buffer.indexOf("\n");
       while (newline >= 0) {
-        consumeLine(buffer.slice(0, newline));
+        await consumeLine(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
         newline = buffer.indexOf("\n");
       }
     }
     buffer += decoder.decode();
-    if (buffer.trim()) consumeLine(buffer);
+    if (buffer.trim()) await consumeLine(buffer);
+    await flush();
   } finally {
     clearTimeout(timeout);
     reader.releaseLock();
   }
-
-  return { events, parsedEvents };
+  return { parsedEvents };
 }
-
 function isValidTrainTime(value: Date): boolean {
   const timestamp = value.getTime();
   if (!Number.isFinite(timestamp)) return false;
@@ -216,7 +202,14 @@ export async function refreshOnce(
           env.MOBILITHEK_RELAY_TOKEN &&
           demand.length
         ) {
-          const relay = await fetchRelayEvents(env, subscriptionId, demand);
+          const relay = await fetchRelayEvents(
+            env,
+            subscriptionId,
+            demand,
+            onSubscriptionEvents
+              ? (events) => onSubscriptionEvents(subscriptionId, events)
+              : undefined,
+          );
           console.log(
             `[Mobilithek] ${subscriptionId}: relay returned ${relay.parsedEvents} demanded events`,
           );
@@ -224,9 +217,9 @@ export async function refreshOnce(
             subscriptionId,
             successful: true,
             parsedEvents: relay.parsedEvents,
-            acceptedEvents: relay.events.length,
+            acceptedEvents: relay.parsedEvents,
             invalidActualTimeEvents: 0,
-            events: relay.events,
+            events: [] as Array<{ subscriptionId: string; event: MobilithekTrainEvent }>,
           };
         }
 
