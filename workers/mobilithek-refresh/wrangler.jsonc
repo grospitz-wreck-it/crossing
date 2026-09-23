@@ -3,9 +3,6 @@
   "name": "meineschranke",
   "main": "./src/index.ts",
   "compatibility_date": "2026-09-05",
-  "triggers": {
-    "crons": ["*/5 * * * *"]
-  },
   "mtls_certificates": [
     {
       "binding": "MOBILITHEK_CLIENT",
