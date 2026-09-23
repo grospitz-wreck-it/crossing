@@ -6,6 +6,15 @@ type DemandRule = {
   lineHints?: string[];
 };
 
+export type SecondaryRuleGroup = {
+  kind: "through" | "diversion";
+  observationStations: string[];
+  categories?: string[];
+  lineHints?: string[];
+  anchorRouteStops?: string[];
+  excludedRouteStop?: string;
+};
+
 type DemandCrossing = {
   id: string;
   requiredRouteStops: string[];
@@ -13,9 +22,7 @@ type DemandCrossing = {
   observationStations: string[];
   primaryObservationEvas: string[];
   primaryObservationStations: string[];
-  secondaryObservationStations: string[];
-  secondaryCategories: string[];
-  secondaryLineHints: string[];
+  secondaryRules: SecondaryRuleGroup[];
 };
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -37,6 +44,17 @@ function collectRules(value: unknown): DemandRule[] {
       lineHints: Array.isArray(rule.lineHints)
         ? rule.lineHints.map(String).map((item) => item.trim()).filter(Boolean)
         : [],
+    }));
+}
+
+function collectThroughRules(value: unknown): SecondaryRuleGroup[] {
+  return collectRules(value)
+    .filter((rule) => Boolean(rule.observationStation))
+    .map((rule) => ({
+      kind: "through" as const,
+      observationStations: [rule.observationStation!],
+      categories: rule.categories || [],
+      lineHints: rule.lineHints || [],
     }));
 }
 
@@ -89,44 +107,19 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       .map((eva) => stationNamesByEva.get(eva))
       .filter((value): value is string => Boolean(value));
 
-    const rules = [
-      ...collectRules(row.through_rules),
-      ...collectRules(row.diversion_rules),
-      ...collectRules(row.reroute_watch_rules),
-    ];
+    // Secondary demand is intentionally limited to regular through-rules for
+    // now. Diversion/reroute rules are retained in the database but are not
+    // treated as permanently active demand until a real diversion state can
+    // be detected. This avoids turning conditional rules into false positives.
+    const secondaryRules = collectThroughRules(row.through_rules);
 
     const categories = Array.from(
-      new Set(rules.flatMap((rule) => rule.categories || [])),
+      new Set(secondaryRules.flatMap((rule) => rule.categories || [])),
     );
 
     const observationStations = Array.from(
       new Set(
-        rules
-          .map((rule) => rule.observationStation)
-          .filter((value): value is string => !!value),
-      ),
-    );
-
-    // Secondary observation is deliberately separate from the primary
-    // observation EVAs. This is important for feeds such as S28 where the
-    // route can expose the stop name but not the configured DB EVA.
-    const secondaryObservationStations = Array.from(
-      new Set(
-        rules
-          .map((rule) => rule.observationStation)
-          .filter((value): value is string => !!value),
-      ),
-    );
-
-    const secondaryCategories = Array.from(
-      new Set(
-        rules.flatMap((rule) => rule.categories || []),
-      ),
-    );
-
-    const secondaryLineHints = Array.from(
-      new Set(
-        rules.flatMap((rule) => rule.lineHints || []),
+        secondaryRules.flatMap((rule) => rule.observationStations),
       ),
     );
 
@@ -137,9 +130,7 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       observationStations,
       primaryObservationEvas,
       primaryObservationStations,
-      secondaryObservationStations,
-      secondaryCategories,
-      secondaryLineHints,
+      secondaryRules,
     };
   });
 }
