@@ -124,9 +124,10 @@ function secondaryMatches(
 export type DemandMatch = {
   crossingId: string;
   kind: "primary" | "secondary";
+  secondaryRuleIndex?: number;
 };
 
-export function getDemandMatches(
+export function getDemandMatchDetails(
   event: MobilithekTrainEvent,
   demand: DemandCrossing[],
 ): DemandMatch[] {
@@ -147,12 +148,30 @@ export function getDemandMatches(
       return [{ crossingId: crossing.id, kind: "primary" as const }];
     }
 
-    if (secondaryMatches(event, crossing)) {
-      return [{ crossingId: crossing.id, kind: "secondary" as const }];
+    const rules = Array.isArray(crossing.secondaryRules)
+      ? crossing.secondaryRules
+      : [];
+    const secondaryRuleIndex = rules.findIndex((rule) =>
+      secondaryRuleMatches(event, rule),
+    );
+
+    if (secondaryRuleIndex >= 0) {
+      return [{
+        crossingId: crossing.id,
+        kind: "secondary" as const,
+        secondaryRuleIndex,
+      }];
     }
 
     return [];
   });
+}
+
+export function getDemandMatches(
+  event: MobilithekTrainEvent,
+  demand: DemandCrossing[],
+): DemandMatch[] {
+  return getDemandMatchDetails(event, demand);
 }
 
 export function filterEventsByDemand(
