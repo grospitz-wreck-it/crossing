@@ -116,7 +116,42 @@ function dateValue(node: any, keys: string[]): Date | undefined { const value = 
 function normalize(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function routeContains(route: string[], target: string) { const t = normalize(target); return Boolean(t) && route.some((name) => { const n = normalize(name); return n === t || n.includes(t) || t.includes(n); }); }
 function numberFrom(value?: string) { const m = String(value || "").match(/(\d{2,6})/); return m ? Number(m[1]) : 0; }
-function inferCategory(line: string, journey: any) { const raw = `${line} ${firstText(journey, ["ProductCategoryRef", "ProductCategory", "VehicleMode", "VehicleModeRef", "TrainType"]) || ""}`.toUpperCase(); for (const category of ["ICE", "EC", "IC", "IRE", "RE", "RB", "U79", "U78", "U76", "U75", "U74", "U73", "U72", "U71", "U70", "U81", "TRAM", "STR", "S"]) if (raw.includes(category)) return category; return line.split(/\s+/)[0] || ""; }
+function inferCategory(line: string, journey: any) {
+  const normalizedLine = normalizeMobilithekLine(line) || line.trim();
+  const product = firstText(journey, [
+    "ProductCategoryRef",
+    "ProductCategory",
+    "VehicleMode",
+    "VehicleModeRef",
+    "TrainType",
+  ]) || "";
+
+  const normalizeToken = (value: string) =>
+    value.toUpperCase().replace(/[^A-Z0-9]+/g, "");
+
+  const lineToken = normalizeToken(normalizedLine);
+  const productToken = normalizeToken(product);
+
+  // Never use substring matching for categories: e.g. S28 must not become S.
+  const knownCategories = [
+    "ICE", "EC", "IC", "IRE", "RE", "RB",
+    "U79", "U78", "U76", "U75", "U74", "U73", "U72", "U71", "U70", "U81",
+    "TRAM", "STR", "S",
+  ];
+
+  const productCategory = knownCategories.find(
+    (category) => productToken === category,
+  );
+  if (productCategory) return productCategory;
+
+  if (knownCategories.includes(lineToken)) return lineToken;
+
+  if (/^S\d+[A-Z]?$/.test(lineToken)) return lineToken;
+  if (/^RB\d+[A-Z]?$/.test(lineToken)) return lineToken.replace(/^RB/, "RB ");
+  if (/^RE\d+[A-Z]?$/.test(lineToken)) return lineToken.replace(/^RE/, "RE ");
+
+  return normalizedLine.split(/\s+/)[0] || "";
+}
 
 export function parseBody(body: string): MobilithekTrainEvent[] {
   let root: any; try { root = parser.parse(body); } catch { return []; }
