@@ -4,6 +4,7 @@ import { createGunzip } from "node:zlib";
 import {
   filterEventsByDemand,
   getDemandMatches,
+  getDemandMatchDetails,
   parseBody,
   type DemandCrossing,
   type MobilithekTrainEvent,
@@ -377,6 +378,9 @@ export async function POST(request: Request) {
       let normalFilterEvents = 0;
       let rawFallbackEvents = 0;
       const crossingBreakdown = new Map<string, { events: number; primary: number; secondary: number }>();
+      const secondaryRuleCounts = new Map<string, number>();
+      const secondaryLineCategoryCounts = new Map<string, number>();
+      const secondarySamples: Array<Record<string, unknown>> = [];
       const kaarstEvas = Array.from(new Set(
         demand
           .filter((crossing) =>
@@ -411,11 +415,41 @@ export async function POST(request: Request) {
         demandedEvents += result.events.length;
 
         for (const item of result.events) {
-          for (const match of getDemandMatches(item.event, demand)) {
+          for (const match of getDemandMatchDetails(item.event, demand)) {
             const current = crossingBreakdown.get(match.crossingId) || { events: 0, primary: 0, secondary: 0 };
             current.events++;
             current[match.kind]++;
             crossingBreakdown.set(match.crossingId, current);
+
+            if (match.kind === "secondary" && /kaarst/i.test(match.crossingId)) {
+              const ruleKey = String(match.secondaryRuleIndex ?? -1);
+              secondaryRuleCounts.set(
+                ruleKey,
+                (secondaryRuleCounts.get(ruleKey) || 0) + 1,
+              );
+
+              const lineCategoryKey =
+                String(item.event.line || "(empty)") + " | " +
+                String(item.event.category || "(empty)");
+              secondaryLineCategoryCounts.set(
+                lineCategoryKey,
+                (secondaryLineCategoryCounts.get(lineCategoryKey) || 0) + 1,
+              );
+
+              if (secondarySamples.length < 20) {
+                secondarySamples.push({
+                  subscriptionId,
+                  crossingId: match.crossingId,
+                  secondaryRuleIndex: match.secondaryRuleIndex,
+                  line: item.event.line,
+                  category: item.event.category,
+                  journeyRef: item.event.journeyRef,
+                  origin: item.event.origin,
+                  destination: item.event.destination,
+                  route: item.event.route,
+                });
+              }
+            }
           }
         }
       };
@@ -448,6 +482,11 @@ export async function POST(request: Request) {
           rawEva8003288Journeys,
           rawKaarstEvaJourneys,
           crossingBreakdown: Object.fromEntries(crossingBreakdown),
+          secondaryDiagnostics: {
+            ruleCounts: Object.fromEntries(secondaryRuleCounts),
+            lineCategoryCounts: Object.fromEntries(secondaryLineCategoryCounts),
+            samples: secondarySamples,
+          },
         }), {
           status: 200,
           headers: {
