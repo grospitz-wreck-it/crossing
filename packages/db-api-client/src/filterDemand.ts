@@ -92,13 +92,8 @@ function secondaryRuleMatches(
   if (
     categories.length &&
     !categories.some((value) => {
-      const wanted = String(value || "").toUpperCase().replace(/\s+/g, "");
-      return wanted && (
-        normalizedCategory === wanted ||
-        normalizedLine === wanted ||
-        normalizedLine.includes(wanted) ||
-        wanted.includes(normalizedLine)
-      );
+      const wanted = String(value || "").toUpperCase();
+      return category === wanted || line.includes(wanted);
     })
   ) {
     return false;
