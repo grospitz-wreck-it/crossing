@@ -325,9 +325,7 @@ export default {
             id: crossing.id,
             primaryObservationEvas: crossing.primaryObservationEvas,
             primaryObservationStations: crossing.primaryObservationStations,
-            secondaryObservationStations: crossing.secondaryObservationStations,
-            secondaryCategories: crossing.secondaryCategories,
-            secondaryLineHints: crossing.secondaryLineHints,
+            secondaryRules: crossing.secondaryRules,
           })),
         });
       } catch (error) {
