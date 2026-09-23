@@ -1,13 +1,20 @@
 import type { MobilithekTrainEvent } from "./mobilithekTimetable";
 
+export type SecondaryRuleGroup = {
+  kind: "through" | "diversion";
+  observationStations: string[];
+  categories?: string[];
+  lineHints?: string[];
+  anchorRouteStops?: string[];
+  excludedRouteStop?: string;
+};
+
 export type DemandCrossing = {
   id: string;
   requiredRouteStops: string[];
   primaryObservationStations: string[];
   primaryObservationEvas: string[];
-  secondaryObservationStations: string[];
-  secondaryCategories: string[];
-  secondaryLineHints: string[];
+  secondaryRules: SecondaryRuleGroup[];
 };
 
 function normalize(value: string): string {
@@ -57,16 +64,12 @@ function primaryEvaMatches(event: MobilithekTrainEvent, evas: string[]): boolean
   );
 }
 
-function secondaryMatches(
+function secondaryRuleMatches(
   event: MobilithekTrainEvent,
-  crossing: DemandCrossing,
+  rule: SecondaryRuleGroup,
 ): boolean {
-  const categories = Array.isArray(crossing.secondaryCategories)
-    ? crossing.secondaryCategories
-    : [];
-  const lineHints = Array.isArray(crossing.secondaryLineHints)
-    ? crossing.secondaryLineHints
-    : [];
+  const categories = Array.isArray(rule.categories) ? rule.categories : [];
+  const lineHints = Array.isArray(rule.lineHints) ? rule.lineHints : [];
 
   const line = String(event.line || "").toUpperCase();
   const category = String(event.category || "").toUpperCase();
@@ -89,17 +92,38 @@ function secondaryMatches(
   if (
     categories.length &&
     !categories.some((value) => {
-      const wanted = String(value).toUpperCase();
-      return category === wanted || line.includes(wanted);
+      const wanted = String(value || "").toUpperCase().replace(/\s+/g, "");
+      return wanted && (
+        normalizedCategory === wanted ||
+        normalizedLine === wanted ||
+        normalizedLine.includes(wanted) ||
+        wanted.includes(normalizedLine)
+      );
     })
   ) {
     return false;
   }
 
-  const stations = Array.isArray(crossing.secondaryObservationStations)
-    ? crossing.secondaryObservationStations
+  const stations = Array.isArray(rule.observationStations)
+    ? rule.observationStations
     : [];
+
   return stations.some((station) => stationMatches(event, station));
+}
+
+function secondaryMatches(
+  event: MobilithekTrainEvent,
+  crossing: DemandCrossing,
+): boolean {
+  const rules = Array.isArray(crossing.secondaryRules)
+    ? crossing.secondaryRules
+    : [];
+
+  // Rules are OR-connected as complete units. Every configured constraint
+  // inside one rule must match the same journey. This prevents unrelated
+  // categories and observation stations from different DB rules forming a
+  // cross-product.
+  return rules.some((rule) => secondaryRuleMatches(event, rule));
 }
 
 export type DemandMatch = {
