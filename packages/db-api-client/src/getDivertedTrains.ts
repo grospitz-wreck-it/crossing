@@ -1,9 +1,9 @@
 import type { Crossing } from "../../crossing-model/src/types";
-import { getStationTimetable } from "./getStationTimetable";
+import {
+  getMobilithekTrainRegistry,
+  type MobilithekTrainEvent,
+} from "./mobilithekTimetable";
 
-// Ein Zug, der eigentlich zur "Kirchlengern-Linie" gehört, aber laut
-// aktuellem (ggf. per fchg geändertem) Laufweg gerade NICHT über den
-// Übergang läuft - z.B. wegen einer Umleitung über Bielefeld Hbf.
 export type DivertedTrain = {
   line: string;
   category: string;
@@ -17,65 +17,170 @@ export type DivertedTrain = {
 
   observationEva: string;
   observationStation: string;
-  observationActualTime: string; // ISO
+  observationActualTime: string;
 
   note: string;
 };
 
-// Der Status-Endpunkt zeigt nur die nächsten 30 Minuten. Ein einstündiges
-// Timetable-Fenster reicht dafür aus und sorgt dafür, dass diversionRules
-// denselben In-Memory-/Turso-Cache wie throughRules verwenden können.
-const DIVERSION_TIMETABLE_HOURS = 1;
+function normalizeStation(value: string): string {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\([^)]*\)/g, " ")
+    .replace(
+      /hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi,
+      " ",
+    )
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function routeContains(route: string[], station: string): boolean {
+  const target = normalizeStation(station);
+  if (!target) return false;
+
+  return route.some((value) => {
+    const normalized = normalizeStation(value);
+    return (
+      normalized === target ||
+      normalized.includes(target) ||
+      target.includes(normalized)
+    );
+  });
+}
+
+function categoryMatches(
+  train: MobilithekTrainEvent,
+  categories: string[],
+): boolean {
+  if (!categories.length) return true;
+
+  const line = String(train.line || "").toUpperCase();
+  const category = String(train.category || "").toUpperCase();
+
+  return categories.some((wanted) => {
+    const value = String(wanted || "").toUpperCase();
+
+    return (
+      category === value ||
+      line === value ||
+      line.includes(value) ||
+      value.includes(line)
+    );
+  });
+}
+
+function callForStation(
+  train: MobilithekTrainEvent,
+  station: string,
+) {
+  const target = normalizeStation(station);
+
+  return train.calls.find((call) => {
+    const value = normalizeStation(call.name);
+
+    return (
+      value === target ||
+      value.includes(target) ||
+      target.includes(value)
+    );
+  });
+}
 
 export async function getDivertedTrains(
-  crossing: Crossing
+  crossing: Crossing,
 ): Promise<DivertedTrain[]> {
   if (!crossing.diversionRules?.length) {
+    return [];
+  }
+
+  let events: MobilithekTrainEvent[];
+
+  try {
+    /*
+     * Wichtig:
+     * Umleitungen werden ebenfalls aus dem bereits aufgebauten
+     * Mobilithek-Registry ermittelt.
+     *
+     * Kein zusätzlicher DB-Timetable-Request mehr.
+     */
+    events = await getMobilithekTrainRegistry();
+  } catch (error) {
+    console.warn(
+      "getDivertedTrains: Mobilithek Registry nicht verfügbar",
+      error,
+    );
+
     return [];
   }
 
   const results: DivertedTrain[] = [];
 
   for (const rule of crossing.diversionRules) {
-    let events;
-
-    try {
-      events = await getStationTimetable(
-        rule.observationEva,
-        DIVERSION_TIMETABLE_HOURS
-      );
-    } catch (error) {
-      console.error(
-        `getDivertedTrains: Timetable für ${rule.observationStation} (${rule.observationEva}) fehlgeschlagen`,
-        error
-      );
-      continue;
-    }
-
-    const diverted = events.filter((train) => {
-      if (train.cancelled) {
-        return false;
+    for (const train of events) {
+      if (!categoryMatches(train, rule.categories || [])) {
+        continue;
       }
 
-      if (!rule.categories.includes(train.category)) {
-        return false;
-      }
-
-      const hasAnchors = rule.anchorRouteStops.every((stop) =>
-        train.route.includes(stop)
+      /*
+       * Der Zug muss alle definierten Anker passieren.
+       * Beispiel Kirchlengern:
+       * Osnabrück Hbf + Hannover Hbf
+       */
+      const hasAnchors = (rule.anchorRouteStops || []).every(
+        (stop: string) => routeContains(train.route, stop),
       );
 
       if (!hasAnchors) {
-        return false;
+        continue;
       }
 
-      // Genau das ist das Umleitungs-Indiz: die Station, die auf der
-      // Stammstrecke (über Kirchlengern) normalerweise im Laufweg stünde,
-      // fehlt - der Zug ist also gerade nicht auf der Stammstrecke.
-      return !train.route.includes(rule.excludedRouteStop);
-    });
+      /*
+       * Der entscheidende Umleitungsindikator:
+       * Der normale Streckenhalt fehlt im aktuellen Laufweg.
+       *
+       * Beispiel:
+       * Bielefeld -> Hannover
+       * ohne Bünde/Kirchlengern
+       */
+      if (
+        routeContains(
+          train.route,
+          rule.excludedRouteStop,
+        )
+      ) {
+        continue;
+      }
 
-    for (const train of diverted) {
+      const observationCall = callForStation(
+        train,
+        rule.observationStation,
+      );
+
+      const observationTime =
+        observationCall?.actual ||
+        observationCall?.planned ||
+        train.actualTime;
+
+      if (!observationTime) {
+        continue;
+      }
+
+      /*
+       * Nur relevante Zeitfenster berücksichtigen.
+       * Der Status-Endpunkt arbeitet mit dem aktuellen Zeitraum.
+       */
+      const timestamp = observationTime.getTime();
+      const now = Date.now();
+
+      if (
+        timestamp < now - 5 * 60_000 ||
+        timestamp > now + 3 * 60 * 60_000
+      ) {
+        continue;
+      }
+
       results.push({
         line: train.line,
         category: train.category,
@@ -89,21 +194,24 @@ export async function getDivertedTrains(
 
         observationEva: rule.observationEva,
         observationStation: rule.observationStation,
-        observationActualTime: train.actualTime.toISOString(),
+        observationActualTime: observationTime.toISOString(),
 
-        note: `Vermutlich umgeleitet über ${rule.observationStation} - kein Halt/Durchfahrt am Übergang zu erwarten.`,
+        note:
+          `Vermutlich umgeleitet über ${rule.observationStation} ` +
+          `- kein Halt/Durchfahrt am Übergang zu erwarten.`,
       });
     }
   }
 
-  // Dedupe über category+journeyNumber, falls mehrere diversionRules
-  // denselben Zug fänden.
+  /*
+   * Derselbe Zug kann durch mehrere Regeln gefunden werden.
+   */
   return Array.from(
     new Map(
       results.map((train) => [
         `${train.category}-${train.journeyNumber}`,
         train,
-      ])
-    ).values()
+      ]),
+    ).values(),
   );
 }
