@@ -165,12 +165,16 @@ async function fetchRelayEvents(
   env: MobilithekEnv,
   subscriptionId: string,
   demand: DemandCrossing[],
-): Promise<{
-  events: Array<{ subscriptionId: string; event: MobilithekTrainEvent }>;
-  parsedEvents: number;
-}> {
+  onBatch: (
+    batch: Array<{
+      subscriptionId: string;
+      event: MobilithekTrainEvent;
+    }>,
+  ) => Promise<void>,
+): Promise<number> {
   const relayUrl = env.MOBILITHEK_RELAY_URL?.trim();
   const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
+
   if (!relayUrl || !relayToken) {
     throw new Error("Mobilithek Relay ist nicht konfiguriert");
   }
@@ -190,57 +194,82 @@ async function fetchRelayEvents(
     throw new Error(`Mobilithek Relay HTTP ${response.status}: ${body}`);
   }
 
+  console.log(
+    "[Mobilithek Relay] response received, starting NDJSON processing",
+  );
+
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
+
   let buffer = "";
   let parsedEvents = 0;
-  const events: Array<{
+
+  const BATCH_SIZE = 100;
+
+  let batch: Array<{
     subscriptionId: string;
     event: MobilithekTrainEvent;
   }> = [];
 
-  const consumeLine = (line: string) => {
+  const flushBatch = async () => {
+    if (batch.length === 0) return;
+
+    const currentBatch = batch;
+    batch = [];
+
+    await onBatch(currentBatch);
+  };
+
+  const consumeLine = async (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
+
     const value = JSON.parse(trimmed) as {
       subscriptionId: string;
       event: MobilithekTrainEvent;
     };
+
     parsedEvents++;
-    events.push({
+
+    batch.push({
       subscriptionId: value.subscriptionId,
-      event: {
-        ...value.event,
-        actualTime: new Date(value.event.actualTime),
-        scheduledTime: new Date(value.event.scheduledTime),
-        calls: (value.event.calls || []).map((call) => ({
-          ...call,
-          planned: call.planned ? new Date(call.planned) : undefined,
-          actual: call.actual ? new Date(call.actual) : undefined,
-        })),
-      },
+      event: value.event,
     });
+
+    if (batch.length >= BATCH_SIZE) {
+      await flushBatch();
+    }
   };
 
   try {
     while (true) {
       const { done, value } = await reader.read();
+
       if (done) break;
+
       buffer += decoder.decode(value, { stream: true });
+
       let newline = buffer.indexOf("\n");
+
       while (newline >= 0) {
-        consumeLine(buffer.slice(0, newline));
+        await consumeLine(buffer.slice(0, newline));
         buffer = buffer.slice(newline + 1);
         newline = buffer.indexOf("\n");
       }
     }
+
     buffer += decoder.decode();
-    if (buffer.trim()) consumeLine(buffer);
+
+    if (buffer.trim()) {
+      await consumeLine(buffer);
+    }
+
+    await flushBatch();
   } finally {
     reader.releaseLock();
   }
 
-  return { events, parsedEvents };
+  return parsedEvents;
 }
 
 function isValidTrainTime(value: Date): boolean {
@@ -275,13 +304,38 @@ export async function refreshOnce(
         env.MOBILITHEK_RELAY_TOKEN &&
         demand.length
       ) {
-        const relay = await fetchRelayEvents(env, subscriptionId, demand);
+        const relayParsedEvents = await fetchRelayEvents(
+          env,
+          subscriptionId,
+          demand,
+          async (batch) => {
+            for (const item of batch) {
+              const event = item.event;
+
+              snapshotEvents.push({
+                subscriptionId: item.subscriptionId,
+                event: {
+                  ...event,
+                  actualTime: new Date(event.actualTime),
+                  scheduledTime: new Date(event.scheduledTime),
+                  calls: (event.calls || []).map((call) => ({
+                    ...call,
+                    planned: call.planned ? new Date(call.planned) : undefined,
+                    actual: call.actual ? new Date(call.actual) : undefined,
+                  })),
+                },
+              });
+
+              acceptedEvents++;
+            }
+          },
+        );
+
         successful++;
-        parsedEvents += relay.parsedEvents;
-        acceptedEvents += relay.events.length;
-        snapshotEvents.push(...relay.events);
+        parsedEvents += relayParsedEvents;
+
         console.log(
-          `[Mobilithek] ${subscriptionId}: relay returned ${relay.parsedEvents} demanded events`,
+          `[Mobilithek] ${subscriptionId}: relay returned ${relayParsedEvents} demanded events`,
         );
         continue;
       }
