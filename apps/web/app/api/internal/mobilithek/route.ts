@@ -121,6 +121,46 @@ function encodeLine(value: unknown): Uint8Array {
   return new TextEncoder().encode(`${JSON.stringify(value)}\n`);
 }
 
+// Conservative candidate prefilter for shadow measurement only.
+// It never skips parsing; filterEventsByDemand remains authoritative.
+function isJourneyCandidate(
+  xml: string,
+  demand: DemandCrossing[],
+): boolean {
+  const normalize = (value: string) =>
+    String(value || "")
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
+      .replace(/[^a-z0-9]+/g, "")
+      .trim();
+
+  const normalizedXml = normalize(xml);
+
+  for (const crossing of demand) {
+    for (const rawEva of crossing.primaryObservationEvas || []) {
+      const eva = String(rawEva || "").trim();
+      if (eva && xml.includes(eva)) return true;
+    }
+
+    const stationNames = [
+      ...(crossing.primaryObservationStations || []),
+      ...(crossing.secondaryRules || []).flatMap(
+        (rule) => rule.observationStations || [],
+      ),
+    ];
+
+    for (const rawName of stationNames) {
+      const name = normalize(String(rawName || ""));
+      if (name && normalizedXml.includes(name)) return true;
+    }
+  }
+
+  return false;
+}
+
 async function processJourney(
   xml: string,
   subscriptionId: string,
@@ -508,6 +548,8 @@ export async function POST(request: Request) {
         let buffer = "";
         let parsedJourneys = 0;
         let demandedEvents = 0;
+        let candidateJourneys = 0;
+        let candidateFalseNegatives = 0;
 
         try {
           for await (const chunk of source as AsyncIterable<Buffer | Uint8Array>) {
@@ -517,11 +559,23 @@ export async function POST(request: Request) {
 
             for (const journey of extracted.journeys) {
               parsedJourneys++;
+              const candidate = isJourneyCandidate(journey, demand);
+              if (candidate) candidateJourneys++;
+
               const matches = await processJourney(
                 journey,
                 subscriptionId,
                 demand,
               );
+
+              if (!candidate && matches.length > 0) {
+                candidateFalseNegatives++;
+                console.error("[Mobilithek Relay] candidate prefilter false negative", {
+                  subscriptionId,
+                  xmlLength: journey.length,
+                  matchedEvents: matches.length,
+                });
+              }
 
               for (const match of matches) {
                 demandedEvents++;
@@ -534,11 +588,24 @@ export async function POST(request: Request) {
           const final = takeJourneys(buffer);
           for (const journey of final.journeys) {
             parsedJourneys++;
+            const candidate = isJourneyCandidate(journey, demand);
+            if (candidate) candidateJourneys++;
+
             const matches = await processJourney(
               journey,
               subscriptionId,
               demand,
             );
+
+            if (!candidate && matches.length > 0) {
+              candidateFalseNegatives++;
+              console.error("[Mobilithek Relay] candidate prefilter false negative", {
+                subscriptionId,
+                xmlLength: journey.length,
+                matchedEvents: matches.length,
+              });
+            }
+
             for (const match of matches) {
               demandedEvents++;
               controller.enqueue(encodeLine(match));
@@ -548,6 +615,13 @@ export async function POST(request: Request) {
           console.log(
             `[Mobilithek Relay] ${subscriptionId}: ${parsedJourneys} journeys parsed, ${demandedEvents} demanded events`,
           );
+          console.log("[Mobilithek Relay] candidate prefilter shadow", {
+            subscriptionId,
+            parsedJourneys,
+            candidateJourneys,
+            demandedEvents,
+            candidateFalseNegatives,
+          });
           controller.close();
         } catch (error) {
           const message =
