@@ -296,7 +296,12 @@ export async function POST(request: Request) {
   try {
     const token = request.headers.get("authorization");
     const expectedToken = process.env.MOBILITHEK_RELAY_TOKEN;
-
+  console.log("[Relay Auth Check]", {
+    tokenPresent: Boolean(token),
+    expectedTokenPresent: Boolean(expectedToken),
+    receivedLength: token?.length ?? 0,
+    expectedLength: expectedToken?.length ?? 0,
+  });
     if (!expectedToken || token !== `Bearer ${expectedToken}`) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
