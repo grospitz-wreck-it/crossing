@@ -21,7 +21,11 @@ function isValidCredentials(request: NextRequest) {
 }
 
 export function middleware(request: NextRequest) {
-  if (!isValidCredentials(request)) return unauthorized();
+  const isPreview =
+    process.env.VERCEL_ENV === "preview" &&
+    process.env.PREVIEW_ADMIN_AUTH_BYPASS === "true";
+
+  if (!isPreview && !isValidCredentials(request)) return unauthorized();
 
   // POST must reach the canonical crossings route. It contains the complete
   // OSM -> station catalog -> prediction-rule derivation. The old /save
