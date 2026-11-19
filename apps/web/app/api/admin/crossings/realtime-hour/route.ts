@@ -3,6 +3,7 @@ import { fetchOpenBoardsBoard } from "../../../../../../../packages/db-api-clien
 import { fetchPlanXml, fetchChangesXml } from "../../../../../../../packages/db-api-client/src/officialTimetableClient";
 import { mergeStationTimetable } from "../../../../../../../packages/db-api-client/src/parseOfficialTimetable";
 import { getMobilithekTrainRegistry } from "../../../../../../../packages/db-api-client/src/mobilithekTimetable";
+import { compareStationObservations, toCanonicalOpenBoardsObservation, toMobilithekEvidence, toTimetableEvidence } from "../../../../../../../packages/db-api-client/src/sourceComparison";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -307,12 +308,64 @@ export async function GET(request: Request) {
       })()
     : { source: "Mobilithek live subscription", error: String(mobilithekResult.reason) };
 
-  const combined = [
+  // OpenBoards is the only canonical station-event collection.
+  // Timetables and Mobilithek are attached as supporting evidence only.
+  const openBoardsRows = [
     ...(Array.isArray((openBoards as any).departures) ? (openBoards as any).departures : []),
     ...(Array.isArray((openBoards as any).arrivals) ? (openBoards as any).arrivals : []),
-    ...(Array.isArray((timetable as any).events) ? (timetable as any).events.map((event: any) => ({ ...event, source: "DB Timetables v1" })) : []),
-    ...(Array.isArray((mobilithek as any).events) ? (mobilithek as any).events.map((event: any) => ({ ...event, source: "Mobilithek live subscription" })) : []),
-  ].sort((a: any, b: any) => String(a.time || a.actualTime || a.scheduledTime || "").localeCompare(String(b.time || b.actualTime || b.scheduledTime || "")));
+  ];
+
+  const canonicalObservations = openBoardsRows
+    .map((row: any) => toCanonicalOpenBoardsObservation({
+      id: row.id,
+      eva,
+      direction: row.direction,
+      time: row.time,
+      scheduledTime: row.scheduledTime,
+      timeType: row.timeType,
+      line: row.line,
+      category: row.category,
+      journeyNumber: row.journeyNumber,
+      journeyId: row.journeyId,
+      origin: row.origin,
+      destination: row.destination,
+      platform: row.platform,
+      cancelled: row.cancelled,
+      raw: row.raw,
+    }))
+    .filter((observation: any) => Boolean(observation));
+
+  const timetableEvidence = timetableResult.status === "fulfilled"
+    ? timetableResult.value.map((event) => toTimetableEvidence({
+        id: event.id,
+        eva,
+        journeyNumber: event.journeyNumber,
+        line: event.line,
+        scheduledTime: event.scheduledTime.toISOString(),
+        actualTime: event.actualTime.toISOString(),
+        platform: event.platform,
+        cancelled: event.cancelled,
+      }))
+    : [];
+
+  const mobilithekEvidence = Array.isArray((mobilithek as any).events)
+    ? (mobilithek as any).events.map((event: any) => toMobilithekEvidence({
+        id: event.id,
+        stationEva: event.stopPointRef || event.stopPlaceRef || (event.stationCall === station ? eva : null),
+        journeyNumber: event.journeyNumber,
+        line: event.line,
+        scheduledTime: event.scheduledTime,
+        actualTime: event.actualTime,
+        platform: event.platform,
+        cancelled: event.cancelled,
+      }))
+    : [];
+
+  const observations = compareStationObservations(
+    canonicalObservations,
+    timetableEvidence,
+    mobilithekEvidence,
+  );
 
   return NextResponse.json({
     ok: [openBoardsResult, timetableResult, mobilithekResult].some((result) => result.status === "fulfilled"),
@@ -321,14 +374,15 @@ export async function GET(request: Request) {
     generatedAt: new Date().toISOString(),
     window: { start: startIso, end: endIso, minutes: 60 },
     durationMs: Date.now() - startedAt,
-    eventCount: combined.length,
-    events: combined,
+    eventCount: observations.length,
+    events: observations,
     sources: { openBoards, timetable, mobilithek },
     notes: [
       "Read-only diagnostic: no Turso writes, no snapshot updates and no forecast/matching changes.",
       "OpenBoards is requested in two consecutive 30-minute windows per direction (the documented default window), covering the next 60 minutes. Rows are normalized from the documented top-level arrivals/departures arrays; line, journey, stop names, platform and schedule/forecast times are read from their explicit OpenBoards fields.",
       "Mobilithek rows are included only when an EstimatedCall explicitly identifies Kirchlengern by stop name or EVA reference; no route-name-only regional heuristic is used.",
-      "Timetables and OpenBoards events are listed independently; cross-source journey matching is intentionally not inferred in this first comparison.",
+      "OpenBoards is the canonical station observation. DB Timetables and Mobilithek are supporting evidence only and are not duplicated as separate event collections.",
+      "Evidence matching requires the same journey number; line and scheduled-time agreement are reported separately and are not silently assumed.",
     ],
   }, { headers: { "Cache-Control": "no-store" } });
 }
