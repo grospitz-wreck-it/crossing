@@ -40,6 +40,7 @@ const db = createClient({
 const files = [
   "apps/web/sql/005_crossing_registry.sql",
   "apps/web/sql/006_railway_station_catalog.sql",
+  "apps/web/sql/008_crossing_train_source_mode.sql",
   "migrations/20260823_crossing_locations.sql",
 ];
 
