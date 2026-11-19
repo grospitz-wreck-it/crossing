@@ -85,7 +85,7 @@ export default function CrossingsAdmin() {
     } catch (e) { setLookupError(e instanceof Error ? e.message : "Löschen fehlgeschlagen."); } finally { setDeletingId(""); }
   }
   async function openForecast(crossing: Crossing) {
-    setForecast(null); setForecastError(""); setForecastLoading(true); try { const res = await fetch(`/api/admin/crossings/${encodeURIComponent(crossing.id)}/forecast`, { cache: "no-store" }); const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || "Prognose konnte nicht geladen werden."); setForecast(data); } catch (e) { setForecastError(e instanceof Error ? e.message : "Prognose konnte nicht geladen werden."); } finally { setForecastLoading(false); }
+    setForecast(null); setForecastError(""); setProfileMessage(""); setForecastLoading(true); try { const res = await fetch(`/api/admin/crossings/${encodeURIComponent(crossing.id)}/forecast`, { cache: "no-store" }); const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || "Prognose konnte nicht geladen werden."); setForecast(data); } catch (e) { setForecastError(e instanceof Error ? e.message : "Prognose konnte nicht geladen werden."); } finally { setForecastLoading(false); }
   }
   async function prepareOsmProfile(crossingId: string) {
     if (!crossingId || profilePreparing) return;
