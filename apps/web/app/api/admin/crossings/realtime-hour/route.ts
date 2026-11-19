@@ -13,86 +13,139 @@ const WINDOW_MS = 60 * 60 * 1000;
 
 type JsonObject = Record<string, unknown>;
 
+type OpenBoardsEntry = {
+  departureId?: string;
+  arrivalId?: string;
+  journeyId?: string;
+  journeyInfo?: JsonObject;
+  transport?: JsonObject;
+  platform?: JsonObject;
+  time?: string;
+  timeSchedule?: string;
+  timeType?: string;
+  type?: string;
+};
+
 function asObject(value: unknown): JsonObject | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as JsonObject
     : null;
 }
 
-function collectObjects(value: unknown, output: JsonObject[] = [], seen = new Set<unknown>()) {
-  if (!value || typeof value !== "object" || seen.has(value)) return output;
-  seen.add(value);
-  if (!Array.isArray(value)) output.push(value as JsonObject);
-  for (const child of Object.values(value as JsonObject)) {
-    if (Array.isArray(child)) child.forEach((item) => collectObjects(item, output, seen));
-    else collectObjects(child, output, seen);
-  }
-  return output;
-}
-
-function firstDeep(objects: JsonObject[], keys: string[]): unknown {
-  for (const object of objects) {
-    for (const key of keys) {
-      if (object[key] !== undefined && object[key] !== null) return object[key];
-    }
-  }
-  return undefined;
-}
-
 function asText(value: unknown): string | null {
   if (typeof value === "string" || typeof value === "number") return String(value);
-  if (value && typeof value === "object") {
-    const object = value as JsonObject;
-    for (const key of ["name", "text", "value", "label", "id"]) {
-      if (object[key] !== undefined) return asText(object[key]);
+  const object = asObject(value);
+  if (!object) return null;
+  for (const key of ["name", "text", "value", "label", "id"]) {
+    if (object[key] !== undefined && object[key] !== null) {
+      return asText(object[key]);
     }
   }
   return null;
 }
 
 function asIso(value: unknown): string | null {
-  if (typeof value !== "string" && typeof value !== "number") return null;
-  const date = new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+  if (typeof value !== "string") return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : null;
 }
 
-function normalizeOpenBoards(data: unknown, source: "DB OpenBoards arrivals" | "DB OpenBoards departures", start: number, end: number) {
-  const objects = collectObjects(data);
-  const rows: Array<Record<string, unknown>> = [];
-  const timeKeys = [
-    "timeForecast", "forecastTime", "actualTime", "estimatedTime",
-    "time", "dateTime", "departureTime", "arrivalTime", "scheduledTime",
-    "timeScheduled", "timeExpected", "timeEstimated",
-  ];
-  for (const object of objects) {
-    const nested = collectObjects(object);
-    const rawTime = firstDeep(nested, timeKeys);
-    const time = asIso(rawTime);
-    if (!time) continue;
-    const timestamp = new Date(time).getTime();
+function stopNameByEva(data: JsonObject): Map<string, string> {
+  const names = new Map<string, string>();
+  const stopPlaces = Array.isArray(data.stopPlaces) ? data.stopPlaces : [];
+  for (const value of stopPlaces) {
+    const stop = asObject(value);
+    if (!stop || typeof stop.evaNumber !== "string") continue;
+    const localizedNames = Array.isArray(stop.localizedNames) ? stop.localizedNames : [];
+    const german = localizedNames
+      .map(asObject)
+      .find((item) => item?.language === "deu" && typeof item.name === "string");
+    const fallback = localizedNames.map(asObject).find((item) => typeof item?.name === "string");
+    const name = german?.name ?? fallback?.name;
+    if (typeof name === "string") names.set(stop.evaNumber, name);
+  }
+  return names;
+}
+
+function resolveStop(value: unknown, names: Map<string, string>): string | null {
+  const stop = asObject(value);
+  if (!stop) return asText(value);
+  const eva = typeof stop.evaNumber === "string" ? stop.evaNumber : null;
+  return (eva && names.get(eva)) || eva || asText(stop);
+}
+
+function normalizeOpenBoards(
+  data: unknown,
+  direction: "arrivals" | "departures",
+  start: number,
+  end: number,
+) {
+  const root = asObject(data);
+  if (!root) return [];
+  const entries = Array.isArray(root[direction]) ? root[direction] as unknown[] : [];
+  const names = stopNameByEva(root);
+  const unique = new Map<string, Record<string, unknown>>();
+
+  for (const value of entries) {
+    const entry = asObject(value) as OpenBoardsEntry | null;
+    if (!entry) continue;
+
+    const actualTime = asIso(entry.time);
+    const scheduledTime = asIso(entry.timeSchedule);
+    if (!actualTime) continue;
+    const timestamp = Date.parse(actualTime);
     if (timestamp < start || timestamp > end) continue;
-    const line = asText(firstDeep(nested, ["line", "lineName", "publishedLineName", "trainNumber", "journeyNumber", "serviceNumber", "name"]));
-    const destination = asText(firstDeep(nested, ["destination", "destinationName", "direction", "directionText", "to"]));
-    const origin = asText(firstDeep(nested, ["origin", "originName", "from", "start"]));
-    const platform = asText(firstDeep(nested, ["platform", "platformName", "track", "trackName"]));
-    const delay = firstDeep(nested, ["delayMinutes", "delay", "delayInMinutes"]);
-    rows.push({
-      source,
-      time,
+
+    const journeyInfo = asObject(entry.journeyInfo) ?? {};
+    const transport = asObject(entry.transport) ??
+      asObject(journeyInfo.transportAtStart) ?? {};
+    const lineObject = asObject(transport.line);
+    const line = asText(transport.journeyDescription) ??
+      asText(lineObject?.name) ??
+      asText(transport.category);
+    const origin = resolveStop(journeyInfo.origin, names);
+    const destination = resolveStop(journeyInfo.destination, names);
+    const platform = asText(entry.platform);
+    const delayMinutes = scheduledTime
+      ? Math.round((Date.parse(actualTime) - Date.parse(scheduledTime)) / 60000)
+      : null;
+    const journeyNumber = typeof transport.journeyNumber === "number"
+      ? transport.journeyNumber
+      : typeof journeyInfo.headerJourneyNumber === "number"
+        ? journeyInfo.headerJourneyNumber
+        : null;
+    const id = entry.journeyId ??
+      entry.departureId ??
+      entry.arrivalId ??
+      [line, journeyNumber, scheduledTime, actualTime].join("|");
+
+    const row = {
+      id,
+      source: direction === "departures" ? "DB OpenBoards departures" : "DB OpenBoards arrivals",
+      direction,
+      time: actualTime,
+      actualTime,
+      scheduledTime,
+      timeType: entry.timeType ?? null,
       line,
+      category: asText(transport.category),
+      journeyNumber,
+      journeyId: entry.journeyId ?? null,
       origin,
       destination,
       platform,
-      delayMinutes: typeof delay === "number" ? delay : null,
-      raw: object,
-    });
-  }
-  const unique = new Map<string, Record<string, unknown>>();
-  for (const row of rows) {
-    const key = [row.time, row.line, row.origin, row.destination, row.platform].join("|");
+      delayMinutes,
+      cancelled: entry.type === "CANCELLED" || entry.type === "CANCELED",
+      entryType: entry.type ?? null,
+      raw: value,
+    };
+    const key = [id, actualTime, direction].join("|");
     if (!unique.has(key)) unique.set(key, row);
   }
-  return Array.from(unique.values()).sort((a, b) => String(a.time).localeCompare(String(b.time)));
+
+  return Array.from(unique.values()).sort((a, b) =>
+    String(a.time).localeCompare(String(b.time)),
+  );
 }
 
 function isKirchlengernCall(call: { name: string; stopPointRef?: string; stopPlaceRef?: string }) {
@@ -168,12 +221,12 @@ export async function GET(request: Request) {
     ? {
         source: "DB OpenBoards v1",
         departures: [
-          ...normalizeOpenBoards(openBoardsResult.value[0], "DB OpenBoards departures", start.getTime(), end.getTime()),
-          ...normalizeOpenBoards(openBoardsResult.value[2], "DB OpenBoards departures", start.getTime(), end.getTime()),
+          ...normalizeOpenBoards(openBoardsResult.value[0], "departures", start.getTime(), end.getTime()),
+          ...normalizeOpenBoards(openBoardsResult.value[2], "departures", start.getTime(), end.getTime()),
         ],
         arrivals: [
-          ...normalizeOpenBoards(openBoardsResult.value[1], "DB OpenBoards arrivals", start.getTime(), end.getTime()),
-          ...normalizeOpenBoards(openBoardsResult.value[3], "DB OpenBoards arrivals", start.getTime(), end.getTime()),
+          ...normalizeOpenBoards(openBoardsResult.value[1], "arrivals", start.getTime(), end.getTime()),
+          ...normalizeOpenBoards(openBoardsResult.value[3], "arrivals", start.getTime(), end.getTime()),
         ],
         raw: { departuresFirstWindow: openBoardsResult.value[0], arrivalsFirstWindow: openBoardsResult.value[1], departuresSecondWindow: openBoardsResult.value[2], arrivalsSecondWindow: openBoardsResult.value[3] },
       }
@@ -259,7 +312,7 @@ export async function GET(request: Request) {
     sources: { openBoards, timetable, mobilithek },
     notes: [
       "Read-only diagnostic: no Turso writes, no snapshot updates and no forecast/matching changes.",
-      "OpenBoards is requested in two consecutive 30-minute windows per direction (the documented default window), covering the next 60 minutes. Its raw payload is retained alongside best-effort normalized rows so the response schema can be verified against the live response.",
+      "OpenBoards is requested in two consecutive 30-minute windows per direction (the documented default window), covering the next 60 minutes. Rows are normalized from the documented top-level arrivals/departures arrays; line, journey, stop names, platform and schedule/forecast times are read from their explicit OpenBoards fields.",
       "Mobilithek rows are included only when an EstimatedCall explicitly identifies Kirchlengern by stop name or EVA reference; no route-name-only regional heuristic is used.",
       "Timetables and OpenBoards events are listed independently; cross-source journey matching is intentionally not inferred in this first comparison.",
     ],
