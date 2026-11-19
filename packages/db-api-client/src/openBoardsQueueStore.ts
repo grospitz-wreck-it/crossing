@@ -163,7 +163,7 @@ export async function finishOpenBoardsJob(
   finishedAt = new Date(),
 ): Promise<void> {
   const finishedIso = finishedAt.toISOString();
-  if (outcome.ok) {
+  if (outcome.ok === true) {
     await db.execute({
       sql: `
         UPDATE openboards_refresh_jobs
