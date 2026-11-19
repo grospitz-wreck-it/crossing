@@ -46,10 +46,13 @@ async function fetchXml(
   label: string,
   meta: { eva: string; requestType: string },
   cacheKind: "plan" | "fchg",
-  cacheSlot: string
+  cacheSlot: string,
+  useCache = true
 ): Promise<string> {
-  const cached = await getTimetableCache(cacheKind, meta.eva, cacheSlot);
-  if (cached !== null) return cached;
+  if (useCache) {
+    const cached = await getTimetableCache(cacheKind, meta.eva, cacheSlot);
+    if (cached !== null) return cached;
+  }
 
   await acquireDbApiSlot(meta);
 
@@ -70,10 +73,12 @@ async function fetchXml(
       );
     }
 
-    try {
-      await setTimetableCache(cacheKind, meta.eva, cacheSlot, text);
-    } catch (error) {
-      console.warn("[TIMETABLE CACHE WRITE FAILED]", error);
+    if (useCache) {
+      try {
+        await setTimetableCache(cacheKind, meta.eva, cacheSlot, text);
+      } catch (error) {
+        console.warn("[TIMETABLE CACHE WRITE FAILED]", error);
+      }
     }
 
     return text;
@@ -87,7 +92,7 @@ async function fetchXml(
   }
 }
 
-export async function fetchPlanXml(eva: string, hoursAhead = 4): Promise<string[]> {
+export async function fetchPlanXml(eva: string, hoursAhead = 4, useCache = true): Promise<string[]> {
   const now = Date.now();
   const requests = Array.from(
     { length: hoursAhead },
@@ -99,19 +104,21 @@ export async function fetchPlanXml(eva: string, hoursAhead = 4): Promise<string[
       `plan/${eva}/${d}/${h}`,
       { eva, requestType: "plan" },
       "plan",
-      `${d}-${h}`
+      `${d}-${h}`,
+      useCache
     );
   });
   return Promise.all(requests);
 }
 
-export async function fetchChangesXml(eva: string): Promise<string> {
+export async function fetchChangesXml(eva: string, useCache = true): Promise<string> {
   const slot = currentFchgSlot();
   return fetchXml(
     `${BASE_URL}/fchg/${eva}`,
     `fchg/${eva}`,
     { eva, requestType: "fchg" },
     "fchg",
-    slot
+    slot,
+    useCache
   );
 }
