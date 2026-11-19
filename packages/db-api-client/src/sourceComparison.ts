@@ -100,13 +100,17 @@ function compareEvidence(
 
   const leftLine = lineToken(observation.train.line);
   const rightLine = lineToken(evidence.line);
-  if (leftLine && rightLine && leftLine === rightLine) matchedBy.push("line");
+  if (leftLine && rightLine) {
+    if (leftLine !== rightLine) return null;
+    matchedBy.push("line");
+  }
 
   const delta = timeDeltaSeconds(
     observation.event.scheduledAt,
     evidence.scheduledAt,
   );
-  if (delta !== null && Math.abs(delta) <= 180) {
+  if (delta !== null) {
+    if (Math.abs(delta) > 180) return null;
     matchedBy.push("scheduled_time");
   }
 
