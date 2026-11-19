@@ -217,17 +217,31 @@ export async function GET(request: Request) {
     getMobilithekTrainRegistry(),
   ]);
 
+  const mergeOpenBoardsRows = (
+    first: Array<Record<string, unknown>>,
+    second: Array<Record<string, unknown>>,
+  ) => {
+    const unique = new Map<string, Record<string, unknown>>();
+    for (const row of [...first, ...second]) {
+      const key = [row.direction, row.id, row.time].join("|");
+      if (!unique.has(key)) unique.set(key, row);
+    }
+    return Array.from(unique.values()).sort((a, b) =>
+      String(a.time).localeCompare(String(b.time)),
+    );
+  };
+
   const openBoards = openBoardsResult.status === "fulfilled"
     ? {
         source: "DB OpenBoards v1",
-        departures: [
-          ...normalizeOpenBoards(openBoardsResult.value[0], "departures", start.getTime(), end.getTime()),
-          ...normalizeOpenBoards(openBoardsResult.value[2], "departures", start.getTime(), end.getTime()),
-        ],
-        arrivals: [
-          ...normalizeOpenBoards(openBoardsResult.value[1], "arrivals", start.getTime(), end.getTime()),
-          ...normalizeOpenBoards(openBoardsResult.value[3], "arrivals", start.getTime(), end.getTime()),
-        ],
+        departures: mergeOpenBoardsRows(
+          normalizeOpenBoards(openBoardsResult.value[0], "departures", start.getTime(), end.getTime()),
+          normalizeOpenBoards(openBoardsResult.value[2], "departures", start.getTime(), end.getTime()),
+        ),
+        arrivals: mergeOpenBoardsRows(
+          normalizeOpenBoards(openBoardsResult.value[1], "arrivals", start.getTime(), end.getTime()),
+          normalizeOpenBoards(openBoardsResult.value[3], "arrivals", start.getTime(), end.getTime()),
+        ),
         raw: { departuresFirstWindow: openBoardsResult.value[0], arrivalsFirstWindow: openBoardsResult.value[1], departuresSecondWindow: openBoardsResult.value[2], arrivalsSecondWindow: openBoardsResult.value[3] },
       }
     : { source: "DB OpenBoards v1", error: String(openBoardsResult.reason) };
