@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { fetchPlanXml, fetchChangesXml } from "../../../../../../packages/db-api-client/src/officialTimetableClient";
-import { mergeStationTimetable } from "../../../../../../packages/db-api-client/src/parseOfficialTimetable";
-import { getMobilithekTrainRegistry } from "../../../../../../packages/db-api-client/src/mobilithekTimetable";
+import { fetchPlanXml, fetchChangesXml } from "../../../../../../../packages/db-api-client/src/officialTimetableClient";
+import { mergeStationTimetable } from "../../../../../../../packages/db-api-client/src/parseOfficialTimetable";
+import { getMobilithekTrainRegistry } from "../../../../../../../packages/db-api-client/src/mobilithekTimetable";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
