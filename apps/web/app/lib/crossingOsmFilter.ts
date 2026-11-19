@@ -119,12 +119,99 @@ async function loadMappingCached(crossingId: string) {
   return value;
 }
 
+const CORRIDOR_PROFILE_VERSION = 1;
+
+type StoredCorridorProfile = {
+  version: number;
+  wayIds: string[];
+  nodePoints: Array<[string, GeoPoint]>;
+  adjacency: Array<[string, Array<{ to: string; distance: number; wayId: string }>]>;
+};
+
+function deserializeCorridorProfile(raw: unknown): CorridorGraph | null {
+  try {
+    const profile = typeof raw === "string" ? JSON.parse(raw) : raw;
+    if (!profile || profile.version !== CORRIDOR_PROFILE_VERSION ||
+        !Array.isArray(profile.wayIds) || !Array.isArray(profile.nodePoints) ||
+        !Array.isArray(profile.adjacency)) return null;
+    const nodePoints = new Map<string, GeoPoint>();
+    for (const entry of profile.nodePoints) {
+      if (!Array.isArray(entry) || entry.length !== 2) return null;
+      const point = entry[1];
+      if (!point || !Number.isFinite(Number(point.lat)) || !Number.isFinite(Number(point.lon))) return null;
+      nodePoints.set(String(entry[0]), { lat: Number(point.lat), lon: Number(point.lon) });
+    }
+    const adjacency = new Map<string, Array<{ to: string; distance: number; wayId: string }>>();
+    for (const entry of profile.adjacency) {
+      if (!Array.isArray(entry) || entry.length !== 2 || !Array.isArray(entry[1])) return null;
+      adjacency.set(String(entry[0]), entry[1].map((edge: any) => ({
+        to: String(edge.to), distance: Number(edge.distance), wayId: String(edge.wayId),
+      })));
+    }
+    if (!nodePoints.size || !adjacency.size) return null;
+    return { graph: { nodePoints, adjacency, wayIds: new Set(profile.wayIds.map(String)) }, wayIds: new Set(profile.wayIds.map(String)) };
+  } catch {
+    return null;
+  }
+}
+
+async function loadPreparedCorridorGraph(crossingId: string): Promise<CorridorGraph | null> {
+  try {
+    const result = await db.execute({
+      sql: `SELECT profile_json, profile_version FROM crossing_osm_corridors WHERE crossing_id = ? LIMIT 1`,
+      args: [crossingId],
+    });
+    const row: any = result.rows[0];
+    if (!row || Number(row.profile_version) !== CORRIDOR_PROFILE_VERSION || !row.profile_json) return null;
+    return deserializeCorridorProfile(row.profile_json);
+  } catch (error) {
+    // Older databases may not have received the profile migration yet.
+    console.warn(`[OSM PROFILE] crossing=${crossingId} prepared profile unavailable:`, error);
+    return null;
+  }
+}
+
+/**
+ * Explicit preparation hook for an admin/selection workflow. This is never
+ * called by the status endpoint; it performs the expensive graph expansion
+ * once and stores the resulting graph for later read-only matching.
+ */
+export async function prepareCrossingOsmProfile(crossingId: string) {
+  const corridor = await buildCorridorGraph(crossingId);
+  if (!corridor) return { ok: false as const, reason: "corridor-unavailable" };
+  const profile: StoredCorridorProfile = {
+    version: CORRIDOR_PROFILE_VERSION,
+    wayIds: [...corridor.wayIds],
+    nodePoints: [...corridor.graph.nodePoints.entries()],
+    adjacency: [...corridor.graph.adjacency.entries()],
+  };
+  const profileJson = JSON.stringify(profile);
+  await db.execute({
+    sql: `UPDATE crossing_osm_corridors
+      SET profile_json = ?, profile_version = ?, profile_built_at = datetime('now'), updated_at = datetime('now')
+      WHERE crossing_id = ?`,
+    args: [profileJson, CORRIDOR_PROFILE_VERSION, crossingId],
+  });
+  corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: corridor });
+  console.log(`[OSM PROFILE] prepared crossing=${crossingId} ways=${corridor.wayIds.size} nodes=${corridor.graph.nodePoints.size} bytes=${new TextEncoder().encode(profileJson).length}`);
+  return { ok: true as const, ways: corridor.wayIds.size, nodes: corridor.graph.nodePoints.size, bytes: new TextEncoder().encode(profileJson).length };
+}
+
 async function loadCorridorGraph(crossingId: string): Promise<CorridorGraph | null> {
   const cached = corridorGraphCache.get(crossingId);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   const pending = corridorGraphPromises.get(crossingId);
   if (pending) return pending;
-  const promise = buildCorridorGraph(crossingId).finally(() => corridorGraphPromises.delete(crossingId));
+  const promise = (async () => {
+    const prepared = await loadPreparedCorridorGraph(crossingId);
+    if (prepared) {
+      corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: prepared });
+      return prepared;
+    }
+    // Compatibility path for crossings not prepared yet. The explicit
+    // preparation workflow should populate the profile before broad rollout.
+    return buildCorridorGraph(crossingId);
+  })().finally(() => corridorGraphPromises.delete(crossingId));
   corridorGraphPromises.set(crossingId, promise);
   return promise;
 }
