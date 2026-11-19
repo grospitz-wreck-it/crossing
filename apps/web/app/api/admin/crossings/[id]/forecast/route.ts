@@ -83,11 +83,39 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     } catch (error) { stationResults.push({ role: "infrastructure-observation", ok: false, count: 0, error: error instanceof Error ? error.message : String(error), lineHints }); }
   } else if (!crossing.eva && storedThroughRules.length) {
     try {
+      const registryStarted = performance.now();
       const registry = await getMobilithekTrainRegistry();
+      diagnostics.registryFetchMs = Math.round(performance.now() - registryStarted);
+      diagnostics.registryTotal = registry.length;
+      for (const train of registry) { const category = String(train.category || "unknown"); diagnostics.categories[category] = (diagnostics.categories[category] || 0) + 1; }
       const scopedRegistry = lineHints.length ? registry.filter((train) => lineMatchesHints(train, lineHints)) : registry;
+      diagnostics.registryAfterLineFilter = scopedRegistry.length;
       for (const rule of storedThroughRules) {
+        const matchingStarted = performance.now();
         const station = String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || "").trim(); if (!station) continue;
-        for (const train of scopedRegistry) { if (!ruleAllowsTrain(rule, train, lineHints)) continue; if (!matchesCorridor(train.route || [], station, storedRouteStops)) continue; const call = mobilithekCallForStation(train, station); const observationTime = call?.actual || call?.planned; if (!observationTime) continue; addCandidate(trainsByKey, crossing, train, rule, station, new Date(observationTime.getTime() + Number(rule.fallbackOffsetSeconds || 0) * 1000), now, "through-rule"); }
+        let categoryPassed = 0, routeContainsStation = 0, corridorPassed = 0, callWithTime = 0;
+        const candidateCountBefore = trainsByKey.size;
+        for (const train of scopedRegistry) {
+          if (!ruleAllowsTrain(rule, train, lineHints)) continue;
+          categoryPassed += 1;
+          const route = train.route || [];
+          if (routeIndex(route, station) < 0) continue;
+          routeContainsStation += 1;
+          if (!matchesCorridor(route, station, storedRouteStops)) continue;
+          corridorPassed += 1;
+          const call = mobilithekCallForStation(train, station);
+          const observationTime = call?.actual || call?.planned;
+          if (!observationTime) continue;
+          callWithTime += 1;
+          const predictedTime = observationTime.getTime() + Number(rule.fallbackOffsetSeconds || 0) * 1000;
+          const before = trainsByKey.size;
+          addCandidate(trainsByKey, crossing, train, rule, station, new Date(predictedTime), now, "through-rule");
+          if (trainsByKey.size > before) diagnostics.candidateInsertions += 1;
+          else if (predictedTime <= now || predictedTime > now + 3 * 60 * 60 * 1000) diagnostics.candidateRejectionsOutsideWindow += 1;
+        }
+        const stationDiagnostic = { eva: String(rule.observationEva || ""), stationName: station, categories: Array.isArray(rule.categories) ? rule.categories : [], categoryPassed, routeContainsStation, corridorPassed, callWithTime, uniqueCandidatesAdded: trainsByKey.size - candidateCountBefore, matchingMs: Math.round(performance.now() - matchingStarted) };
+        diagnostics.stationChecks.push(stationDiagnostic);
+        diagnostics.matchingMs += stationDiagnostic.matchingMs;
         stationResults.push({ eva: String(rule.observationEva || ""), stationName: station, role: "rule", ok: true, count: scopedRegistry.length, lineHints });
       }
     } catch (error) { stationResults.push({ role: "rule", ok: false, count: 0, error: error instanceof Error ? error.message : String(error) }); }
