@@ -5,7 +5,21 @@ const dbToken = process.env.TURSO_AUTH_TOKEN;
 const db = dbUrl && dbToken ? createClient({ url: dbUrl, authToken: dbToken }) : null;
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
-function categories(value: unknown): string[] { if (Array.isArray(value)) return value.map(String).filter(Boolean); if (typeof value === "string") return value.split(/[\s,;]+/).map((v) => v.trim()).filter(Boolean); return []; }
+function categories(value: unknown, depth = 0): string[] {
+  if (depth > 12 || value == null) return [];
+  if (Array.isArray(value)) return value.flatMap((item) => categories(item, depth + 1));
+  if (typeof value !== "string") return [];
+  const text = value.trim();
+  if (!text) return [];
+  // Older edits accidentally JSON-encoded the category array multiple times.
+  if (text.startsWith("[") || text.startsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (parsed !== value) return categories(parsed, depth + 1);
+    } catch {}
+  }
+  return text.split(/[\\s,;]+/).map((item) => item.trim().replace(/^["'\\[]+|["'\\]]+$/g, "")).filter((item) => /^(ICE|IC|EC|RE|RB|S|U|TGV|RJ|NJ|EN|D|IR|FLX)$/i.test(item));
+}
 function requireDb() { if (!db) throw new Error("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN fehlen."); return db; }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
