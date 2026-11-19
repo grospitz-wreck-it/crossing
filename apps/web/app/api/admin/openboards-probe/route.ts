@@ -1,5 +1,8 @@
 import { db } from "../../../lib/db";
-import { fetchOpenBoardsForStations } from "@crossing/db-api-client";
+import {
+  fetchOpenBoardsForStations,
+  normalizeOpenBoardsBatches,
+} from "@crossing/db-api-client";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -143,6 +146,38 @@ export async function GET() {
       }),
     ]);
 
+    const normalized = normalizeOpenBoardsBatches([...arrivals, ...departures]);
+    const byJourney = new Map<string, typeof normalized>();
+    for (const observation of normalized) {
+      const list = byJourney.get(observation.journeyId) || [];
+      list.push(observation);
+      byJourney.set(observation.journeyId, list);
+    }
+    const normalizedJourneys = [...byJourney.entries()]
+      .map(([journeyId, observations]) => {
+        const first = observations[0];
+        return {
+          journeyId,
+          line: first.line,
+          category: first.category,
+          journeyNumber: first.journeyNumber,
+          originEva: first.originEva,
+          destinationEva: first.destinationEva,
+          routeEvas: first.routeEvas,
+          routeNames: first.routeNames,
+          observationCount: observations.length,
+          observations: observations.map((observation) => ({
+            evaNumber: observation.evaNumber,
+            direction: observation.direction,
+            eventTime: observation.eventTime,
+            scheduledTime: observation.scheduledTime || null,
+            timeType: observation.timeType,
+          })),
+        };
+      })
+      .sort((a, b) => b.observationCount - a.observationCount)
+      .slice(0, 60);
+
     const from = new Date(Date.now() - 5 * 60_000).toISOString();
     const to = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
     const likeClauses = allEvas.map(() => "calls_json LIKE ?").join(" OR ");
@@ -191,6 +226,8 @@ export async function GET() {
         crossings,
         arrivals: summarizeBatches(arrivals, "arrivals"),
         departures: summarizeBatches(departures, "departures"),
+        normalizedJourneyCount: byJourney.size,
+        normalizedJourneys,
         mobilithekSnapshot: {
           matchedRows: snapshotResult.rows.length,
           byEva: allEvas.map((eva) => ({
