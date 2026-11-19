@@ -121,14 +121,24 @@ export async function GET(request: Request) {
     Promise.all([
       fetchOpenBoardsBoard("departures", [eva], {
         timeStart: startIso,
-        timeEnd: endIso,
         maxViaStops: 10,
         maxEntriesPerTransportType: 100,
         languages: ["deu"],
       }),
       fetchOpenBoardsBoard("arrivals", [eva], {
         timeStart: startIso,
-        timeEnd: endIso,
+        maxViaStops: 10,
+        maxEntriesPerTransportType: 100,
+        languages: ["deu"],
+      }),
+      fetchOpenBoardsBoard("departures", [eva], {
+        timeStart: new Date(start.getTime() + 30 * 60 * 1000).toISOString(),
+        maxViaStops: 10,
+        maxEntriesPerTransportType: 100,
+        languages: ["deu"],
+      }),
+      fetchOpenBoardsBoard("arrivals", [eva], {
+        timeStart: new Date(start.getTime() + 30 * 60 * 1000).toISOString(),
         maxViaStops: 10,
         maxEntriesPerTransportType: 100,
         languages: ["deu"],
@@ -157,9 +167,15 @@ export async function GET(request: Request) {
   const openBoards = openBoardsResult.status === "fulfilled"
     ? {
         source: "DB OpenBoards v1",
-        departures: normalizeOpenBoards(openBoardsResult.value[0], "DB OpenBoards departures", start.getTime(), end.getTime()),
-        arrivals: normalizeOpenBoards(openBoardsResult.value[1], "DB OpenBoards arrivals", start.getTime(), end.getTime()),
-        raw: { departures: openBoardsResult.value[0], arrivals: openBoardsResult.value[1] },
+        departures: [
+          ...normalizeOpenBoards(openBoardsResult.value[0], "DB OpenBoards departures", start.getTime(), end.getTime()),
+          ...normalizeOpenBoards(openBoardsResult.value[2], "DB OpenBoards departures", start.getTime(), end.getTime()),
+        ],
+        arrivals: [
+          ...normalizeOpenBoards(openBoardsResult.value[1], "DB OpenBoards arrivals", start.getTime(), end.getTime()),
+          ...normalizeOpenBoards(openBoardsResult.value[3], "DB OpenBoards arrivals", start.getTime(), end.getTime()),
+        ],
+        raw: { departuresFirstWindow: openBoardsResult.value[0], arrivalsFirstWindow: openBoardsResult.value[1], departuresSecondWindow: openBoardsResult.value[2], arrivalsSecondWindow: openBoardsResult.value[3] },
       }
     : { source: "DB OpenBoards v1", error: String(openBoardsResult.reason) };
 
@@ -243,7 +259,7 @@ export async function GET(request: Request) {
     sources: { openBoards, timetable, mobilithek },
     notes: [
       "Read-only diagnostic: no Turso writes, no snapshot updates and no forecast/matching changes.",
-      "OpenBoards is requested for an explicit 60-minute timeWindow. Its raw payload is retained alongside best-effort normalized rows so the response schema can be verified against the live response.",
+      "OpenBoards is requested in two consecutive 30-minute windows per direction (the documented default window), covering the next 60 minutes. Its raw payload is retained alongside best-effort normalized rows so the response schema can be verified against the live response.",
       "Mobilithek rows are included only when an EstimatedCall explicitly identifies Kirchlengern by stop name or EVA reference; no route-name-only regional heuristic is used.",
       "Timetables and OpenBoards events are listed independently; cross-source journey matching is intentionally not inferred in this first comparison.",
     ],
