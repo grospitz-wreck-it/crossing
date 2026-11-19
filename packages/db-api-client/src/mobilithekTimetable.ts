@@ -607,12 +607,32 @@ export async function getMobilithekTrainDiagnostics() {
         let facilityConditions: number | undefined;
 
         let journeySamples: Array<Record<string, unknown>> | undefined;
+        let rawProductCategoryRefCounts: Record<string, number> | undefined;
+        let rawProductCategoryCounts: Record<string, number> | undefined;
+        let rawVehicleModeRefCounts: Record<string, number> | undefined;
+        let rawVehicleModeCounts: Record<string, number> | undefined;
+        let rawTrainTypeCounts: Record<string, number> | undefined;
 
         if (kind === "siri-journey") {
           const root = parser.parse(feed.body);
           const journeys = findAll(root, "EstimatedVehicleJourney");
           rawJourneyCount = journeys.length;
           rawCallCount = findAll(root, "EstimatedCall").length;
+          const countRawField = (key: string) => {
+            const counts: Record<string, number> = {};
+            for (const journey of journeys) {
+              const value = firstText(journey, [key]) || "(missing)";
+              counts[value] = (counts[value] || 0) + 1;
+            }
+            return Object.fromEntries(
+              Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 50),
+            );
+          };
+          rawProductCategoryRefCounts = countRawField("ProductCategoryRef");
+          rawProductCategoryCounts = countRawField("ProductCategory");
+          rawVehicleModeRefCounts = countRawField("VehicleModeRef");
+          rawVehicleModeCounts = countRawField("VehicleMode");
+          rawTrainTypeCounts = countRawField("TrainType");
           parsedEvents = parseBodyFromRoot(root);
           journeySamples = journeys.slice(0, 8).map((journey) => ({
             publishedLineName: firstText(journey, ["PublishedLineName"]) || null,
@@ -656,7 +676,13 @@ export async function getMobilithekTrainDiagnostics() {
           parsedEvents: parsedEvents.length,
           facilityConditions,
           categoryCounts,
-          // Raw SIRI product fields are exposed separately from inferred event categories.
+          // Complete raw-field distributions (top 50) are separate from inferred event categories.
+          rawProductCategoryRefCounts,
+          rawProductCategoryCounts,
+          rawVehicleModeRefCounts,
+          rawVehicleModeCounts,
+          rawTrainTypeCounts,
+          // Samples preserve source-level labels but never infer product class from substrings.
           journeySamples,
           // Samples preserve source-level labels but never infer product class
           // from substrings in technical IDs.
@@ -697,7 +723,7 @@ export async function getMobilithekTrainDiagnostics() {
   return {
     ok: true,
     mode: "read-only-per-subscription-diagnostics",
-    multiFeedVersion: "2026-11-19-feed-timing-v1",
+    multiFeedVersion: "2026-11-19-feed-timing-v2",
     configured: subscriptionIds.length,
     loaded: successful.length,
     failed: feeds.length - successful.length,
