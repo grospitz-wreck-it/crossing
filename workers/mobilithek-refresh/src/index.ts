@@ -18,6 +18,13 @@ export interface Env {
   MOBILITHEK_CLIENT_TEST: Fetcher;
 }
 
+// Production probe (2026-11-19): this feed returned zero demanded events
+// for all active crossings. Keep its ID in the cleanup list so old snapshot
+// rows from this source are removed on the next successful refresh.
+const RETIRED_TRAIN_SUBSCRIPTION_IDS: string[] = [
+  "1024488922196914176",
+];
+
 function getSubscriptionIds(env: Env): string[] {
   return [
     env.MOBILITHEK_SUBSCRIPTION_ID,
@@ -26,7 +33,12 @@ function getSubscriptionIds(env: Env): string[] {
     env.MOBILITHEK_SUBSCRIPTION_ID_4,
   ]
     .map((value) => value?.trim() || "")
-    .filter(Boolean);
+    .filter(
+      (value, index, values) =>
+        Boolean(value) &&
+        !RETIRED_TRAIN_SUBSCRIPTION_IDS.includes(value) &&
+        values.indexOf(value) === index,
+    );
 }
 
 const TEST_URL_8443 =
@@ -203,11 +215,16 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     );
   }
 
-  await writeSnapshot(demandedEvents, startedAt, {
-    subscriptionCount: result.subscriptionCount,
-    successful: result.successful,
-    failed: result.failed,
-  });
+  await writeSnapshot(
+    demandedEvents,
+    startedAt,
+    {
+      subscriptionCount: result.subscriptionCount,
+      successful: result.successful,
+      failed: result.failed,
+    },
+    [...subscriptionIds, ...RETIRED_TRAIN_SUBSCRIPTION_IDS],
+  );
 
   return {
     status: "success",
@@ -308,6 +325,7 @@ export default {
             mode: "read-only-probe",
             demandedCrossings: demand.length,
             subscriptions: subscriptionIds,
+            excludedSubscriptions: RETIRED_TRAIN_SUBSCRIPTION_IDS,
             relayConfig,
             probes,
             note: "No Turso snapshot writes were performed.",
@@ -318,6 +336,7 @@ export default {
           status: "ok",
           demandedCrossings: demand.length,
           subscriptions: getSubscriptionIds(env),
+          excludedSubscriptions: RETIRED_TRAIN_SUBSCRIPTION_IDS,
           relayConfig: {
             configured: Boolean(env.MOBILITHEK_RELAY_URL),
           },
