@@ -149,6 +149,7 @@ export async function writeSnapshot(
     successful: number;
     failed: number;
   },
+  processedSubscriptionIds?: string[],
 ) {
   const db = getDb();
   const refreshedAt = new Date().toISOString();
@@ -159,9 +160,14 @@ export async function writeSnapshot(
     incoming.set(row.id, row);
   }
 
-  // Only diff subscriptions processed by this refresh. The previous full-table
-  // scan pulled the entire snapshot into the Worker and was unnecessarily CPU-heavy.
-  const subscriptionIds = [...new Set(events.map(({ subscriptionId }) => subscriptionId))];
+  // Diff only sources processed by this refresh. Include feeds that were
+  // intentionally retired so their previously stored rows are removed as well.
+  const subscriptionIds = [
+    ...new Set(
+      processedSubscriptionIds ??
+        events.map(({ subscriptionId }) => subscriptionId),
+    ),
+  ];
   if (subscriptionIds.length === 0) return;
   const placeholders = subscriptionIds.map(() => "?").join(", ");
   const existingResult = await db.execute({
