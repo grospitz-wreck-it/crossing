@@ -157,8 +157,7 @@ function inferCategory(line: string, journey: any) {
   return normalizedLine.split(/\s+/)[0] || "";
 }
 
-export function parseBody(body: string): MobilithekTrainEvent[] {
-  let root: any; try { root = parser.parse(body); } catch { return []; }
+function parseBodyFromRoot(root: any): MobilithekTrainEvent[] {
   const journeys = findAll(root, "EstimatedVehicleJourney");
   const now = Date.now();
   const events: MobilithekTrainEvent[] = [];
@@ -265,6 +264,16 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
     events.push({ id: journeyRef, line: lineName, category: inferCategory(lineName, journey), journeyNumber: numberFrom(firstText(journey, ["VehicleJourneyName", "PublishedServiceName"]) || journeyRef), journeyRef, origin, destination, route, calls, actualTime, scheduledTime, delayMinutes, direction: firstText(journey, ["DirectionRef", "DirectionName"]) || "" });
   }
   return events;
+}
+
+export function parseBody(body: string): MobilithekTrainEvent[] {
+  let root: any;
+  try {
+    root = parser.parse(body);
+  } catch {
+    return [];
+  }
+  return parseBodyFromRoot(root);
 }
 
 // Classifies a feed purely from its raw bytes/content — same heuristic already proven in
@@ -597,12 +606,28 @@ export async function getMobilithekTrainDiagnostics() {
         let rawCallCount: number | undefined;
         let facilityConditions: number | undefined;
 
+        let journeySamples: Array<Record<string, unknown>> | undefined;
+
         if (kind === "siri-journey") {
           const root = parser.parse(feed.body);
           const journeys = findAll(root, "EstimatedVehicleJourney");
           rawJourneyCount = journeys.length;
           rawCallCount = findAll(root, "EstimatedCall").length;
-          parsedEvents = parseBody(feed.body);
+          parsedEvents = parseBodyFromRoot(root);
+          journeySamples = journeys.slice(0, 8).map((journey) => ({
+            publishedLineName: firstText(journey, ["PublishedLineName"]) || null,
+            lineRef: firstText(journey, ["LineRef"]) || null,
+            publishedServiceName: firstText(journey, ["PublishedServiceName"]) || null,
+            productCategoryRef: firstText(journey, ["ProductCategoryRef"]) || null,
+            productCategory: firstText(journey, ["ProductCategory"]) || null,
+            vehicleMode: firstText(journey, ["VehicleMode"]) || null,
+            vehicleModeRef: firstText(journey, ["VehicleModeRef"]) || null,
+            trainType: firstText(journey, ["TrainType"]) || null,
+            directionRef: firstText(journey, ["DirectionRef"]) || null,
+            origin: firstText(journey, ["OriginName", "OriginText"]) || null,
+            destination: firstText(journey, ["DestinationName", "DestinationText", "DestinationDisplay"]) || null,
+            callCount: findAll(journey, "EstimatedCall").length,
+          }));
         } else if (kind === "siri-facility") {
           facilityConditions = countFacilityStatuses(feed.body).total;
         } else if (kind === "gtfs-rt") {
@@ -631,6 +656,8 @@ export async function getMobilithekTrainDiagnostics() {
           parsedEvents: parsedEvents.length,
           facilityConditions,
           categoryCounts,
+          // Raw SIRI product fields are exposed separately from inferred event categories.
+          journeySamples,
           // Samples preserve source-level labels but never infer product class
           // from substrings in technical IDs.
           samples: parsedEvents.slice(0, 8).map((event) => ({
