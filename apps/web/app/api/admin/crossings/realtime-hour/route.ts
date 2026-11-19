@@ -275,14 +275,26 @@ export async function GET(request: Request) {
     ? (() => {
         const events = mobilithekResult.value.flatMap((train) => {
           const calls = train.calls.filter(isKirchlengernCall);
-          return calls.flatMap((call) => {
-            const planned = call.planned;
-            const actual = call.actual || call.planned;
+          return calls.flatMap((call) => ([
+            {
+              kind: "arrival" as const,
+              scheduled: call.plannedArrival,
+              actual: call.actualArrival || call.plannedArrival,
+            },
+            {
+              kind: "departure" as const,
+              scheduled: call.plannedDeparture,
+              actual: call.actualDeparture || call.plannedDeparture,
+            },
+          ]).flatMap(({ kind, scheduled, actual }) => {
+            // No directional timestamp means no directional evidence. In
+            // particular, never reuse an arrival time as a departure time.
             if (!actual) return [];
             const time = actual.getTime();
             if (time < start.getTime() || time > end.getTime()) return [];
             return [{
               id: train.id,
+              kind,
               line: train.line,
               category: train.category,
               journeyNumber: train.journeyNumber,
@@ -292,12 +304,12 @@ export async function GET(request: Request) {
               stationCall: call.name,
               stopPointRef: call.stopPointRef || null,
               stopPlaceRef: call.stopPlaceRef || null,
-              scheduledTime: planned?.toISOString() || null,
+              scheduledTime: scheduled?.toISOString() || null,
               actualTime: actual.toISOString(),
-              delayMinutes: planned ? Math.round((actual.getTime() - planned.getTime()) / 60000) : null,
+              delayMinutes: scheduled ? Math.round((actual.getTime() - scheduled.getTime()) / 60000) : null,
               direction: train.direction || null,
             }];
-          });
+          }));
         }).sort((a, b) => a.actualTime.localeCompare(b.actualTime));
         return {
           source: "Mobilithek live subscription",
@@ -337,22 +349,40 @@ export async function GET(request: Request) {
   });
 
   const timetableEvidence = timetableResult.status === "fulfilled"
-    ? timetableResult.value.map((event) => toTimetableEvidence({
-        id: event.id,
-        eva,
-        journeyNumber: event.journeyNumber,
-        line: event.line,
-        scheduledTime: event.scheduledTime.toISOString(),
-        actualTime: event.actualTime.toISOString(),
-        platform: event.platform,
-        cancelled: event.cancelled,
+    ? timetableResult.value.flatMap((event) => ([
+        {
+          kind: "arrival" as const,
+          scheduledTime: event.scheduledArrival,
+          actualTime: event.actualArrival,
+        },
+        {
+          kind: "departure" as const,
+          scheduledTime: event.scheduledDeparture,
+          actualTime: event.actualDeparture,
+        },
+      ]).flatMap(({ kind, scheduledTime, actualTime }) => {
+        // Use only direction-specific fields; event-level times are arrival-based
+        // and must not be reused for departures.
+        if (!scheduledTime && !actualTime) return [];
+        return [toTimetableEvidence({
+          id: event.id,
+          eva,
+          journeyNumber: event.journeyNumber,
+          line: event.line,
+          kind,
+          scheduledTime: scheduledTime?.toISOString() || null,
+          actualTime: actualTime?.toISOString() || null,
+          platform: event.platform,
+          cancelled: event.cancelled,
+        })];
       }))
     : [];
 
   const mobilithekEvidence = Array.isArray((mobilithek as any).events)
     ? (mobilithek as any).events.map((event: any) => toMobilithekEvidence({
         id: event.id,
-        stationEva: event.stopPointRef || event.stopPlaceRef || (event.stationCall === station ? eva : null),
+        kind: event.kind,
+        stationEva: event.stopPointRef === eva || event.stopPlaceRef === eva ? eva : null,
         journeyNumber: event.journeyNumber,
         line: event.line,
         scheduledTime: event.scheduledTime,
