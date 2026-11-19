@@ -1,4 +1,4 @@
-import { db } from "../../../../lib/db";
+import { db } from "../../../lib/db";
 import { fetchOpenBoardsForStations } from "@crossing/db-api-client";
 
 export const dynamic = "force-dynamic";
