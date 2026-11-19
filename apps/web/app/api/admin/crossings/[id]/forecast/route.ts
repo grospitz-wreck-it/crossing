@@ -41,14 +41,19 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const now = Date.now();
   const trainsByKey = new Map<string, any>();
   const stationResults: any[] = [];
-  const diagnostics: any = { mode: isInfrastructureForecast ? "infrastructure" : (!crossing.eva && storedThroughRules.length ? "through-rules" : "station-timetable"), registryTotal: 0, registryAfterLineFilter: 0, categories: {}, stationChecks: [], registryFetchMs: 0, matchingMs: 0, candidateInsertions: 0, candidateRejectionsOutsideWindow: 0 };
+  const diagnostics: any = { mode: isInfrastructureForecast ? "infrastructure" : (!crossing.eva && storedThroughRules.length ? "through-rules" : "station-timetable"), registryTotal: 0, registryAfterLineFilter: 0, categories: {}, relevantCategoryCounts: { ICE: 0, IC: 0, EC: 0 }, categorySamples: [], stationChecks: [], registryFetchMs: 0, matchingMs: 0, candidateInsertions: 0, candidateRejectionsOutsideWindow: 0 };
   if (isInfrastructureForecast) {
     try {
       const registryStarted = performance.now();
       const registry = await getMobilithekTrainRegistry();
       diagnostics.registryFetchMs = Math.round(performance.now() - registryStarted);
       diagnostics.registryTotal = registry.length;
-      for (const train of registry) { const category = String(train.category || "unknown"); diagnostics.categories[category] = (diagnostics.categories[category] || 0) + 1; }
+      for (const train of registry) {
+        const category = String(train.category || "unknown");
+        diagnostics.categories[category] = (diagnostics.categories[category] || 0) + 1;
+        for (const wanted of ["ICE", "IC", "EC"]) if (category.toUpperCase() === wanted || String(train.line || "").toUpperCase().includes(wanted)) diagnostics.relevantCategoryCounts[wanted] += 1;
+      }
+      diagnostics.categorySamples = registry.filter((train) => ["ICE", "IC", "EC"].some((wanted) => String(train.category || "").toUpperCase() === wanted || String(train.line || "").toUpperCase().includes(wanted))).slice(0, 12).map((train) => ({ line: train.line, category: train.category, journeyNumber: train.journeyNumber, route: (train.route || []).slice(0, 30), calls: (train.calls || []).slice(0, 30).map((call) => ({ name: call.name, planned: call.planned?.toISOString() || null, actual: call.actual?.toISOString() || null, stopPointRef: call.stopPointRef || null, stopPlaceRef: call.stopPlaceRef || null })) }));
       const scopedRegistry = registry.filter((train) => lineMatchesHints(train, lineHints));
       diagnostics.registryAfterLineFilter = scopedRegistry.length;
       const fallbackStations = (stationLinks.rows as any[]).map((row) => ({ observationEva: String(row.eva || ""), observationStation: String(row.station_name || row.eva || "") })).filter((rule) => rule.observationStation);
@@ -87,7 +92,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       const registry = await getMobilithekTrainRegistry();
       diagnostics.registryFetchMs = Math.round(performance.now() - registryStarted);
       diagnostics.registryTotal = registry.length;
-      for (const train of registry) { const category = String(train.category || "unknown"); diagnostics.categories[category] = (diagnostics.categories[category] || 0) + 1; }
+      for (const train of registry) {
+        const category = String(train.category || "unknown");
+        diagnostics.categories[category] = (diagnostics.categories[category] || 0) + 1;
+        for (const wanted of ["ICE", "IC", "EC"]) if (category.toUpperCase() === wanted || String(train.line || "").toUpperCase().includes(wanted)) diagnostics.relevantCategoryCounts[wanted] += 1;
+      }
+      diagnostics.categorySamples = registry.filter((train) => ["ICE", "IC", "EC"].some((wanted) => String(train.category || "").toUpperCase() === wanted || String(train.line || "").toUpperCase().includes(wanted))).slice(0, 12).map((train) => ({ line: train.line, category: train.category, journeyNumber: train.journeyNumber, route: (train.route || []).slice(0, 30), calls: (train.calls || []).slice(0, 30).map((call) => ({ name: call.name, planned: call.planned?.toISOString() || null, actual: call.actual?.toISOString() || null, stopPointRef: call.stopPointRef || null, stopPlaceRef: call.stopPlaceRef || null })) }));
       const scopedRegistry = lineHints.length ? registry.filter((train) => lineMatchesHints(train, lineHints)) : registry;
       diagnostics.registryAfterLineFilter = scopedRegistry.length;
       for (const rule of storedThroughRules) {
