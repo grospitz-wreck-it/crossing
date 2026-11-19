@@ -18,7 +18,7 @@ function isRelevantMobilithekTrain(train: Awaited<ReturnType<typeof getMobilithe
     .filter(Boolean).join(" ").toLocaleLowerCase("de");
   const hasRegionalStop = RELEVANT_STOPS.some((name) => routeText.includes(name));
   const category = String(train.category || "").toUpperCase();
-  const isRail = RAIL_CATEGORIES.has(category) || /^(ICE|EC|IC|IRE|RE|RB|RS|S)\\s?\\d/i.test(train.line);
+  const isRail = RAIL_CATEGORIES.has(category) || /^(ICE|EC|IC|IRE|RE|RB|RS|S)\s?\d/i.test(train.line);
   return hasRegionalStop && isRail;
 }
 
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const eva = (searchParams.get("eva") || DEFAULT_EVA).trim();
 
-  if (!/^\\d{5,8}$/.test(eva)) {
+  if (!/^\d{5,8}$/.test(eva)) {
     return NextResponse.json({ ok: false, error: "Invalid EVA number." }, { status: 400 });
   }
   if (!process.env.DB_CLIENT_ID || !process.env.DB_API_KEY) {
