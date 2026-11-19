@@ -191,15 +191,19 @@ export async function prepareCrossingOsmProfile(crossingId: string) {
     ] as [string, Array<[string, number, string]>]),
   };
   const profileJson = JSON.stringify(profile);
-  await db.execute({
+  const profileBytes = new TextEncoder().encode(profileJson).length;
+  const update = await db.execute({
     sql: `UPDATE crossing_osm_corridors
       SET profile_json = ?, profile_version = ?, profile_built_at = datetime('now'), updated_at = datetime('now')
       WHERE crossing_id = ?`,
     args: [profileJson, CORRIDOR_PROFILE_VERSION, crossingId],
   });
+  if (Number(update.rowsAffected || 0) < 1) {
+    return { ok: false as const, reason: "corridor-row-missing" };
+  }
   corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: corridor });
-  console.log(`[OSM PROFILE] prepared crossing=${crossingId} ways=${corridor.wayIds.size} nodes=${corridor.graph.nodePoints.size} bytes=${new TextEncoder().encode(profileJson).length}`);
-  return { ok: true as const, ways: corridor.wayIds.size, nodes: corridor.graph.nodePoints.size, bytes: new TextEncoder().encode(profileJson).length };
+  console.log(`[OSM PROFILE] prepared crossing=${crossingId} ways=${corridor.wayIds.size} nodes=${corridor.graph.nodePoints.size} bytes=${profileBytes}`);
+  return { ok: true as const, ways: corridor.wayIds.size, nodes: corridor.graph.nodePoints.size, bytes: profileBytes };
 }
 
 async function loadCorridorGraph(crossingId: string): Promise<CorridorGraph | null> {
