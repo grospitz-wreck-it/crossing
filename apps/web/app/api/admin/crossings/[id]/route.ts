@@ -12,11 +12,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id } = await params;
   try {
     const client = requireDb();
-    const result = await client.execute({ sql: `SELECT id,name,eva,lat,lon,confidence,status,source,observation_evas,context_evas,required_route_stops,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,created_at,updated_at FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+    const result = await client.execute({ sql: `SELECT id,name,eva,lat,lon,confidence,status,source,train_source_mode,observation_evas,context_evas,required_route_stops,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,created_at,updated_at FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
     const crossing: any = result.rows[0];
     if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
     const links = await client.execute({ sql: `SELECT id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }).catch(() => ({ rows: [] as any[] }));
-    return Response.json({ crossing: { ...crossing, observationEvas: jsonArray(crossing.observation_evas), contextEvas: jsonArray(crossing.context_evas), requiredRouteStops: jsonArray(crossing.required_route_stops), rules: jsonArray(crossing.rules), throughRules: jsonArray(crossing.through_rules), diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules) }, stationLinks: links.rows });
+    const stationLinks = links.rows.map((row: any) => { let parsed: unknown = row.categories; try { const value = JSON.parse(String(row.categories || '[]')); if (Array.isArray(value)) parsed = value; } catch {} return { ...row, categories: Array.isArray(parsed) ? parsed.map(String).join(',') : String(row.categories || '') }; });
+    return Response.json({ crossing: { ...crossing, observationEvas: jsonArray(crossing.observation_evas), contextEvas: jsonArray(crossing.context_evas), requiredRouteStops: jsonArray(crossing.required_route_stops), rules: jsonArray(crossing.rules), throughRules: jsonArray(crossing.through_rules), diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules) }, stationLinks });
   } catch (error) { console.error("Failed to load crossing:", error); return Response.json({ error: error instanceof Error ? error.message : "Übergang konnte nicht geladen werden." }, { status: 500 }); }
 }
 
@@ -27,7 +28,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const body = await request.json();
     const existing = await client.execute({ sql: `SELECT id FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
     if (!existing.rows.length) return Response.json({ error: "Crossing not found" }, { status: 404 });
-    const name = String(body.name ?? "").trim(), eva = String(body.eva ?? "").trim(), lat = Number(body.lat), lon = Number(body.lon), closeOffset = Number(body.closeOffsetSeconds), openOffset = Number(body.openOffsetSeconds), confidence = Number(body.confidence), status = body.status === "inactive" ? "inactive" : "active";
+    const name = String(body.name ?? "").trim(), eva = String(body.eva ?? "").trim(), lat = Number(body.lat), lon = Number(body.lon), closeOffset = Number(body.closeOffsetSeconds), openOffset = Number(body.openOffsetSeconds), confidence = Number(body.confidence), status = body.status === "inactive" ? "inactive" : "active", trainSourceMode = ["openboards","mobilithek","hybrid"].includes(String(body.trainSourceMode)) ? String(body.trainSourceMode) : "mobilithek";
     if (!name) return Response.json({ error: "Bitte einen Namen vergeben." }, { status: 400 });
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return Response.json({ error: "Ungültige Koordinaten." }, { status: 400 });
     if (!Number.isFinite(closeOffset) || !Number.isFinite(openOffset) || !Number.isFinite(confidence)) return Response.json({ error: "Ungültige Berechnungswerte." }, { status: 400 });
@@ -41,8 +42,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       observationEvas = body.stationLinks.map((link: any) => ({ eva: String(link.eva || "").trim(), role: String(link.role || "observation") })).filter((link: any) => link.eva && (link.role === "primary" || link.role === "observation")).map((link: any) => link.eva);
       contextEvas = body.stationLinks.map((link: any) => ({ eva: String(link.eva || "").trim(), role: String(link.role || "observation") })).filter((link: any) => link.eva && link.role === "anchor").map((link: any) => link.eva);
     }
-    const fields = [`name = ?`,`eva = ?`,`lat = ?`,`lon = ?`,`close_offset_seconds = ?`,`open_offset_seconds = ?`,`confidence = ?`,`status = ?`,`updated_at = datetime('now')`,...(observationEvas ? [`observation_evas = ?`] : []),...(contextEvas ? [`context_evas = ?`] : []),...(requiredRouteStops ? [`required_route_stops = ?`] : []),...(body.rules !== undefined ? [`rules = ?`] : []),...(body.throughRules !== undefined ? [`through_rules = ?`] : []),...(body.diversionRules !== undefined ? [`diversion_rules = ?`] : []),...(body.rerouteWatchRules !== undefined ? [`reroute_watch_rules = ?`] : [])];
-    const args: any[] = [name,eva,lat,lon,Math.round(closeOffset),Math.round(openOffset),confidence,status];
+    const fields = [`name = ?`,`eva = ?`,`lat = ?`,`lon = ?`,`close_offset_seconds = ?`,`open_offset_seconds = ?`,`confidence = ?`,`status = ?`,`train_source_mode = ?`,`updated_at = datetime('now')`,...(observationEvas ? [`observation_evas = ?`] : []),...(contextEvas ? [`context_evas = ?`] : []),...(requiredRouteStops ? [`required_route_stops = ?`] : []),...(body.rules !== undefined ? [`rules = ?`] : []),...(body.throughRules !== undefined ? [`through_rules = ?`] : []),...(body.diversionRules !== undefined ? [`diversion_rules = ?`] : []),...(body.rerouteWatchRules !== undefined ? [`reroute_watch_rules = ?`] : [])];
+    const args: any[] = [name,eva,lat,lon,Math.round(closeOffset),Math.round(openOffset),confidence,status,trainSourceMode];
     if (observationEvas) args.push(JSON.stringify(observationEvas)); if (contextEvas) args.push(JSON.stringify(contextEvas)); if (requiredRouteStops) args.push(JSON.stringify(requiredRouteStops)); if (body.rules !== undefined) args.push(JSON.stringify(body.rules ?? [])); if (body.throughRules !== undefined) args.push(JSON.stringify(body.throughRules ?? [])); if (body.diversionRules !== undefined) args.push(JSON.stringify(body.diversionRules ?? [])); if (body.rerouteWatchRules !== undefined) args.push(JSON.stringify(body.rerouteWatchRules ?? [])); args.push(id);
     await client.execute({ sql: `UPDATE crossings SET ${fields.join(", ")} WHERE id = ?`, args });
 
