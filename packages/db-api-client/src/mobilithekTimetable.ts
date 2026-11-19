@@ -16,6 +16,10 @@ type Call = {
   name: string;
   planned?: Date;
   actual?: Date;
+  plannedArrival?: Date;
+  actualArrival?: Date;
+  plannedDeparture?: Date;
+  actualDeparture?: Date;
   stopPointRef?: string;
   stopPlaceRef?: string;
 };
@@ -192,31 +196,28 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
       const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef"]) || "";
       const stopPointRef = firstText(call, ["StopPointRef"]);
       const stopPlaceRef = firstText(call, ["StopPlaceRef"]);
-      const planned = dateValue(call, ["AimedArrivalTime", "AimedDepartureTime", "PlannedArrivalTime", "PlannedDepartureTime"]);
-      let actual = dateValue(call, ["ExpectedArrivalTime", "ExpectedDepartureTime", "EstimatedArrivalTime", "EstimatedDepartureTime", "ActualArrivalTime", "ActualDepartureTime"]);
+      const plannedArrival = dateValue(call, ["AimedArrivalTime", "PlannedArrivalTime"]);
+      let actualArrival = dateValue(call, ["ExpectedArrivalTime", "EstimatedArrivalTime", "ActualArrivalTime"]);
+      const plannedDeparture = dateValue(call, ["AimedDepartureTime", "PlannedDepartureTime"]);
+      let actualDeparture = dateValue(call, ["ExpectedDepartureTime", "EstimatedDepartureTime", "ActualDepartureTime"]);
 
-      // SIRI can occasionally contain technically valid but obviously corrupt
-      // realtime timestamps (e.g. an actual time decades away from the
-      // scheduled time). Never turn those into huge delays.
-      if (actual && planned) {
-        const difference = Math.abs(actual.getTime() - planned.getTime());
-        const MAX_REASONABLE_DEVIATION_MS = 7 * 24 * 60 * 60 * 1000;
+      // Keep the legacy combined values for existing consumers, but retain
+      // arrival/departure timestamps separately for direction-safe diagnostics.
+      const planned = plannedArrival || plannedDeparture;
+      let actual = actualArrival || actualDeparture;
+      const MAX_REASONABLE_DEVIATION_MS = 7 * 24 * 60 * 60 * 1000;
+      const isPlausible = (candidate: Date | undefined, scheduled: Date | undefined) =>
+        !candidate || !scheduled ||
+        Math.abs(candidate.getTime() - scheduled.getTime()) <= MAX_REASONABLE_DEVIATION_MS;
 
-        if (difference > MAX_REASONABLE_DEVIATION_MS) {
-          console.warn(
-            "[Mobilithek] ignoring implausible actual timestamp",
-            JSON.stringify({
-              name,
-              planned: planned.toISOString(),
-              actual: actual.toISOString(),
-            }),
-          );
+      if (!isPlausible(actualArrival, plannedArrival)) actualArrival = undefined;
+      if (!isPlausible(actualDeparture, plannedDeparture)) actualDeparture = undefined;
+      if (!isPlausible(actual, planned)) actual = undefined;
 
-          actual = undefined;
-        }
-      }
-
-      const mapped = { name, planned, actual, stopPointRef, stopPlaceRef };
+      const mapped = {
+        name, planned, actual, plannedArrival, actualArrival,
+        plannedDeparture, actualDeparture, stopPointRef, stopPlaceRef,
+      };
       if (index < 2 && callIndex < 3) {
         console.log("[Mobilithek MAPPED EstimatedCall]", {
           journeyIndex: index,
@@ -227,6 +228,10 @@ export function parseBody(body: string): MobilithekTrainEvent[] {
             stopPlaceRef: mapped.stopPlaceRef,
             planned: mapped.planned?.toISOString(),
             actual: mapped.actual?.toISOString(),
+            plannedArrival: mapped.plannedArrival?.toISOString(),
+            actualArrival: mapped.actualArrival?.toISOString(),
+            plannedDeparture: mapped.plannedDeparture?.toISOString(),
+            actualDeparture: mapped.actualDeparture?.toISOString(),
           },
         });
       }
