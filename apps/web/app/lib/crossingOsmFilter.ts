@@ -124,8 +124,8 @@ const CORRIDOR_PROFILE_VERSION = 1;
 type StoredCorridorProfile = {
   version: number;
   wayIds: string[];
-  nodePoints: Array<[string, GeoPoint]>;
-  adjacency: Array<[string, Array<{ to: string; distance: number; wayId: string }>]>;
+  nodePoints: Array<[string, number, number]>;
+  adjacency: Array<[string, Array<[string, number, string]>]>;
 };
 
 function deserializeCorridorProfile(raw: unknown): CorridorGraph | null {
