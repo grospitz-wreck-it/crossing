@@ -42,6 +42,19 @@ const responseCache = new Map<
   string,
   { expiresAt: number; value: unknown }
 >();
+const MAX_CACHE_ENTRIES = 100;
+
+function pruneResponseCache() {
+  const now = Date.now();
+  for (const [key, entry] of responseCache) {
+    if (entry.expiresAt <= now) responseCache.delete(key);
+  }
+  while (responseCache.size > MAX_CACHE_ENTRIES) {
+    const oldestKey = responseCache.keys().next().value;
+    if (!oldestKey) break;
+    responseCache.delete(oldestKey);
+  }
+}
 const inFlight = new Map<string, Promise<unknown>>();
 
 function credentials() {
@@ -111,13 +124,13 @@ export async function fetchOpenBoardsBoard(
 
   const body = {
     stopPlaceOrStation: { evaNumbers },
-    timeWindow: { timeStart: options.timeStart || new Date().toISOString() },
+    // Stable within the short cache window so simultaneous/repeated callers\n    // share one board request instead of creating a new cache key every ms.\n    timeWindow: {\n      timeStart:\n        options.timeStart ||\n        new Date(Math.floor(Date.now() / CACHE_TTL_MS) * CACHE_TTL_MS).toISOString(),\n    },
     maxViaStops: options.maxViaStops ?? 5,
     maxEntriesPerTransportType: options.maxEntriesPerTransportType ?? 25,
     languages: options.languages ?? ["deu"],
   };
 
-  const key = cacheKey(direction, evaNumbers, body);
+  pruneResponseCache();\n  const key = cacheKey(direction, evaNumbers, body);
   const cached = responseCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
