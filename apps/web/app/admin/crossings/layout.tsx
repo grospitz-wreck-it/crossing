@@ -20,7 +20,7 @@ export default function CrossingsAdminLayout({ children }: { children: ReactNode
           <a href="/admin" className={styles.navItem}>⌂ <span>Dashboard</span></a>
           <a href="/admin/crossings" className={`${styles.navItem} ${active("/admin/crossings")}`}>◫ <span>Bahnübergänge</span></a>
           <div className={styles.navLabel}>DATEN</div>
-          <a href="/admin/crossings" className={styles.navItem}>⌁ <span>Prognosen</span></a>
+          <a href="/admin/crossings/forecasts" className={`${styles.navItem} ${active("/admin/crossings/forecasts")}`}>⌁ <span>Prognosen</span></a>
           <a href="/admin/crossings" className={styles.navItem}>▣ <span>DB-Stationen</span></a>
           <a href="/admin/crossings" className={styles.navItem}>▤ <span>Fahrpläne</span></a>
           <div className={styles.navLabel}>SYSTEM</div>
