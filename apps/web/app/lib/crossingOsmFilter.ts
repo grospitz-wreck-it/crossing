@@ -184,11 +184,11 @@ export async function prepareCrossingOsmProfile(crossingId: string) {
   const profile: StoredCorridorProfile = {
     version: CORRIDOR_PROFILE_VERSION,
     wayIds: [...corridor.wayIds],
-    nodePoints: [...corridor.graph.nodePoints.entries()].map(([id, point]) => [id, point.lat, point.lon]),
+    nodePoints: [...corridor.graph.nodePoints.entries()].map(([id, point]) => [id, point.lat, point.lon] as [string, number, number]),
     adjacency: [...corridor.graph.adjacency.entries()].map(([id, edges]) => [
       id,
-      edges.map((edge) => [edge.to, edge.distance, edge.wayId]),
-    ]),
+      edges.map((edge) => [edge.to, edge.distance, edge.wayId] as [string, number, string]),
+    ] as [string, Array<[string, number, string]>]),
   };
   const profileJson = JSON.stringify(profile);
   await db.execute({
