@@ -36,6 +36,7 @@ export type CanonicalStationObservation = {
 
 export type SupportingEvidence = {
   source: "db_timetables" | "mobilithek";
+  kind: "arrival" | "departure";
   sourceRecordId: string | null;
   stationEva: string | null;
   journeyNumber: string | null;
@@ -85,6 +86,7 @@ function compareEvidence(
   if (evidence.stationEva && evidence.stationEva !== observation.station.eva) {
     return null;
   }
+  if (evidence.kind !== observation.event.kind) return null;
 
   const matchedBy: EvidenceMatch["matchedBy"] = [];
   const leftNumber = observation.train.journeyNumber;
@@ -202,11 +204,13 @@ export function toTimetableEvidence(input: {
   line: unknown;
   scheduledTime: unknown;
   actualTime: unknown;
+  kind: "arrival" | "departure";
   platform: unknown;
   cancelled: unknown;
 }): SupportingEvidence {
   return {
     source: "db_timetables",
+    kind: input.kind,
     sourceRecordId: clean(input.id),
     stationEva: clean(input.eva),
     journeyNumber: clean(input.journeyNumber),
@@ -225,11 +229,13 @@ export function toMobilithekEvidence(input: {
   line: unknown;
   scheduledTime: unknown;
   actualTime: unknown;
+  kind: "arrival" | "departure";
   platform?: unknown;
   cancelled?: unknown;
 }): SupportingEvidence {
   return {
     source: "mobilithek",
+    kind: input.kind,
     sourceRecordId: clean(input.id),
     stationEva: clean(input.stationEva),
     journeyNumber: clean(input.journeyNumber),
