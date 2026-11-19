@@ -136,17 +136,19 @@ function deserializeCorridorProfile(raw: unknown): CorridorGraph | null {
         !Array.isArray(profile.adjacency)) return null;
     const nodePoints = new Map<string, GeoPoint>();
     for (const entry of profile.nodePoints) {
-      if (!Array.isArray(entry) || entry.length !== 2) return null;
-      const point = entry[1];
-      if (!point || !Number.isFinite(Number(point.lat)) || !Number.isFinite(Number(point.lon))) return null;
-      nodePoints.set(String(entry[0]), { lat: Number(point.lat), lon: Number(point.lon) });
+      if (!Array.isArray(entry) || entry.length !== 3 ||
+          !Number.isFinite(Number(entry[1])) || !Number.isFinite(Number(entry[2]))) return null;
+      nodePoints.set(String(entry[0]), { lat: Number(entry[1]), lon: Number(entry[2]) });
     }
     const adjacency = new Map<string, Array<{ to: string; distance: number; wayId: string }>>();
     for (const entry of profile.adjacency) {
       if (!Array.isArray(entry) || entry.length !== 2 || !Array.isArray(entry[1])) return null;
-      adjacency.set(String(entry[0]), entry[1].map((edge: any) => ({
-        to: String(edge.to), distance: Number(edge.distance), wayId: String(edge.wayId),
-      })));
+      const edges = entry[1].map((edge: any) => {
+        if (!Array.isArray(edge) || edge.length !== 3 ||
+            !Number.isFinite(Number(edge[1]))) throw new Error("Invalid corridor edge");
+        return { to: String(edge[0]), distance: Number(edge[1]), wayId: String(edge[2]) };
+      });
+      adjacency.set(String(entry[0]), edges);
     }
     if (!nodePoints.size || !adjacency.size) return null;
     return { graph: { nodePoints, adjacency, wayIds: new Set(profile.wayIds.map(String)) }, wayIds: new Set(profile.wayIds.map(String)) };
@@ -182,8 +184,11 @@ export async function prepareCrossingOsmProfile(crossingId: string) {
   const profile: StoredCorridorProfile = {
     version: CORRIDOR_PROFILE_VERSION,
     wayIds: [...corridor.wayIds],
-    nodePoints: [...corridor.graph.nodePoints.entries()],
-    adjacency: [...corridor.graph.adjacency.entries()],
+    nodePoints: [...corridor.graph.nodePoints.entries()].map(([id, point]) => [id, point.lat, point.lon]),
+    adjacency: [...corridor.graph.adjacency.entries()].map(([id, edges]) => [
+      id,
+      edges.map((edge) => [edge.to, edge.distance, edge.wayId]),
+    ]),
   };
   const profileJson = JSON.stringify(profile);
   await db.execute({
