@@ -50,3 +50,11 @@ export type {
   OpenBoardsQueueJob,
   OpenBoardsQueueDemand,
 } from "./openBoardsScheduler";
+
+export {
+  syncOpenBoardsQueue,
+  claimNextOpenBoardsJob,
+  reserveOpenBoardsRequestSlot,
+  finishOpenBoardsJob,
+} from "./openBoardsQueueStore";
+export type { ClaimedOpenBoardsJob } from "./openBoardsQueueStore";
