@@ -334,6 +334,9 @@ async function saveCrossingCorridor(crossingId, osmCrossingId, ways) {
       ON CONFLICT(crossing_id) DO UPDATE SET
         osm_crossing_id = excluded.osm_crossing_id,
         railway_way_ids_json = excluded.railway_way_ids_json,
+        profile_json = NULL,
+        profile_version = 0,
+        profile_built_at = NULL,
         updated_at = excluded.updated_at
     `,
     args: [
