@@ -130,8 +130,7 @@ export async function fetchOpenBoardsBoard(
     languages: options.languages ?? ["deu"],
   };
 
-  pruneResponseCache();
-  const key = cacheKey(direction, evaNumbers, body);
+  pruneResponseCache();\n  const key = cacheKey(direction, evaNumbers, body);
   const cached = responseCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
 
