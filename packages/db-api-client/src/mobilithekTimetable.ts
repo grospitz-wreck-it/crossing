@@ -574,121 +574,115 @@ export async function getMobilithekTrainRegistry(): Promise<MobilithekTrainEvent
 
 export async function getMobilithekTrainDiagnostics() {
   const subscriptionIds = getMobilithekSubscriptionIds();
-  const feeds: Array<{
-    index: number;
-    subscriptionId: string;
-    ok: boolean;
-    kind?: MobilithekFeedKind;
-    status?: number;
-    bodyLength?: number;
-    estimatedVehicleJourneys?: number;
-    estimatedCalls?: number;
-    parsedJourneys?: number;
-    facilityConditions?: number;
-    gtfsRtTripUpdates?: number;
-    hasS28?: boolean;
-    hasU76?: boolean;
-    error?: string;
-  }> = [];
-
+  const feeds: Array<Record<string, unknown>> = [];
   const BATCH_SIZE = 3;
 
   for (let offset = 0; offset < subscriptionIds.length; offset += BATCH_SIZE) {
     const batch = subscriptionIds.slice(offset, offset + BATCH_SIZE);
+    const results = await Promise.all(batch.map(async (subscriptionId, batchIndex) => {
+      const index = offset + batchIndex + 1;
+      const startedAt = performance.now();
+      let fetchMs = 0;
+      let parseMs = 0;
 
-    const results = await Promise.all(
-      batch.map(async (subscriptionId, batchIndex) => {
-        const index = offset + batchIndex + 1;
+      try {
+        const fetchStartedAt = performance.now();
+        const feed = await fetchFeed(subscriptionId);
+        fetchMs = Math.round(performance.now() - fetchStartedAt);
 
-        try {
-          const feed = await fetchFeed(subscriptionId);
-          const kind = classifyFeed(feed.bytes);
+        const parseStartedAt = performance.now();
+        const kind = classifyFeed(feed.bytes);
+        let parsedEvents: MobilithekTrainEvent[] = [];
+        let rawJourneyCount: number | undefined;
+        let rawCallCount: number | undefined;
+        let facilityConditions: number | undefined;
 
-          const base = {
-            index,
-            subscriptionId,
-            ok: true,
-            status: 200,
-            kind,
-            bodyLength: feed.body.length,
-          };
-
-          if (kind === "siri-journey") {
-            const root = parser.parse(feed.body);
-            const journeys = findAll(root, "EstimatedVehicleJourney");
-            const calls = findAll(root, "EstimatedCall");
-            const parsedJourneys = parseBody(feed.body);
-
-            return {
-              ...base,
-              estimatedVehicleJourneys: journeys.length,
-              estimatedCalls: calls.length,
-              parsedJourneys: parsedJourneys.length,
-              hasS28: /<LineRef>\s*(?:de:nrw:s28:|S28)\s*<\/LineRef>/i.test(feed.body),
-              hasU76: /<LineRef>\s*U76\s*<\/LineRef>/i.test(feed.body),
-            };
-          }
-
-          if (kind === "siri-facility") {
-            const stats = countFacilityStatuses(feed.body);
-            return { ...base, facilityConditions: stats.total };
-          }
-
-          if (kind === "gtfs-rt") {
-            const journeys = parseGtfsRtTripUpdates(feed.bytes);
-            return { ...base, gtfsRtTripUpdates: journeys.length };
-          }
-
-          return base;
-        } catch (error) {
-          return {
-            index,
-            subscriptionId,
-            ok: false,
-            error: error instanceof Error ? error.message : String(error),
-          };
+        if (kind === "siri-journey") {
+          const root = parser.parse(feed.body);
+          const journeys = findAll(root, "EstimatedVehicleJourney");
+          rawJourneyCount = journeys.length;
+          rawCallCount = findAll(root, "EstimatedCall").length;
+          parsedEvents = parseBody(feed.body);
+        } else if (kind === "siri-facility") {
+          facilityConditions = countFacilityStatuses(feed.body).total;
+        } else if (kind === "gtfs-rt") {
+          parsedEvents = parseGtfsRtTripUpdates(feed.bytes);
         }
-      }),
-    );
+        parseMs = Math.round(performance.now() - parseStartedAt);
 
+        const categoryCounts: Record<string, number> = {};
+        for (const event of parsedEvents) {
+          const category = String(event.category || "unknown");
+          categoryCounts[category] = (categoryCounts[category] || 0) + 1;
+        }
+
+        return {
+          index,
+          subscriptionId,
+          ok: true,
+          kind,
+          bytes: feed.bytes.byteLength,
+          bodyLength: feed.body.length,
+          fetchMs,
+          parseMs,
+          totalMs: Math.round(performance.now() - startedAt),
+          rawJourneyCount,
+          rawCallCount,
+          parsedEvents: parsedEvents.length,
+          facilityConditions,
+          categoryCounts,
+          // Samples preserve source-level labels but never infer product class
+          // from substrings in technical IDs.
+          samples: parsedEvents.slice(0, 8).map((event) => ({
+            line: event.line,
+            category: event.category,
+            journeyRef: event.journeyRef,
+            journeyNumber: event.journeyNumber,
+            origin: event.origin || null,
+            destination: event.destination || null,
+            route: event.route.slice(0, 12),
+          })),
+        };
+      } catch (error) {
+        return {
+          index,
+          subscriptionId,
+          ok: false,
+          fetchMs,
+          parseMs,
+          totalMs: Math.round(performance.now() - startedAt),
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    }));
     feeds.push(...results);
+  }
+
+  const successful = feeds.filter((feed) => feed.ok === true);
+  const categoryTotals: Record<string, number> = {};
+  for (const feed of successful) {
+    const counts = feed.categoryCounts as Record<string, number> | undefined;
+    for (const [category, count] of Object.entries(counts || {})) {
+      categoryTotals[category] = (categoryTotals[category] || 0) + Number(count || 0);
+    }
   }
 
   return {
     ok: true,
-    multiFeedVersion: "2026-08-21-multi-feed-type-aware-v4",
+    mode: "read-only-per-subscription-diagnostics",
+    multiFeedVersion: "2026-11-19-feed-timing-v1",
     configured: subscriptionIds.length,
-    loaded: feeds.filter((feed) => feed.ok).length,
-    failed: feeds.filter((feed) => !feed.ok).length,
-    feeds,
-    feedTypes: {
-      siriJourney: feeds.filter((feed) => feed.kind === "siri-journey").length,
-      siriFacility: feeds.filter((feed) => feed.kind === "siri-facility").length,
-      gtfsRt: feeds.filter((feed) => feed.kind === "gtfs-rt").length,
-      unknown: feeds.filter((feed) => feed.ok && feed.kind === "unknown").length,
-    },
+    loaded: successful.length,
+    failed: feeds.length - successful.length,
     totals: {
-      estimatedVehicleJourneys: feeds.reduce(
-        (sum, feed) => sum + (feed.estimatedVehicleJourneys || 0),
-        0,
-      ),
-      estimatedCalls: feeds.reduce(
-        (sum, feed) => sum + (feed.estimatedCalls || 0),
-        0,
-      ),
-      parsedJourneys: feeds.reduce(
-        (sum, feed) => sum + (feed.parsedJourneys || 0),
-        0,
-      ),
-      facilityConditions: feeds.reduce(
-        (sum, feed) => sum + (feed.facilityConditions || 0),
-        0,
-      ),
-      gtfsRtTripUpdates: feeds.reduce(
-        (sum, feed) => sum + (feed.gtfsRtTripUpdates || 0),
-        0,
-      ),
+      bytes: successful.reduce((sum, feed) => sum + Number(feed.bytes || 0), 0),
+      fetchMs: successful.reduce((sum, feed) => sum + Number(feed.fetchMs || 0), 0),
+      parseMs: successful.reduce((sum, feed) => sum + Number(feed.parseMs || 0), 0),
+      parsedEvents: successful.reduce((sum, feed) => sum + Number(feed.parsedEvents || 0), 0),
+      categoryCounts: categoryTotals,
     },
+    feeds,
+    note: "Read-only upstream fetch and parsing only. No Turso writes. GTFS-RT is reported as a feed type, not as a train product class.",
   };
 }
 export function filterMobilithekTrains(events: MobilithekTrainEvent[], categories: string[], observationStation: string, requiredRouteStops: string[]) { return events.filter((train) => { if (categories.length && !categories.some((category) => String(train.category).toUpperCase() === String(category).toUpperCase() || String(train.line).toUpperCase().includes(String(category).toUpperCase()))) return false; if (observationStation && !routeContains(train.route, observationStation)) return false; if (requiredRouteStops.length < 2) return true; const matched = requiredRouteStops.filter((stop) => routeContains(train.route, stop)); return matched.length >= 2; }); }
