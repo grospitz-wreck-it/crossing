@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS openboards_refresh_jobs (
   eva_numbers_json TEXT NOT NULL,
   interval_ms INTEGER NOT NULL DEFAULT 60000,
   priority INTEGER NOT NULL DEFAULT 100,
+  is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   next_due_at TEXT NOT NULL,
   last_started_at TEXT,
   last_finished_at TEXT,
