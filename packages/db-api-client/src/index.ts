@@ -36,3 +36,8 @@ export type {
   OpenBoardsOptions,
   OpenBoardsBatchResult,
 } from "./openBoardsClient";
+export {
+  normalizeOpenBoardsBatch,
+  normalizeOpenBoardsBatches,
+} from "./openBoardsNormalizer";
+export type { OpenBoardsStationObservation } from "./openBoardsNormalizer";
