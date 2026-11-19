@@ -25,3 +25,14 @@ export type { SnapshotThroughTrain } from "./getSnapshotThroughTrains";
 
 export { getSnapshotPrimaryTrains } from "./getSnapshotPrimaryTrains";
 export type { SnapshotPrimaryTrain } from "./getSnapshotPrimaryTrains";
+
+export {
+  fetchOpenBoardsBoard,
+  fetchOpenBoardsForStations,
+  clearOpenBoardsMemoryCache,
+} from "./openBoardsClient";
+export type {
+  OpenBoardsDirection,
+  OpenBoardsOptions,
+  OpenBoardsBatchResult,
+} from "./openBoardsClient";
