@@ -315,8 +315,8 @@ export async function GET(request: Request) {
     ...(Array.isArray((openBoards as any).arrivals) ? (openBoards as any).arrivals : []),
   ];
 
-  const canonicalObservations = openBoardsRows
-    .map((row: any) => toCanonicalOpenBoardsObservation({
+  const canonicalObservations = openBoardsRows.flatMap((row: any) => {
+    const observation = toCanonicalOpenBoardsObservation({
       id: row.id,
       eva,
       direction: row.direction,
@@ -332,8 +332,9 @@ export async function GET(request: Request) {
       platform: row.platform,
       cancelled: row.cancelled,
       raw: row.raw,
-    }))
-    .filter((observation: any) => Boolean(observation));
+    });
+    return observation ? [observation] : [];
+  });
 
   const timetableEvidence = timetableResult.status === "fulfilled"
     ? timetableResult.value.map((event) => toTimetableEvidence({
