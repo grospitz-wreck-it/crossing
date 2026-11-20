@@ -21,6 +21,7 @@ Secrets:
 - `TURSO_AUTH_TOKEN`
 - `DB_OPENBOARDS_CLIENT_ID`
 - `DB_OPENBOARDS_API_KEY`
+- `OPENBOARDS_RUN_TOKEN` (optional; enables the protected manual `/run` endpoint)
 
 Optional variables:
 - `OPENBOARDS_BATCH_SIZE` (default 5, maximum 20)
@@ -44,8 +45,8 @@ npx wrangler deploy --config workers/openboards-refresh/wrangler.jsonc
 
 `GET /health` is a read-only health response. `GET /run` performs a refresh
 and writes only to the OpenBoards queue, observations and run-log tables.
-Do not expose `/run` publicly without protecting it if the Worker is deployed
-with a public route.
+The manual `/run` endpoint is disabled unless `OPENBOARDS_RUN_TOKEN` is set
+and the caller sends `Authorization: Bearer <token>`.
 
 ## Demand cohorts
 
