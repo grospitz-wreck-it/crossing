@@ -1,35 +1,49 @@
-import { readStations } from "db-stations";
+import fs from "node:fs";
+import path from "node:path";
 
 export const dynamic = "force-dynamic";
 
-let stationCache: Array<{ eva: string; name: string; ril100?: string; lat: number; lon: number; city?: string; zipcode?: string }> | null = null;
-let stationCachePromise: Promise<typeof stationCache> | null = null;
+type NearbyStation = {
+  eva: string;
+  name: string;
+  ril100?: string;
+  lat: number;
+  lon: number;
+  city?: string;
+  zipcode?: string;
+};
 
-async function getStations() {
+let stationCache: NearbyStation[] | null = null;
+
+function getStations(): NearbyStation[] {
   if (stationCache) return stationCache;
-  if (!stationCachePromise) {
-    stationCachePromise = (async () => {
-      const stations: NonNullable<typeof stationCache> = [];
-      for await (const station of readStations()) {
-        const lat = Number(station.location?.latitude);
-        const lon = Number(station.location?.longitude);
-        const eva = String(station.id || "").trim();
-        if (!eva || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-        stations.push({
-          eva,
-          name: String(station.name || eva),
-          ril100: station.ril100 ? String(station.ril100) : undefined,
-          lat,
-          lon,
-          city: station.address?.city ? String(station.address.city) : undefined,
-          zipcode: station.address?.zipcode ? String(station.address.zipcode) : undefined,
-        });
-      }
-      stationCache = stations;
-      return stations;
-    })();
+
+  const file = path.join(process.cwd(), "data", "db-stations.ndjson");
+  const raw = fs.readFileSync(file, "utf8");
+  const stations: NearbyStation[] = [];
+
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    const station = JSON.parse(line);
+    const lat = Number(station.location?.latitude);
+    const lon = Number(station.location?.longitude);
+    const eva = String(station.id || "").trim();
+
+    if (!eva || !Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    stations.push({
+      eva,
+      name: String(station.name || eva),
+      ril100: station.ril100 ? String(station.ril100) : undefined,
+      lat,
+      lon,
+      city: station.address?.city ? String(station.address.city) : undefined,
+      zipcode: station.address?.zipcode ? String(station.address.zipcode) : undefined,
+    });
   }
-  return stationCachePromise;
+
+  stationCache = stations;
+  return stations;
 }
 
 function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
@@ -51,12 +65,17 @@ export async function GET(request: Request) {
     return Response.json({ error: "Ungültige Koordinaten." }, { status: 400 });
   }
 
-  const stations = await getStations();
-  const nearby = stations
-    .map((station) => ({ ...station, distanceKm: distanceKm(lat, lon, station.lat, station.lon) }))
-    .filter((station) => station.distanceKm <= radiusKm)
-    .sort((a, b) => a.distanceKm - b.distanceKm)
-    .slice(0, limit);
+  try {
+    const stations = getStations();
+    const nearby = stations
+      .map((station) => ({ ...station, distanceKm: distanceKm(lat, lon, station.lat, station.lon) }))
+      .filter((station) => station.distanceKm <= radiusKm)
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .slice(0, limit);
 
-  return Response.json({ source: "db-stations", count: nearby.length, radiusKm, stations: nearby });
+    return Response.json({ source: "db-stations", count: nearby.length, radiusKm, stations: nearby });
+  } catch (error) {
+    console.error("DB station catalogue unavailable:", error);
+    return Response.json({ error: "Bahnhofskatalog ist im Deployment nicht verfügbar." }, { status: 503 });
+  }
 }
