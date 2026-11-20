@@ -13,9 +13,9 @@ function parseEvas(value: unknown): string[] {
 }
 
 export async function GET(request: Request) {
-  // Explicit opt-in: this diagnostic page is invisible until enabled in the
-  // Vercel Preview environment. It never writes to any table.
-  if (process.env.OPENBOARDS_APP_TEST_MODE !== "true") {
+  // Available only on Vercel Preview. Production stays hard-disabled.
+  // This endpoint is read-only and remains behind the existing admin middleware.
+  if (process.env.VERCEL_ENV !== "preview" || process.env.OPENBOARDS_APP_TEST_MODE === "false") {
     return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   }
 
