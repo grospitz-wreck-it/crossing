@@ -95,6 +95,20 @@ async function main() {
         observed_at = excluded.observed_at,
         expires_at = excluded.expires_at,
         updated_at = excluded.updated_at
+      WHERE openboards_observations.event_time IS NOT excluded.event_time
+         OR openboards_observations.scheduled_time IS NOT excluded.scheduled_time
+         OR openboards_observations.time_type IS NOT excluded.time_type
+         OR openboards_observations.line IS NOT excluded.line
+         OR openboards_observations.category IS NOT excluded.category
+         OR openboards_observations.journey_number IS NOT excluded.journey_number
+         OR openboards_observations.origin_eva IS NOT excluded.origin_eva
+         OR openboards_observations.destination_eva IS NOT excluded.destination_eva
+         OR openboards_observations.via_evas_json IS NOT excluded.via_evas_json
+         OR openboards_observations.route_evas_json IS NOT excluded.route_evas_json
+         OR openboards_observations.route_names_json IS NOT excluded.route_names_json
+         OR openboards_observations.platform IS NOT excluded.platform
+         OR openboards_observations.cancelled IS NOT excluded.cancelled
+         OR julianday(excluded.observed_at) - julianday(openboards_observations.observed_at) >= (10.0 / 1440.0)
     `;
     const observationArgs = [
       observation.key, observation.journey, observation.eva, observation.direction,
@@ -112,7 +126,13 @@ async function main() {
     observationArgs[18] = "2026-11-20T11:02:00.000Z";
     observationArgs[19] = refreshedAt;
     result = await execute({ sql: upsertSql, args: observationArgs });
-    assert(result.rowsAffected === 1, "Refresh UPSERT did not update the existing observation");
+    assert(result.rowsAffected === 0, "Unchanged observation should not be rewritten on every poll");
+    const throttledAt = "2026-11-20T10:12:00.000Z";
+    observationArgs[17] = throttledAt;
+    observationArgs[18] = "2026-11-20T11:12:00.000Z";
+    observationArgs[19] = throttledAt;
+    result = await execute({ sql: upsertSql, args: observationArgs });
+    assert(result.rowsAffected === 1, "Observation freshness should be refreshed after the 10-minute write throttle");
     metrics.observationsUpdated += result.rowsAffected;
 
     await execute({
@@ -140,12 +160,8 @@ async function main() {
     assert(result.rowsAffected === 1, "Pruning should delete only the stale observation for the requested EVA");
     metrics.observationsDeleted += result.rowsAffected;
 
-    await execute({
-      sql: `INSERT INTO openboards_refresh_runs
-        (job_key, direction, eva_numbers_json, requested_at, completed_at, status, observation_count)
-        VALUES (?, ?, ?, ?, ?, 'success', ?)`,
-      args: [claimed.jobKey, claimed.direction, JSON.stringify(claimed.evaNumbers), stamp, refreshedAt, 1],
-    });
+    // Successful timestamps are retained on the queue row; the run log is
+    // reserved for failures so normal polling does not append permanent rows.
 
     await finishOpenBoardsJob(db, claimed, { ok: true }, new Date(refreshedAt));
     const queueState = await db.execute({
@@ -165,7 +181,7 @@ async function main() {
       queueJobsCreated: jobs.length,
       requestSlotSpacingMs: secondSlot - firstSlot,
       observationsRemaining: Number(observationCount.rows[0].count),
-      successfulRunLogs: 1,
+      successfulRunLogs: 0,
     }, null, 2));
   } finally {
     db.close();
