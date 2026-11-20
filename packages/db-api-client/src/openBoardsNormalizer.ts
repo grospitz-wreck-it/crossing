@@ -10,6 +10,7 @@ import type { OpenBoardsDirection, OpenBoardsBatchResult } from "./openBoardsCli
 
 export type OpenBoardsStationObservation = {
   source: "openboards";
+  observedAt?: string;
   journeyId: string;
   evaNumber: string;
   direction: OpenBoardsDirection;
