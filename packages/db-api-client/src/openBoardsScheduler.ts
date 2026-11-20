@@ -82,25 +82,30 @@ export function buildOpenBoardsQueueJobs(
     }
   }
 
-  const allEvas = [...evaMeta.keys()].sort((a, b) => a.localeCompare(b, "en"));
-  const jobs: OpenBoardsQueueJob[] = [];
+  const groups = new Map<number, string[]>();
+  for (const [eva, meta] of evaMeta) {
+    const group = groups.get(meta.priority) || [];
+    group.push(eva);
+    groups.set(meta.priority, group);
+  }
 
-  for (const direction of ["arrivals", "departures"] as const) {
-    for (const batch of chunks(allEvas, batchSize)) {
-      const meta = batch.reduce(
-        (acc, eva) => ({
-          intervalMs: Math.min(acc.intervalMs, evaMeta.get(eva)!.intervalMs),
-          priority: Math.min(acc.priority, evaMeta.get(eva)!.priority),
-        }),
-        { intervalMs: Number.MAX_SAFE_INTEGER, priority: Number.MAX_SAFE_INTEGER },
-      );
-      jobs.push({
-        jobKey: stableJobKey(direction, batch),
-        direction,
-        evaNumbers: batch,
-        intervalMs: meta.intervalMs,
-        priority: meta.priority,
-      });
+  const jobs: OpenBoardsQueueJob[] = [];
+  for (const [priority, groupEvas] of [...groups.entries()].sort((a, b) => a[0] - b[0])) {
+    const orderedEvas = groupEvas.sort((a, b) => a.localeCompare(b, "en"));
+    for (const direction of ["arrivals", "departures"] as const) {
+      for (const batch of chunks(orderedEvas, batchSize)) {
+        const intervalMs = batch.reduce(
+          (minimum, eva) => Math.min(minimum, evaMeta.get(eva)!.intervalMs),
+          Number.MAX_SAFE_INTEGER,
+        );
+        jobs.push({
+          jobKey: stableJobKey(direction, batch),
+          direction,
+          evaNumbers: batch,
+          intervalMs,
+          priority,
+        });
+      }
     }
   }
 
