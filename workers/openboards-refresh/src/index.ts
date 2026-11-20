@@ -114,7 +114,7 @@ async function loadDemand(
 
   const [crossingsResult, catalogResult] = await Promise.all([
     db.execute(`
-      SELECT c.id, c.observation_evas, c.reference_stations, c.through_rules
+      SELECT c.id, c.name, c.observation_evas, c.reference_stations, c.through_rules
       FROM crossings c
       WHERE c.status = 'active'
         AND (
@@ -169,7 +169,7 @@ async function loadDemand(
 
     // Keep configured EVAs even if the optional station catalogue has no name for them.
     const stations = [...evas].map((eva) => stationByEva.get(eva) || { eva, name: eva });
-    const isCore = stations.some((station) => isOwlStation(station.name));
+    const isCore = isOwlStation(String(row.name || "")) || stations.some((station) => isOwlStation(station.name));
     demandByCrossing.set(crossingId, {
       crossingId,
       evaNumbers: stations.map((station) => station.eva),
@@ -245,7 +245,21 @@ async function persistObservations(
         cancelled = excluded.cancelled,
         observed_at = excluded.observed_at,
         expires_at = excluded.expires_at,
-        updated_at = excluded.updated_at`,
+        updated_at = excluded.updated_at
+      WHERE openboards_observations.event_time IS NOT excluded.event_time
+         OR openboards_observations.scheduled_time IS NOT excluded.scheduled_time
+         OR openboards_observations.time_type IS NOT excluded.time_type
+         OR openboards_observations.line IS NOT excluded.line
+         OR openboards_observations.category IS NOT excluded.category
+         OR openboards_observations.journey_number IS NOT excluded.journey_number
+         OR openboards_observations.origin_eva IS NOT excluded.origin_eva
+         OR openboards_observations.destination_eva IS NOT excluded.destination_eva
+         OR openboards_observations.via_evas_json IS NOT excluded.via_evas_json
+         OR openboards_observations.route_evas_json IS NOT excluded.route_evas_json
+         OR openboards_observations.route_names_json IS NOT excluded.route_names_json
+         OR openboards_observations.platform IS NOT excluded.platform
+         OR openboards_observations.cancelled IS NOT excluded.cancelled
+         OR julianday(excluded.observed_at) - julianday(openboards_observations.observed_at) >= (10.0 / 1440.0)`,
       args: [
         observationKey, item.journeyId, item.evaNumber, item.direction,
         eventTime.toISOString(), item.scheduledTime || null, item.timeType,
@@ -258,13 +272,8 @@ async function persistObservations(
   }
 
   await db.batch(statements, "write");
-  await db.execute({
-    sql: `INSERT INTO openboards_refresh_runs
-      (job_key, direction, eva_numbers_json, requested_at, completed_at, status, observation_count)
-      VALUES (?, ?, ?, ?, ?, 'success', ?)`,
-    args: [jobKey, direction, JSON.stringify(evas), observedIso, new Date().toISOString(), validObservations.length],
-  });
-
+  // Successful run timestamps/counts live on the queue row. Keep the
+  // append-only run log for failures only to avoid one permanent row per poll.
 }
 
 async function recordFailure(
