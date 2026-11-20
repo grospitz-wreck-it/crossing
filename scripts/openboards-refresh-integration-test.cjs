@@ -47,7 +47,7 @@ async function main() {
     const syncBefore = metrics.changedRows;
     await syncOpenBoardsQueue(db, jobs, "2026-11-20T10:00:00.000Z");
     metrics.queueSyncChangedRows += metrics.changedRows - syncBefore;
-    assert(jobs.length === 4, "Expected two EVA batches for each direction");
+    assert(jobs.length === 2, "Expected one deduplicated EVA batch for each direction");
 
     const unchangedBefore = metrics.changedRows;
     await syncOpenBoardsQueue(db, jobs, "2026-11-20T10:00:01.000Z");
