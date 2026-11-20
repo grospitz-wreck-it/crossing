@@ -44,7 +44,7 @@ const snapshotDb = process.env.TURSO_DATABASE_URL && process.env.TURSO_AUTH_TOKE
   ? createClient({ url: process.env.TURSO_DATABASE_URL, authToken: process.env.TURSO_AUTH_TOKEN })
   : null;
 
-export async function getThroughTrains(crossing:Crossing):Promise<ThroughTrain[]>{
+export async function getThroughTrains(crossing:Crossing, options: { snapshotOnly?: boolean } = {}):Promise<ThroughTrain[]>{
   // Production path: consume the compact worker snapshot first. This keeps
   // user-facing requests off the Mobilithek mTLS feed and makes all crossings
   // share the same refresh cadence. Direct Mobilithek/DB fallback remains for
@@ -64,6 +64,14 @@ export async function getThroughTrains(crossing:Crossing):Promise<ThroughTrain[]
     } catch (error) {
       console.warn("Mobilithek snapshot through-train lookup failed; falling back", error);
     }
+  }
+
+  // User-facing status requests must never load the full Mobilithek registry.
+  // A missing snapshot is reported as no through-train candidates; background
+  // refresh is responsible for replenishing the snapshot.
+  if (options.snapshotOnly) {
+    console.warn(`[getThroughTrains] snapshot-only: keine passenden Snapshot-Züge für ${crossing.id}`);
+    return [];
   }
 
   const rules=(crossing.throughRules?.length?crossing.throughRules:crossing.observationEvas.map((eva:string)=>({observationEva:eva,observationStation:eva,categories:[],trackDistanceMeters:0,fallbackOffsetSeconds:300,direction:"unknown"}))) as any[];try{const registry=await getMobilithekTrainRegistry();const dynamicStops=rules.length?[]:Array.from(new Set([...(await discoverTransitStops(crossing)),...crossingNameCandidates(crossing)]));const candidates=buildMobilithekCandidates(registry,crossing,dynamicStops);if(candidates.length)return candidates;}catch(error){console.warn("Mobilithek through-train registry unavailable; falling back to DB Timetables API",error);}if(!rules.length)return[];const uniqueEvas=Array.from(new Set(rules.map(rule=>String(rule.observationEva).trim()).filter(Boolean)));const timetableByEva=new Map<string,OfficialTrainEvent[]>();await Promise.all(uniqueEvas.map(async eva=>{try{timetableByEva.set(eva,await getStationTimetable(eva,THROUGH_TIMETABLE_HOURS));}catch(error){console.error(`getThroughTrains: Timetable für ${eva} fehlgeschlagen`,error);}}));const candidates:ThroughTrain[]=[];const lineHints=lineHintsForCrossing(crossing);for(const rule of rules){const events=timetableByEva.get(String(rule.observationEva).trim())||[];for(const train of events){if(train.cancelled||!ruleAllowsTrain(rule,train as any,lineHints))continue;const route=train.route||[];if(!matchesOsmCorridor(route,rule.observationStation,crossing.requiredRouteStops||[],isLocalTransitTrain(train as any)))continue;const expectedDirection=directionForRoute(route,rule.observationStation,crossing.requiredRouteStops||[]);if(rule.direction!=="unknown"&&expectedDirection!=="unknown"&&rule.direction!==expectedDirection)continue;const crossingTime=new Date(train.actualTime.getTime()+rule.fallbackOffsetSeconds*1000).toISOString();candidates.push({type:"through",line:train.line,category:train.category,journeyNumber:train.journeyNumber,destination:train.destination,origin:train.origin,route,delayMinutes:train.delayMinutes,observationEva:rule.observationEva,observationStation:rule.observationStation,observationActualTime:train.actualTime.toISOString(),fallbackOffsetSeconds:rule.fallbackOffsetSeconds,trackDistanceMeters:rule.trackDistanceMeters,direction:rule.direction==="unknown"?expectedDirection:rule.direction,crossingTime,detection:"official-route"});}}const byTrain=new Map<string,ThroughTrain[]>();for(const candidate of candidates){const key=trainKey(candidate),list=byTrain.get(key)||[];list.push(candidate);byTrain.set(key,list);}for(const list of byTrain.values()){if(list.length<2)continue;const sorted=[...list].sort((a,b)=>Date.parse(a.observationActualTime)-Date.parse(b.observationActualTime));for(let i=0;i<sorted.length-1;i++){const interpolated=interpolateCrossingTime(sorted[i],sorted[i+1]);if(!interpolated)continue;for(const candidate of list){candidate.crossingTime=interpolated;candidate.detection="official-route-time-anchored";}break;}}return Array.from(new Map(candidates.map(train=>[`${train.category}-${train.journeyNumber}`,train])).values());}
