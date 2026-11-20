@@ -58,3 +58,8 @@ export {
   finishOpenBoardsJob,
 } from "./openBoardsQueueStore";
 export type { ClaimedOpenBoardsJob } from "./openBoardsQueueStore";
+
+export {
+  getOpenBoardsObservations,
+  toTrainObservation,
+} from "./openBoardsObservations";
