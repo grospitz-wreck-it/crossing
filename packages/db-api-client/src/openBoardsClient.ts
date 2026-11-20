@@ -60,10 +60,13 @@ function pruneResponseCache() {
 const inFlight = new Map<string, Promise<unknown>>();
 
 function credentials(explicit?: { clientId: string; apiKey: string }) {
+  const runtimeEnv = (globalThis as typeof globalThis & {
+    process?: { env?: Record<string, string | undefined> };
+  }).process?.env;
   const clientId =
-    explicit?.clientId || process.env.DB_OPENBOARDS_CLIENT_ID || process.env.DB_CLIENT_ID;
+    explicit?.clientId || runtimeEnv?.DB_OPENBOARDS_CLIENT_ID || runtimeEnv?.DB_CLIENT_ID;
   const apiKey =
-    explicit?.apiKey || process.env.DB_OPENBOARDS_API_KEY || process.env.DB_API_KEY;
+    explicit?.apiKey || runtimeEnv?.DB_OPENBOARDS_API_KEY || runtimeEnv?.DB_API_KEY;
 
   if (!clientId || !apiKey) {
     throw new Error(
