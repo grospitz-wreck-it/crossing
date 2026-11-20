@@ -19,6 +19,7 @@ export interface Env {
   TURSO_AUTH_TOKEN: string;
   DB_OPENBOARDS_CLIENT_ID: string;
   DB_OPENBOARDS_API_KEY: string;
+  OPENBOARDS_RUN_TOKEN?: string;
   OPENBOARDS_BATCH_SIZE?: string;
   OPENBOARDS_MAX_JOBS_PER_RUN?: string;
   OPENBOARDS_CORE_INTERVAL_MS?: string;
@@ -300,6 +301,10 @@ export default {
       return Response.json({ ok: true, service: "openboards-refresh", mode: "shadow-only" });
     }
     if (url.pathname === "/run") {
+      const token = env.OPENBOARDS_RUN_TOKEN?.trim();
+      if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
+        return new Response("Not found", { status: 404 });
+      }
       try {
         return Response.json(await runRefresh(env));
       } catch (error) {
