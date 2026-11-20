@@ -55,6 +55,26 @@ export default function EditCrossingDrawer({ crossingId, onClose, onSaved }: Pro
   {nearbyLoading && <small>Bahnhöfe werden gesucht…</small>}
   {nearbyError && <small style={{ color: "#b4232d" }}>{nearbyError}</small>}
   {!nearbyLoading && !nearbyError && nearbyStations.length === 0 && <small style={{ color: "#68717d" }}>Keine Bahnhöfe im Umkreis gefunden.</small>}
+  {nearbyStations.length > 0 && (
+    <label style={{ display: "grid", gap: 6 }}>
+      <span style={labelStyle}>Nächstgelegenen Bahnhof auswählen</span>
+      <select
+        style={inputStyle}
+        value={mapStation?.eva || ""}
+        onChange={(event) => {
+          const station = nearbyStations.find((item) => item.eva === event.target.value);
+          if (station) addNearbyStation(station);
+        }}
+      >
+        <option value="">Bahnhof auswählen …</option>
+        {nearbyStations.map((station) => (
+          <option key={station.eva} value={station.eva}>
+            {station.name} · EVA {station.eva} · {station.distanceKm.toFixed(1)} km
+          </option>
+        ))}
+      </select>
+    </label>
+  )}
   <div style={{ display: "grid", gap: 6, maxHeight: 220, overflowY: "auto" }}>
     {nearbyStations.map((station) => {
       const selected = links.some((link) => link.eva === station.eva);
