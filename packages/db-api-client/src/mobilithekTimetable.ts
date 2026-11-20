@@ -166,11 +166,18 @@ function inferCategory(line: string, journey: any) {
   ];
 
   if (knownLineCategories.includes(lineToken)) return lineToken;
-  if (/^S\\d+[A-Z]?$/.test(lineToken)) return lineToken;
-  if (/^RB\\d+[A-Z]?$/.test(lineToken)) return lineToken.replace(/^RB/, "RB ");
-  if (/^RE\\d+[A-Z]?$/.test(lineToken)) return lineToken.replace(/^RE/, "RE ");
 
-  return normalizedLine.split(/\\s+/)[0] || "";
+  const isDigits = (value: string) =>
+    value.length > 0 && [...value].every((char) => char >= "0" && char <= "9");
+  const sSuffix = lineToken.startsWith("S") ? lineToken.slice(1) : "";
+  const rbSuffix = lineToken.startsWith("RB") ? lineToken.slice(2) : "";
+  const reSuffix = lineToken.startsWith("RE") ? lineToken.slice(2) : "";
+
+  if (isDigits(sSuffix)) return lineToken;
+  if (isDigits(rbSuffix)) return `RB ${rbSuffix}`;
+  if (isDigits(reSuffix)) return `RE ${reSuffix}`;
+
+  return normalizedLine.trim().split(" ")[0] || "";
 }
 
 function parseBodyFromRoot(root: any): MobilithekTrainEvent[] {
