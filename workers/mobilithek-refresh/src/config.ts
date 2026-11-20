@@ -30,10 +30,6 @@ export const config = {
 export function validateConfig() {
   const missing: string[] = [];
 
-  if (!config.subscriptionIds.length) {
-    missing.push("MOBILITHEK_SUBSCRIPTION_ID*");
-  }
-
   if (!config.p12Base64) {
     missing.push("MOBILITHEK_CLIENT_P12_BASE64");
   }
