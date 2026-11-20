@@ -154,7 +154,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     return value;
   });
   const observationEventsPromise = Promise.resolve([]);
-  const throughPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing)).catch(() => []); timing.throughTrainsMs = performance.now() - started; return value; })();
+  const throughPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing, { snapshotOnly: true })).catch(() => []); timing.throughTrainsMs = performance.now() - started; return value; })();
   const divertedPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []); timing.divertedTrainsMs = performance.now() - started; return value; })();
   const reroutedPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []); timing.reroutedTrainsMs = performance.now() - started; return value; })();
   const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedPromise]);
