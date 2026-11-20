@@ -84,6 +84,21 @@ let cachedDemandAt = 0;
 let cachedDemandDbUrl = "";
 let demandCacheNeedsSync = true;
 
+// Expired rows are housekeeping, not part of each board refresh. Keep the
+// cleanup to at most once per warm isolate per hour instead of once per job.
+const OBSERVATION_CLEANUP_INTERVAL_MS = 60 * 60_000;
+let lastObservationCleanupAt = 0;
+
+async function cleanupExpiredObservations(db: Client): Promise<void> {
+  const now = Date.now();
+  if (now - lastObservationCleanupAt < OBSERVATION_CLEANUP_INTERVAL_MS) return;
+
+  await db.execute(
+    "DELETE FROM openboards_observations WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+  );
+  lastObservationCleanupAt = now;
+}
+
 async function loadDemand(
   db: Client,
   env: Env,
@@ -244,7 +259,7 @@ async function persistObservations(
       VALUES (?, ?, ?, ?, ?, 'success', ?)`,
     args: [jobKey, direction, JSON.stringify(evas), observedIso, new Date().toISOString(), validObservations.length],
   });
-  await db.execute("DELETE FROM openboards_observations WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
+
 }
 
 async function recordFailure(
@@ -323,6 +338,15 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
         console.error("[OpenBoards] failed to record error", logError);
       }
       await finishOpenBoardsJob(db, job, { ok: false, error: message });
+    }
+  }
+
+  if (processed > 0) {
+    try {
+      await cleanupExpiredObservations(db);
+    } catch (error) {
+      // Housekeeping must not turn otherwise successful refreshes into failures.
+      console.error("[OpenBoards] expired-observation cleanup failed", error);
     }
   }
 
