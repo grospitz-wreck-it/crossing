@@ -15,7 +15,8 @@ const nextConfig = {
   // explicitly in the nearby-stations serverless function trace.
   outputFileTracingIncludes: {
     "/api/admin/stations/nearby": [
-      "../../node_modules/db-stations/data.ndjson",
+      "../../node_modules/db-stations/**",
+      "node_modules/db-stations/**",
     ],
   },
 };
