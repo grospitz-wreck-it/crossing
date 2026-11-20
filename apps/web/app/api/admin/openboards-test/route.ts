@@ -26,7 +26,7 @@ export async function GET(request: Request) {
     // The diagnostic inventory must show every active crossing, not only
     // crossings currently assigned to a user. This is read-only.
     const crossingsResult = await db.execute({
-      sql: `SELECT id, name, reference_stations
+      sql: `SELECT id, name, observation_evas, reference_stations
             FROM crossings
             WHERE status = 'active'
             ORDER BY name COLLATE NOCASE
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
     const baseCrossings = (crossingsResult.rows as Array<Record<string, unknown>>).map((row) => ({
       id: String(row.id),
       name: String(row.name || row.id),
-      evas: parseEvas(row.reference_stations),
+      evas: [...new Set([...parseEvas(row.observation_evas), ...parseEvas(row.reference_stations)])],
     }));
 
     if (!crossingId) {
@@ -115,7 +115,7 @@ export async function GET(request: Request) {
       });
     }
     if (!crossing.evas.length) {
-      return Response.json({ ok: true, crossing, observations: [], queue: [], warning: "Für diesen Übergang sind keine reference_stations hinterlegt." }, {
+      return Response.json({ ok: true, crossing, observations: [], queue: [], warning: "Für diesen Übergang sind keine Beobachtungs-EVAs hinterlegt." }, {
         headers: { "Cache-Control": "no-store" },
       });
     }
