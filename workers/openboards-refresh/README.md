@@ -67,3 +67,15 @@ with a public route.
   used to create or alter a user-facing prediction.
 - Do not retire Mobilithek feeds until multi-day shadow comparisons demonstrate
   equivalent or better event coverage and crossing-time accuracy.
+## Prediction boundary
+
+The shared `TrainObservation` contract is defined in
+`packages/shared-types/src/index.ts`. The DB client exposes
+`getOpenBoardsObservations()` and `toTrainObservation()` for later shadow
+comparison and prediction work. OpenBoards route data is always marked
+`partial` or `unknown`; it is never promoted to a complete route merely
+because origin, destination and via references are present.
+
+The existing Timetables-based forecast path (plan + fchg merge, route checks,
+configured offsets and two-observation interpolation) remains unchanged.
+This worker does not replace or bypass it.
