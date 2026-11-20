@@ -2,8 +2,8 @@
  * Builds a conservative SQLite JSON1 prefilter for snapshot rows.
  *
  * The application still performs the authoritative EVA/name/route matching
- * after loading rows. This predicate only removes journeys whose calls cannot
- * possibly mention any configured observation station.
+ * after loading rows. This predicate narrows candidates only; it does not
+ * replace the application-level matching.
  */
 export type SnapshotObservationStation = {
   eva?: string;
@@ -17,14 +17,15 @@ export function buildSnapshotCallPrefilter(
     stations.map((station) => String(station.eva || "").trim()).filter(Boolean),
   ));
   const nameTokens = Array.from(new Set(
-    stations.flatMap((station) =>
-      String(station.station || "")
-        .toLowerCase()
+    stations.flatMap((station) => {
+      const raw = String(station.station || "").toLowerCase();
+      const ascii = raw
         .normalize("NFKD")
-        .replace(/[\\u0300-\\u036f]/g, "")
-        .split(/[^a-z0-9]+/)
-        .filter((token) => token.length >= 4),
-    ),
+        .replace(/[\u0300-\u036f]/g, "");
+      return [raw, ascii].flatMap((value) =>
+        value.split(/[^a-z0-9äöüß]+/).filter((token) => token.length >= 4),
+      );
+    }),
   ));
 
   const predicates: string[] = [];
