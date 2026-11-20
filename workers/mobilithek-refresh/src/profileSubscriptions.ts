@@ -13,21 +13,25 @@ import { loadDemandCrossings } from "./demand.js";
 
 type DemandCrossing = Awaited<ReturnType<typeof loadDemandCrossings>>[number];
 
-const DEFAULT_TARGETS = [
-  "Bünde (Westf)",
-  "Bünde",
-  "Osnabrück Hbf",
-  "Osnabrück",
-  "Hannover Hbf",
-  "Hannover",
-  "Bielefeld Hbf",
-  "Bielefeld",
-  "8003288",
-  "8000059",
-  "8000036",
-  "8000152",
-  "8000294",
-];
+const SUBSCRIPTION_LABELS: Record<string, string> = {
+  "1027363179037855744": "DELFI-Realtime SIRI ET Oberelbe",
+  "1024486200127131648": "DELFI-Realtime GTFS-RT Trip Updates",
+  "1027363384068018176": "DELFI-Realtime SIRI ET Bremen, Niedersachsen, Hamburg und Rostock/VVW",
+  "1027312851625926656": "DELFI-Realtime SIRI ET Rhein-Ruhr",
+  "1027362883041628160": "DELFI-Realtime SIRI ET Hessen",
+  "1024488922196914176": "DELFI-Realtime SIRI ET Bahndaten",
+  "1027362992668151808": "DELFI-Realtime SIRI ET Bayern",
+  "1027363323942670336": "DELFI-Realtime SIRI ET Sachsen-Anhalt",
+  "1027362933037555712": "DELFI-Realtime SIRI ET Berlin-Brandenburg",
+  "1027362816998158336": "DELFI-Realtime SIRI ET Mecklenburg-Vorpommern",
+  "1027363044509749248": "DELFI-Realtime SIRI ET Schleswig-Holstein",
+  "1027363247962677248": "DELFI-Realtime SIRI ET Baden-Württemberg",
+  "1027362616334266368": "DELFI-Realtime SIRI ET Rhein-Sieg",
+  "1027363211925434368": "DELFI-Realtime SIRI ET Mittelthüringen",
+  "1027363132866998272": "DELFI-Realtime SIRI ET Rhein-Neckar-Dreieck",
+  "102736308815550544": "DELFI-Realtime SIRI ET Saarland",
+  "1027363432285736960": "SIRI-ET Niedersachsen und Bremen (VBN)",
+};
 
 async function fetchFeed(subscriptionId: string): Promise<{
   bytes: Buffer;
@@ -120,9 +124,7 @@ function targetMatchesEvent(event: MobilithekTrainEvent, target: string): boolea
 }
 
 function profileEvents(events: MobilithekTrainEvent[], targets: string[]) {
-  // Runtime only needs the subscription → target coverage mapping.
-  // Do not persist the full feed inventory (lines/stations/categories/counts),
-  // which can grow to several megabytes and is not needed by the selector.
+  // Only persist the subscription → target coverage mapping, not the full feed.
   const targetMatches = targets.filter((target) =>
     events.some((event) => targetMatchesEvent(event, target)),
   );
@@ -150,14 +152,15 @@ async function main() {
   const useDemand = process.argv.includes("--demand");
   const { targets, demand } = useDemand
     ? await loadTargetsFromDemand()
-    : { targets: DEFAULT_TARGETS, demand: [] as DemandCrossing[] };
+    : { targets: [] as string[], demand: [] as DemandCrossing[] };
 
   console.log("\n==============================================");
   console.log(" Mobilithek Subscription Profiling");
   console.log(" EINMALIGE INVENTUR – KEIN SNAPSHOT-WRITE");
   console.log("==============================================\n");
-  console.log(`Subscriptions: ${config.subscriptionIds.length}`);
-  console.log(`Mode: ${useDemand ? "LIVE DEMAND" : "DEFAULT TARGETS"}`);
+  console.log(`Configured subscriptions: ${config.subscriptionIds.length}`);
+  console.log(`Known screenshot subscriptions: ${Object.keys(SUBSCRIPTION_LABELS).length}`);
+  console.log(`Mode: ${useDemand ? "LIVE DEMAND" : "NO DEMAND MATCHING"}`);
   if (useDemand) console.log(`Demand crossings: ${demand.length}`);
   console.log(`Targets: ${targets.length}`);
   console.log(`Target list: ${targets.join(" | ")}\n`);
@@ -169,19 +172,24 @@ async function main() {
 
   const profiles: Array<{
     subscriptionId: string;
+    subscriptionLabel: string;
     feedKind?: ReturnType<typeof classifyFeed>;
+    bytes?: number;
+    durationMs?: number;
     parsedEvents?: number;
     targetMatches?: string[];
     error?: string;
   }> = [];
 
   for (const [index, subscriptionId] of config.subscriptionIds.entries()) {
-    console.log(`[${index + 1}/${config.subscriptionIds.length}] ${subscriptionId}`);
+    const subscriptionLabel = SUBSCRIPTION_LABELS[subscriptionId] || "Unbekanntes / nicht in Screenshot-Liste";
+    console.log(`[${index + 1}/${config.subscriptionIds.length}] ${subscriptionLabel}`);
+    console.log(`  ID: ${subscriptionId}`);
 
     try {
       const started = Date.now();
       const feed = await fetchFeed(subscriptionId);
-      const elapsedMs = Date.now() - started;
+      const durationMs = Date.now() - started;
       let events: MobilithekTrainEvent[] = [];
 
       if (feed.kind === "siri-journey") {
@@ -192,34 +200,48 @@ async function main() {
 
       const profile = {
         subscriptionId,
+        subscriptionLabel,
         feedKind: feed.kind,
+        bytes: feed.bytes.length,
+        durationMs,
         parsedEvents: events.length,
-        targetMatches: profileEvents(events, targets).targetMatches,
+        targetMatches: useDemand ? profileEvents(events, targets).targetMatches : [],
       };
 
       profiles.push(profile);
       console.log(`  feed:       ${profile.feedKind}`);
-      console.log(`  bytes:      ${feed.bytes.length}`);
-      console.log(`  duration:   ${elapsedMs} ms`);
+      console.log(`  bytes:      ${profile.bytes}`);
+      console.log(`  duration:   ${profile.durationMs} ms`);
       console.log(`  events:     ${profile.parsedEvents}`);
-      console.log(
-        `  TARGET MATCHES: ${profile.targetMatches.length ? profile.targetMatches.join(" | ") : "NONE"}`,
-      );
+      if (useDemand) {
+        console.log(
+          `  TARGET MATCHES: ${profile.targetMatches.length ? profile.targetMatches.join(" | ") : "NONE"}`,
+        );
+      }
       console.log("");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      profiles.push({ subscriptionId, error: message });
+      profiles.push({ subscriptionId, subscriptionLabel, error: message });
       console.log(`  ERROR: ${message}\n`);
     }
   }
 
+  const report = {
+    generatedAt: new Date().toISOString(),
+    mode: useDemand ? "live-demand" : "feed-inventory-only",
+    configuredSubscriptions: config.subscriptionIds.length,
+    targets,
+    profiles,
+  };
+
   await import("node:fs/promises").then(({ writeFile }) =>
-    writeFile("subscription-profiles.json", JSON.stringify(profiles, null, 2), "utf8"),
+    writeFile("subscription-profiles.json", JSON.stringify(report, null, 2), "utf8"),
   );
 
   console.log("==============================================");
   console.log("Profiling abgeschlossen.");
   console.log("Geschrieben: subscription-profiles.json");
+  console.log("Keine Turso-Snapshot-Writes ausgeführt.");
   console.log("==============================================");
 }
 
