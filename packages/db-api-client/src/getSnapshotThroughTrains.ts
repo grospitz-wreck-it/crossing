@@ -96,7 +96,7 @@ function parseJson(value: unknown, fallback: any) {
 
 function normalizeEva(value: unknown) {
   const raw = String(value || "").trim();
-  const match = raw.match(/(?:^|[^0-9])(\\d{7})(?:$|[^0-9])/);
+  const match = raw.match(/(?:^|[^0-9])(\d{7})(?:$|[^0-9])/);
   return match?.[1] || raw;
 }
 
