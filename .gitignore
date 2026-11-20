@@ -15,3 +15,5 @@ apps/web/certificate.p12
 apps/web/debug.log
 apps/web/.env.local
 workers/mobilithek-refresh/subscription-profiles.json
+workers/mobilithek-refresh/certificate.p12
+workers/mobilithek-refresh/mobilithek-p12-base64.txt
