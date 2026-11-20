@@ -139,3 +139,10 @@ Wichtige Grenze:
   und die vier Secrets gesetzt sein. Deployment und Live-Test sind noch nicht erfolgt.
 
 Setup und Betriebsdetails stehen in `workers/openboards-refresh/README.md`.
+Zusätzlich ist der quellenneutrale Vertrag `TrainObservation` in
+`packages/shared-types/src/index.ts` angelegt. Der DB-Client kann gespeicherte
+OpenBoards-Beobachtungen lesen und über `toTrainObservation()` in diesen Vertrag
+überführen. OpenBoards-Laufwege bleiben dabei ausdrücklich als `partial` oder
+`unknown` markiert. Die bestehende Timetable-Prognose (Plan + Fchg, Laufwegprüfung,
+konfigurierte Offsets und Zwei-Punkt-Interpolation) bleibt unverändert und ist
+weiterhin die Referenz für den späteren Shadow-Vergleich.
