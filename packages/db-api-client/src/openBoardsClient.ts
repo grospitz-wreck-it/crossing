@@ -18,6 +18,8 @@ export type OpenBoardsOptions = {
   languages?: string[];
   /** Conservative EVA batch size; DB's documented maximum is not specified. */
   batchSize?: number;
+  /** Explicit credentials for runtimes without process.env (e.g. Cloudflare Workers). */
+  credentials?: { clientId: string; apiKey: string };
 };
 
 export type OpenBoardsBatchResult = {
@@ -57,11 +59,11 @@ function pruneResponseCache() {
 }
 const inFlight = new Map<string, Promise<unknown>>();
 
-function credentials() {
+function credentials(explicit?: { clientId: string; apiKey: string }) {
   const clientId =
-    process.env.DB_OPENBOARDS_CLIENT_ID || process.env.DB_CLIENT_ID;
+    explicit?.clientId || process.env.DB_OPENBOARDS_CLIENT_ID || process.env.DB_CLIENT_ID;
   const apiKey =
-    process.env.DB_OPENBOARDS_API_KEY || process.env.DB_API_KEY;
+    explicit?.apiKey || process.env.DB_OPENBOARDS_API_KEY || process.env.DB_API_KEY;
 
   if (!clientId || !apiKey) {
     throw new Error(
@@ -154,7 +156,7 @@ export async function fetchOpenBoardsBoard(
       const response = await fetch(`${BASE_URL}/${direction}`, {
         method: "POST",
         headers: {
-          ...credentials(),
+          ...credentials(options.credentials),
           "Content-Type": "application/json",
           Accept: "application/json",
         },
