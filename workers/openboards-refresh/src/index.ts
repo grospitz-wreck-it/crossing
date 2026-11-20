@@ -78,7 +78,25 @@ function getDb(env: Env): Client {
   return dbClient;
 }
 
-async function loadDemand(db: Client, env: Env): Promise<OpenBoardsQueueDemand[]> {
+const DEMAND_CACHE_TTL_MS = 5 * 60_000;
+let cachedDemand: OpenBoardsQueueDemand[] | null = null;
+let cachedDemandAt = 0;
+let cachedDemandDbUrl = "";
+let demandCacheNeedsSync = true;
+
+async function loadDemand(
+  db: Client,
+  env: Env,
+): Promise<OpenBoardsQueueDemand[]> {
+  const now = Date.now();
+  if (
+    cachedDemand &&
+    cachedDemandDbUrl === env.TURSO_DATABASE_URL &&
+    now - cachedDemandAt < DEMAND_CACHE_TTL_MS
+  ) {
+    return cachedDemand.map((item) => ({ ...item, evaNumbers: [...item.evaNumbers] }));
+  }
+
   const [crossingsResult, catalogResult] = await Promise.all([
     db.execute(`
       SELECT c.id, c.reference_stations, c.through_rules
@@ -140,7 +158,14 @@ async function loadDemand(db: Client, env: Env): Promise<OpenBoardsQueueDemand[]
     });
   }
 
-  return [...demandByCrossing.values()].filter((item) => item.evaNumbers.length > 0);
+  const demand = [...demandByCrossing.values()]
+    .filter((item) => item.evaNumbers.length > 0);
+
+  cachedDemand = demand.map((item) => ({ ...item, evaNumbers: [...item.evaNumbers] }));
+  cachedDemandAt = now;
+  cachedDemandDbUrl = env.TURSO_DATABASE_URL;
+  demandCacheNeedsSync = true;
+  return demand;
 }
 
 async function persistObservations(
@@ -236,7 +261,14 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   const demand = await loadDemand(db, env);
   const batchSize = Math.max(1, Math.min(20, Number(env.OPENBOARDS_BATCH_SIZE || 5)));
   const jobs = buildOpenBoardsQueueJobs(demand, { batchSize });
-  await syncOpenBoardsQueue(db, jobs);
+
+  // Active crossing demand and the station catalogue are relatively static.
+  // Reconcile the persistent queue only when the five-minute demand cache is
+  // refreshed; keep the flag set if reconciliation fails so the next run retries.
+  if (demandCacheNeedsSync) {
+    await syncOpenBoardsQueue(db, jobs);
+    demandCacheNeedsSync = false;
+  }
 
   const maxJobs = Math.max(1, Math.min(20, Number(env.OPENBOARDS_MAX_JOBS_PER_RUN || 20)));
   let processed = 0;
