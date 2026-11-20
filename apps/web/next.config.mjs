@@ -10,6 +10,14 @@ const nextConfig = {
     process.cwd(),
     "../.."
   ),
+
+  // db-stations reads its bundled NDJSON catalogue at runtime. Include it
+  // explicitly in the nearby-stations serverless function trace.
+  outputFileTracingIncludes: {
+    "/api/admin/stations/nearby": [
+      "../../node_modules/db-stations/data.ndjson",
+    ],
+  },
 };
 
 export default nextConfig;
