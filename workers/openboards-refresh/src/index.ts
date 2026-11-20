@@ -190,7 +190,6 @@ async function loadDemand(
 
 async function persistObservations(
   db: Client,
-  jobKey: string,
   direction: "arrivals" | "departures",
   evas: string[],
   observations: OpenBoardsStationObservation[],
@@ -340,7 +339,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
         },
       });
       const observations = normalizeOpenBoardsBatches(batches);
-      await persistObservations(db, job.jobKey, job.direction, job.evaNumbers, observations, requestedAt);
+      await persistObservations(db, job.direction, job.evaNumbers, observations, requestedAt);
       observationsWritten += observations.length;
       await finishOpenBoardsJob(db, job, { ok: true });
     } catch (error) {
