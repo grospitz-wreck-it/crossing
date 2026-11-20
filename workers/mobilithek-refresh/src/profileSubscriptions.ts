@@ -158,6 +158,10 @@ function fingerprintEvents(events: MobilithekTrainEvent[]): JourneyFingerprints 
       .map((call) => call.planned?.toISOString() || "")
       .filter(Boolean);
 
+    // Require enough timetable structure to avoid treating weak GTFS-RT
+    // observations or parser fallbacks as evidence of duplicate journeys.
+    if (routeRefs.length < 2 || plannedTimes.length < 2) continue;
+
     // Provider journey references are useful for exact cross-feed comparison,
     // but can differ between regional aggregators.
     const refKey = [
@@ -242,6 +246,33 @@ function compareFeeds(
     b.exactJourneyRef.jaccard - a.exactJourneyRef.jaccard ||
     b.structuralJourney.jaccard - a.structuralJourney.jaccard,
   );
+}
+
+const OWL_TARGET_HINTS = [
+  "kirchlengern", "herford", "buende", "bielefeld", "loehne",
+  "bad oeynhausen", "minden", "porta westfalica", "vlotho",
+  "hiddenhausen", "enger", "spenge", "roedinghausen", "guetersloh",
+  "huellhorst", "preussisch oldendorf", "stemwede", "rahden",
+  "espelkamp", "paderborn",
+];
+
+function classifyTargetGroups(targets: string[]) {
+  const owlFocusTargets = targets.filter((target) => {
+    const normalized = normalize(target);
+    return OWL_TARGET_HINTS.some((hint) => normalized.includes(normalize(hint)));
+  });
+  const exploratoryTargets = targets.filter((target) => !owlFocusTargets.includes(target));
+
+  return {
+    owlFocus: {
+      description: "Kirchlengern und OWL – künftiger Produktivschwerpunkt",
+      targets: owlFocusTargets,
+    },
+    exploratory: {
+      description: "Weitere Testbahnhöfe und regionale Testfälle – vorerst nicht entfernen",
+      targets: exploratoryTargets,
+    },
+  };
 }
 
 async function loadTargetsFromDemand(): Promise<{ targets: string[]; demand: DemandCrossing[] }> {
@@ -346,6 +377,7 @@ async function main() {
     configuredSubscriptions: config.subscriptionIds.length,
     profiledSubscriptions: subscriptionIds.length,
     targets,
+    targetGroups: classifyTargetGroups(targets),
     profiles,
     journeyOverlap: compareFeeds(profiles, fingerprints),
     comparisonNotes: [
