@@ -1,5 +1,6 @@
 import type { Client } from "@libsql/client";
 import type { Crossing } from "../../crossing-model/src/types";
+import { buildSnapshotCallPrefilter } from "./snapshotQuery";
 
 export type SnapshotThroughTrain = {
   type: "through";
@@ -131,10 +132,35 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
     // the observation call and predicted crossing time are filtered below.
     const from = new Date(now - 24 * 60 * 60_000).toISOString();
     const to = new Date(now + 24 * 60 * 60_000).toISOString();
-    const result = await db.execute({
-      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction FROM mobilithek_train_snapshot WHERE actual_time >= ? AND actual_time <= ? ORDER BY actual_time ASC LIMIT 5000`,
-      args: [from, to],
-    });
+    const prefilter = buildSnapshotCallPrefilter(
+      rules.map((rule: any) => ({
+        eva: String(rule.observationEva || "").trim(),
+        station: String(rule.observationStation || "").trim(),
+      })),
+    );
+
+    const baseSql = `SELECT s.line,s.category,s.journey_number,s.journey_ref,s.origin,s.destination,s.route_json,s.calls_json,s.delay_minutes,s.actual_time,s.scheduled_time,s.direction
+      FROM mobilithek_train_snapshot AS s
+      WHERE s.actual_time >= ? AND s.actual_time <= ?`;
+    let result;
+    try {
+      result = await db.execute({
+        sql: `${baseSql} ${prefilter.sql}
+          ORDER BY s.actual_time ASC
+          LIMIT 5000`,
+        args: [from, to, ...prefilter.args],
+      });
+    } catch (prefilterError) {
+      // Preserve the old broad scan if JSON1 is unavailable or malformed
+      // legacy JSON prevents SQLite from evaluating the candidate predicate.
+      console.warn("[Mobilithek] through snapshot prefilter unavailable; using time-window scan", prefilterError);
+      result = await db.execute({
+        sql: `${baseSql}
+          ORDER BY s.actual_time ASC
+          LIMIT 5000`,
+        args: [from, to],
+      });
+    }
 
     const candidates: SnapshotThroughTrain[] = [];
     for (const row of result.rows as any[]) {
