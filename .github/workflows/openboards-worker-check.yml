@@ -5,6 +5,7 @@ on:
     paths:
       - "workers/openboards-refresh/**"
       - "packages/db-api-client/src/openBoards*.ts"
+      - "packages/db-api-client/sql/00[89]_openboards_*.sql"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/openboards-worker-check.yml"
@@ -14,6 +15,7 @@ on:
     paths:
       - "workers/openboards-refresh/**"
       - "packages/db-api-client/src/openBoards*.ts"
+      - "packages/db-api-client/sql/00[89]_openboards_*.sql"
       - "package.json"
       - "package-lock.json"
       - ".github/workflows/openboards-worker-check.yml"
@@ -36,21 +38,99 @@ jobs:
         run: npm ci
       - name: TypeScript check for OpenBoards worker
         run: npx tsc --noEmit -p workers/openboards-refresh/tsconfig.json
-      - name: Verify SQLite JSON1 query used by observation pruning
+      - name: Exercise OpenBoards SQL against isolated libSQL database
         run: |
           node --input-type=module <<'NODE'
+          import { readFile } from "node:fs/promises";
           import { createClient } from "@libsql/client";
+
           const db = createClient({ url: "file::memory:" });
+          const assert = (condition, message) => {
+            if (!condition) throw new Error(message);
+          };
+
           try {
-            const result = await db.execute({
-              sql: "SELECT value FROM json_each(?) ORDER BY value",
-              args: ['["journey-a|123|arrivals","journey-b|456|departures"]'],
-            });
-            const values = result.rows.map((row) => String(row.value));
-            if (values.length !== 2 || values[0] !== "journey-a|123|arrivals" || values[1] !== "journey-b|456|departures") {
-              throw new Error("SQLite json_each returned unexpected values: " + JSON.stringify(values));
+            for (const migration of [
+              "packages/db-api-client/sql/008_openboards_scheduler.sql",
+              "packages/db-api-client/sql/009_openboards_observations.sql",
+            ]) {
+              await db.executeMultiple(await readFile(migration, "utf8"));
             }
-            console.log("SQLite json_each OK");
+
+            // Queue reconciliation: an unchanged UPSERT must not write a row.
+            const queueUpsert = `
+              INSERT INTO openboards_refresh_jobs (
+                job_key, direction, eva_numbers_json, interval_ms, priority,
+                is_active, next_due_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+              ON CONFLICT(job_key) DO UPDATE SET
+                direction = excluded.direction,
+                eva_numbers_json = excluded.eva_numbers_json,
+                interval_ms = excluded.interval_ms,
+                priority = excluded.priority,
+                is_active = 1,
+                updated_at = excluded.updated_at
+              WHERE openboards_refresh_jobs.direction IS NOT excluded.direction
+                 OR openboards_refresh_jobs.eva_numbers_json IS NOT excluded.eva_numbers_json
+                 OR openboards_refresh_jobs.interval_ms IS NOT excluded.interval_ms
+                 OR openboards_refresh_jobs.priority IS NOT excluded.priority
+                 OR openboards_refresh_jobs.is_active IS NOT 1
+            `;
+            const queueArgs = ["job-a", "arrivals", '["123"]', 120000, 10, "2026-11-20T10:00:00.000Z", "2026-11-20T10:00:00.000Z"];
+            await db.execute({ sql: queueUpsert, args: queueArgs });
+            const unchanged = await db.execute({ sql: queueUpsert, args: queueArgs });
+            assert(unchanged.rowsAffected === 0, "Unchanged queue UPSERT unexpectedly wrote a row");
+
+            // Observation pruning: keep keys present in the successful response,
+            // remove stale keys for the requested EVA/direction only.
+            const insertObservation = `
+              INSERT INTO openboards_observations (
+                observation_key, journey_id, eva_number, direction, event_time,
+                observed_at, expires_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+            const stamp = "2026-11-20T10:00:00.000Z";
+            for (const [key, journey, eva, direction] of [
+              ["journey-a|123|arrivals", "journey-a", "123", "arrivals"],
+              ["journey-stale|123|arrivals", "journey-stale", "123", "arrivals"],
+              ["journey-other|456|arrivals", "journey-other", "456", "arrivals"],
+              ["journey-departure|123|departures", "journey-departure", "123", "departures"],
+            ]) {
+              await db.execute({
+                sql: insertObservation,
+                args: [key, journey, eva, direction, stamp, stamp, "2026-11-20T11:00:00.000Z", stamp],
+              });
+            }
+
+            const prune = await db.execute({
+              sql: `DELETE FROM openboards_observations
+                    WHERE direction = ?
+                      AND eva_number IN (?)
+                      AND observation_key NOT IN (SELECT value FROM json_each(?))`,
+              args: ["arrivals", "123", JSON.stringify(["journey-a|123|arrivals"])],
+            });
+            assert(prune.rowsAffected === 1, "Observation pruning did not remove exactly one stale row");
+
+            const remaining = await db.execute(
+              "SELECT observation_key FROM openboards_observations ORDER BY observation_key"
+            );
+            const keys = remaining.rows.map((row) => String(row.observation_key));
+            assert(keys.length === 3, "Unexpected observation row count after pruning");
+            assert(keys.includes("journey-a|123|arrivals"), "Current observation was removed");
+            assert(keys.includes("journey-other|456|arrivals"), "Other EVA observation was removed");
+            assert(keys.includes("journey-departure|123|departures"), "Other direction observation was removed");
+
+            // Empty successful response: all observations for that EVA/direction are pruned.
+            const emptyPrune = await db.execute({
+              sql: `DELETE FROM openboards_observations
+                    WHERE direction = ?
+                      AND eva_number IN (?)
+                      AND observation_key NOT IN (SELECT value FROM json_each(?))`,
+              args: ["arrivals", "123", "[]"],
+            });
+            assert(emptyPrune.rowsAffected === 1, "Empty-response pruning did not remove the remaining EVA observation");
+
+            console.log("OpenBoards migrations, queue no-op UPSERT and observation pruning OK");
           } finally {
             db.close();
           }
