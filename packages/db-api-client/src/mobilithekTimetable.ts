@@ -120,6 +120,30 @@ function dateValue(node: any, keys: string[]): Date | undefined { const value = 
 function normalize(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function routeContains(route: string[], target: string) { const t = normalize(target); return Boolean(t) && route.some((name) => { const n = normalize(name); return n === t || n.includes(t) || t.includes(n); }); }
 function numberFrom(value?: string) { const m = String(value || "").match(/(\d{2,6})/); return m ? Number(m[1]) : 0; }
+/**
+ * Normalize the source product field independently from the line name.
+ * Unknown source product values are deliberately preserved as uppercase tokens:
+ * they must not silently turn into a numeric line label (e.g. "6").
+ */
+export function normalizeMobilithekProductCategory(value: unknown): string | null {
+  if (value == null) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  const token = raw.toUpperCase().replace(/[^A-Z0-9]+/g, "");
+  if (!token) return null;
+
+  const aliases: Record<string, string> = {
+    REGIONALBAHN: "RB",
+    REGIONALEXPRESS: "RE",
+    SBAHN: "S",
+    STADTBAHN: "STB",
+    STRASSENBAHN: "TRAM",
+  };
+
+  return aliases[token] || token;
+}
+
 function inferCategory(line: string, journey: any) {
   const normalizedLine = normalizeMobilithekLine(line) || line.trim();
   const product = firstText(journey, [
@@ -128,33 +152,25 @@ function inferCategory(line: string, journey: any) {
     "VehicleMode",
     "VehicleModeRef",
     "TrainType",
-  ]) || "";
+  ]);
 
-  const normalizeToken = (value: string) =>
-    value.toUpperCase().replace(/[^A-Z0-9]+/g, "");
-
-  const lineToken = normalizeToken(normalizedLine);
-  const productToken = normalizeToken(product);
-
-  // Never use substring matching for categories: e.g. S28 must not become S.
-  const knownCategories = [
-    "ICE", "EC", "IC", "IRE", "RE", "RB",
-    "U79", "U78", "U76", "U75", "U74", "U73", "U72", "U71", "U70", "U81",
-    "TRAM", "STR", "S",
-  ];
-
-  const productCategory = knownCategories.find(
-    (category) => productToken === category,
-  );
+  // Prefer the actual source product category. In particular, keep STB, BUS,
+  // BAHN and other source values instead of falling back to a line number.
+  const productCategory = normalizeMobilithekProductCategory(product);
   if (productCategory) return productCategory;
 
-  if (knownCategories.includes(lineToken)) return lineToken;
+  const lineToken = normalizedLine.toUpperCase().replace(/[^A-Z0-9]+/g, "");
+  const knownLineCategories = [
+    "ICE", "EC", "IC", "IRE", "RE", "RB", "STB", "TRAM", "STR", "S",
+    "U79", "U78", "U76", "U75", "U74", "U73", "U72", "U71", "U70", "U81",
+  ];
 
-  if (/^S\d+[A-Z]?$/.test(lineToken)) return lineToken;
-  if (/^RB\d+[A-Z]?$/.test(lineToken)) return lineToken.replace(/^RB/, "RB ");
-  if (/^RE\d+[A-Z]?$/.test(lineToken)) return lineToken.replace(/^RE/, "RE ");
+  if (knownLineCategories.includes(lineToken)) return lineToken;
+  if (/^S\\d+[A-Z]?$/.test(lineToken)) return lineToken;
+  if (/^RB\\d+[A-Z]?$/.test(lineToken)) return lineToken.replace(/^RB/, "RB ");
+  if (/^RE\\d+[A-Z]?$/.test(lineToken)) return lineToken.replace(/^RE/, "RE ");
 
-  return normalizedLine.split(/\s+/)[0] || "";
+  return normalizedLine.split(/\\s+/)[0] || "";
 }
 
 function parseBodyFromRoot(root: any): MobilithekTrainEvent[] {
