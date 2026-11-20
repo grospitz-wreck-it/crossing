@@ -94,11 +94,27 @@ function parseJson(value: unknown, fallback: any) {
   try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; }
 }
 
-function snapshotCallsContain(calls: any[], station: string) {
+function normalizeEva(value: unknown) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/(?:^|[^0-9])(\\d{7})(?:$|[^0-9])/);
+  return match?.[1] || raw;
+}
+
+function snapshotCallsContain(calls: any[], station: string, observationEva: string) {
+  const targetEva = normalizeEva(observationEva);
+  if (targetEva) {
+    const byEva = calls.find((call) =>
+      normalizeEva(call?.stopPointRef) === targetEva ||
+      normalizeEva(call?.stopPlaceRef) === targetEva
+    );
+    if (byEva) return byEva;
+  }
+
   const target = normalizeStationName(station);
+  if (!target) return undefined;
   return calls.find((call) => {
     const value = normalizeStationName(String(call?.name || ""));
-    return value === target || value.includes(target) || target.includes(value);
+    return Boolean(value && (value === target || value.includes(target) || target.includes(value)));
   });
 }
 
@@ -110,8 +126,11 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
     if (!rules.length) return null;
 
     const now = Date.now();
-    const from = new Date(now - 5 * 60_000).toISOString();
-    const to = new Date(now + 3 * 60 * 60_000).toISOString();
+    // actual_time is the first relevant call of the whole journey, not
+    // necessarily the observation station. Keep a wider journey window here;
+    // the observation call and predicted crossing time are filtered below.
+    const from = new Date(now - 24 * 60 * 60_000).toISOString();
+    const to = new Date(now + 24 * 60 * 60_000).toISOString();
     const result = await db.execute({
       sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction FROM mobilithek_train_snapshot WHERE actual_time >= ? AND actual_time <= ? ORDER BY actual_time ASC LIMIT 5000`,
       args: [from, to],
@@ -129,7 +148,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
         const observationStation = String(rule.observationStation || "");
         if (!matchesRoute(route, observationStation, crossing.requiredRouteStops || [])) continue;
 
-        const observationCall = snapshotCallsContain(calls, observationStation);
+        const observationCall = snapshotCallsContain(calls, observationStation, String(rule.observationEva || ""));
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
         const parsedObservation = new Date(observationTime);
         if (!Number.isFinite(parsedObservation.getTime())) continue;
