@@ -37,7 +37,7 @@ type Payload = {
 function time(value: string | null | undefined) {
   if (!value) return "–";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("de-DE");
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("de-DE", { timeZone: "Europe/Berlin" });
 }
 
 export default function OpenBoardsTestPage() {
@@ -156,7 +156,7 @@ export default function OpenBoardsTestPage() {
 
           <section style={{ marginTop: 24 }}>
             <h2 style={{ fontSize: 19, fontWeight: 650 }}>OpenBoards-Beobachtungen</h2>
-            {!data.observations?.length ? <p>Noch keine gespeicherten Beobachtungen für diesen Übergang.</p> : <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}><thead><tr>{["Zeit","Linie","Zug","Richtung","Station","Zeitqualität","Gleis","Erhoben"].map(x => <th key={x} style={{ textAlign: "left", padding: 9, borderBottom: "1px solid #8885" }}>{x}</th>)}</tr></thead><tbody>{data.observations.map(item => <tr key={item.key}><td style={{ padding: 9, borderBottom: "1px solid #8883", whiteSpace: "nowrap" }}>{time(item.eventTime)}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.line || item.category || "–"}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.journeyNumber || item.journeyId}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.direction === "arrivals" ? "Ankunft" : "Abfahrt"}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.eva}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.timeType}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.platform || "–"}</td><td style={{ padding: 9, borderBottom: "1px solid #8883", whiteSpace: "nowrap" }}>{time(item.observedAt)}</td></tr>)}</tbody></table></div>}
+            {!data.observations?.length ? <p>Noch keine gespeicherten Beobachtungen für diesen Übergang.</p> : <div style={{ overflowX: "auto" }}><table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}><thead><tr>{["Ereigniszeit","Planzeit","Linie","Zug","Richtung","Station","Zeitqualität","Gleis","Erhoben"].map(x => <th key={x} style={{ textAlign: "left", padding: 9, borderBottom: "1px solid #8885" }}>{x}</th>)}</tr></thead><tbody>{data.observations.map(item => <tr key={item.key}><td style={{ padding: 9, borderBottom: "1px solid #8883", whiteSpace: "nowrap" }}>{time(item.eventTime)}</td><td style={{ padding: 9, borderBottom: "1px solid #8883", whiteSpace: "nowrap" }}>{time(item.scheduledTime)}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.line || item.category || "–"}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.journeyNumber || item.journeyId}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.direction === "arrivals" ? "Ankunft" : "Abfahrt"}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.eva}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.timeType}</td><td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{item.platform || "–"}</td><td style={{ padding: 9, borderBottom: "1px solid #8883", whiteSpace: "nowrap" }}>{time(item.observedAt)}</td></tr>)}</tbody></table></div>}
           </section>
         </>
       )}
