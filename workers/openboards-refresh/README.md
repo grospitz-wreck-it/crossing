@@ -36,8 +36,9 @@ its per-runtime guard.
 
 ## Scheduling and manual execution
 
-The Wrangler configuration schedules one run per minute. To deploy explicitly
-from the repository root after migrations and secrets are configured:
+Cron scheduling is intentionally disabled. The worker runs only through the
+protected manual endpoint until automatic operation is explicitly approved.
+To deploy explicitly from the repository root after migrations and secrets are configured:
 
 ```sh
 npx wrangler deploy --config workers/openboards-refresh/wrangler.jsonc
@@ -50,9 +51,12 @@ and the caller sends `Authorization: Bearer <token>`.
 
 ## Demand cohorts
 
-- OWL stations are assigned priority 10 and a default 60-second interval.
-- Other active test/exploratory stations are assigned priority 100 and a
-  default 300-second interval.
+- OWL stations are assigned priority 10 and currently use a 120-second interval.
+- Other active test/exploratory stations are assigned priority 100 and currently
+  use a 600-second interval.
+- The worker caches active crossing demand and the station catalogue in-memory
+  for up to five minutes, then reconciles the persistent queue. Isolate restarts
+  cause a fresh read and reconciliation.
 - EVAs are deduplicated across crossings and batched separately by priority.
 - Primary reference EVAs are retained even when the optional station catalogue
   has no matching display name. Secondary through-rule station names are added
@@ -60,8 +64,9 @@ and the caller sends `Authorization: Bearer <token>`.
 
 ## Safety boundary
 
-- A successful upstream response replaces only the corresponding EVA/direction
-  board rows. Failed requests leave the last successful observations untouched.
+- A successful upstream response upserts current EVA/direction observations and
+  removes only observations absent from that successful response. Failed
+  requests leave the last successful observations untouched.
 - Observations expire after their event time plus one hour, with a minimum
   retention of 30 minutes after collection.
 - This is observation collection only. No OpenBoards observation is currently
