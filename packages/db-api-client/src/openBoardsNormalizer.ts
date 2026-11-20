@@ -88,8 +88,10 @@ export function normalizeOpenBoardsBatch(
   for (const placeValue of stopPlaces) {
     const place = asObject(placeValue);
     const eva = evaOf(place);
-    const localized = Array.isArray(place.localizedNames) ? place.localizedNames : [];
-    const german = localized.find((entry: any) => entry?.language === "deu");
+    const localized = Array.isArray(place.localizedNames)
+      ? place.localizedNames as Array<Record<string, unknown>>
+      : [];
+    const german = localized.find((entry) => entry.language === "deu");
     const name = asText(german?.name ?? localized[0]?.name ?? place.name);
     if (eva && name) namesByEva.set(eva, name);
   }
