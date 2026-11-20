@@ -342,6 +342,7 @@ async function main() {
         events = parseGtfsRtTripUpdates(feed.bytes);
       }
 
+      const journeyFingerprints = fingerprintEvents(events);
       const profile = {
         subscriptionId,
         subscriptionLabel,
@@ -349,11 +350,12 @@ async function main() {
         bytes: feed.bytes.length,
         durationMs,
         parsedEvents: events.length,
+        fingerprintedJourneys: journeyFingerprints.journeyRef.size,
         targetMatches: useDemand ? profileEvents(events, targets).targetMatches : [],
       };
 
       profiles.push(profile);
-      fingerprints.set(subscriptionId, fingerprintEvents(events));
+      fingerprints.set(subscriptionId, journeyFingerprints);
       console.log(`  feed:       ${profile.feedKind}`);
       console.log(`  bytes:      ${profile.bytes}`);
       console.log(`  duration:   ${profile.durationMs} ms`);
@@ -378,6 +380,7 @@ async function main() {
     profiledSubscriptions: subscriptionIds.length,
     targets,
     targetGroups: classifyTargetGroups(targets),
+    targetMatchingMethod: "Approximate normalized station-name matching; not proof of production event coverage.",
     profiles,
     journeyOverlap: compareFeeds(profiles, fingerprints),
     comparisonNotes: [
