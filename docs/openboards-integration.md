@@ -106,3 +106,19 @@ detection until a fresh comparison proves which cases OpenBoards can cover.
 
 Do not switch production source priority or disable Mobilithek before this
 fresh-data comparison and staged validation.
+
+
+## Write-volume guardrails (20 November 2026)
+
+- Queue state is the source of last-run status; successful polls do not append
+  one permanent `openboards_refresh_runs` row each time. The run log is
+  reserved for failures.
+- Observation UPSERTs compare all meaningful train fields. Identical board
+  results are not rewritten on every poll; freshness metadata is refreshed at
+  most once per ten minutes unless train data changes.
+- Core classification uses the crossing name as well as station names, so a
+  configured Kirchlengern crossing remains on the core interval even if its
+  station EVA is not yet present in the optional station catalogue.
+- Mobilithek demand now includes `observation_evas` as well as legacy
+  `reference_stations`, ensuring newly selected observation stations also
+  enter the route/call snapshot demand. This does not alter forecast matching.
