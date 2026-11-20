@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "npx wrangler deploy"
+    "deploy": "npx wrangler deploy",
+    "profile": "tsx src/profileSubscriptions.ts --demand"
   },
   "dependencies": {
     "@crossing/db-api-client": "file:../../packages/db-api-client",
@@ -13,6 +14,7 @@
     "protobufjs": "^8.7.2"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260917.1"
+    "@cloudflare/workers-types": "^5.20260917.1",
+    "tsx": "^4.20.6"
   }
 }
