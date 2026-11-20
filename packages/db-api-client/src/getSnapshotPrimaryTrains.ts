@@ -1,5 +1,6 @@
 import type { Client } from "@libsql/client";
 import type { Crossing } from "../../crossing-model/src/types";
+import { buildSnapshotCallPrefilter } from "./snapshotQuery";
 
 export type SnapshotPrimaryTrain = {
   type: "primary-stop";
@@ -78,14 +79,45 @@ export async function getSnapshotPrimaryTrains(
     const from = new Date(now - 5 * 60_000).toISOString();
     const to = new Date(now + 3 * 60 * 60_000).toISOString();
 
-    const result = await db.execute({
-      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,calls_json,delay_minutes,actual_time,scheduled_time
-            FROM mobilithek_train_snapshot
-            WHERE actual_time >= ? AND actual_time <= ?
-            ORDER BY actual_time ASC
+    const rules = Array.isArray(crossing.throughRules) ? crossing.throughRules : [];
+    const stationByEva = new Map(
+      rules.map((rule: any) => [
+        String(rule.observationEva || "").trim(),
+        String(rule.observationStation || "").trim(),
+      ]),
+    );
+    const prefilter = buildSnapshotCallPrefilter(
+      observationEvas.map((eva, index) => ({
+        eva,
+        station:
+          primaryObservationStations[index] ||
+          stationByEva.get(eva) ||
+          "",
+      })),
+    );
+
+    const baseSql = `SELECT s.line,s.category,s.journey_number,s.journey_ref,s.origin,s.destination,s.calls_json,s.delay_minutes,s.actual_time,s.scheduled_time
+            FROM mobilithek_train_snapshot AS s
+            WHERE s.actual_time >= ? AND s.actual_time <= ?`;
+    let result;
+    try {
+      result = await db.execute({
+        sql: `${baseSql} ${prefilter.sql}
+            ORDER BY s.actual_time ASC
             LIMIT 5000`,
-      args: [from, to],
-    });
+        args: [from, to, ...prefilter.args],
+      });
+    } catch (prefilterError) {
+      // Keep the previous broad query as a compatibility fallback if JSON1
+      // is unavailable or a legacy row contains data SQLite cannot inspect.
+      console.warn("[Mobilithek] primary snapshot prefilter unavailable; using time-window scan", prefilterError);
+      result = await db.execute({
+        sql: `${baseSql}
+            ORDER BY s.actual_time ASC
+            LIMIT 5000`,
+        args: [from, to],
+      });
+    }
 
     const stationNames = new Map<string, string>();
     for (const eva of observationEvas) {
