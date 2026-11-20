@@ -1,4 +1,5 @@
 import https from "node:https";
+import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 
 import {
@@ -135,6 +136,114 @@ function profileEvents(events: MobilithekTrainEvent[], targets: string[]) {
   };
 }
 
+type JourneyFingerprints = {
+  journeyRef: Set<string>;
+  journeyShape: Set<string>;
+};
+
+function hash(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 24);
+}
+
+function fingerprintEvents(events: MobilithekTrainEvent[]): JourneyFingerprints {
+  const journeyRef = new Set<string>();
+  const journeyShape = new Set<string>();
+
+  for (const event of events) {
+    const calls = [...(event.calls || [])];
+    const routeRefs = calls
+      .map((call) => String(call.stopPointRef || call.stopPlaceRef || "").trim())
+      .filter(Boolean);
+    const plannedTimes = calls
+      .map((call) => call.planned?.toISOString() || "")
+      .filter(Boolean);
+
+    // Provider journey references are useful for exact cross-feed comparison,
+    // but can differ between regional aggregators.
+    const refKey = [
+      String(event.line || "").toUpperCase().replace(/\\s+/g, ""),
+      String(event.journeyRef || "").trim(),
+      routeRefs.join(">"),
+      plannedTimes.join(">"),
+    ].join("|");
+    journeyRef.add(hash(refKey));
+
+    // Structural key deliberately excludes provider-specific journey IDs.
+    // It is a candidate match only: equal line/route/time does not prove
+    // that two feeds carry the same operational journey.
+    const shapeKey = [
+      String(event.line || "").toUpperCase().replace(/\\s+/g, ""),
+      routeRefs.join(">"),
+      plannedTimes.join(">"),
+      event.origin || "",
+      event.destination || "",
+    ].join("|");
+    journeyShape.add(hash(shapeKey));
+  }
+
+  return { journeyRef, journeyShape };
+}
+
+function compareFingerprintSets(a: Set<string>, b: Set<string>) {
+  let intersection = 0;
+  for (const value of a) if (b.has(value)) intersection += 1;
+  const union = a.size + b.size - intersection;
+  return {
+    intersection,
+    union,
+    jaccard: union ? Number((intersection / union).toFixed(4)) : 0,
+    leftOnly: a.size - intersection,
+    rightOnly: b.size - intersection,
+  };
+}
+
+function compareFeeds(
+  profiles: Array<{ subscriptionId: string; subscriptionLabel: string; parsedEvents?: number; error?: string }>,
+  fingerprints: Map<string, JourneyFingerprints>,
+) {
+  const comparisons = [];
+  for (let left = 0; left < profiles.length; left += 1) {
+    for (let right = left + 1; right < profiles.length; right += 1) {
+      const a = profiles[left];
+      const b = profiles[right];
+      const aFingerprints = fingerprints.get(a.subscriptionId);
+      const bFingerprints = fingerprints.get(b.subscriptionId);
+      if (!aFingerprints || !bFingerprints) continue;
+
+      const exactJourneyRef = compareFingerprintSets(
+        aFingerprints.journeyRef,
+        bFingerprints.journeyRef,
+      );
+      const structuralJourney = compareFingerprintSets(
+        aFingerprints.journeyShape,
+        bFingerprints.journeyShape,
+      );
+
+      if (exactJourneyRef.intersection || structuralJourney.intersection) {
+        comparisons.push({
+          left: { subscriptionId: a.subscriptionId, label: a.subscriptionLabel },
+          right: { subscriptionId: b.subscriptionId, label: b.subscriptionLabel },
+          leftParsedEvents: a.parsedEvents || 0,
+          rightParsedEvents: b.parsedEvents || 0,
+          exactJourneyRef,
+          structuralJourney,
+          interpretation:
+            exactJourneyRef.jaccard >= 0.8
+              ? "strong-exact-overlap-review-required"
+              : structuralJourney.jaccard >= 0.8
+                ? "strong-structural-overlap-review-required"
+                : "partial-overlap-review",
+        });
+      }
+    }
+  }
+
+  return comparisons.sort((a, b) =>
+    b.exactJourneyRef.jaccard - a.exactJourneyRef.jaccard ||
+    b.structuralJourney.jaccard - a.structuralJourney.jaccard,
+  );
+}
+
 async function loadTargetsFromDemand(): Promise<{ targets: string[]; demand: DemandCrossing[] }> {
   const demand = await loadDemandCrossings();
   const targets = unique(
@@ -183,6 +292,7 @@ async function main() {
     targetMatches?: string[];
     error?: string;
   }> = [];
+  const fingerprints = new Map<string, JourneyFingerprints>();
 
   for (const [index, subscriptionId] of subscriptionIds.entries()) {
     const subscriptionLabel = SUBSCRIPTION_LABELS[subscriptionId] || "Unbekanntes / nicht in Screenshot-Liste";
@@ -212,6 +322,7 @@ async function main() {
       };
 
       profiles.push(profile);
+      fingerprints.set(subscriptionId, fingerprintEvents(events));
       console.log(`  feed:       ${profile.feedKind}`);
       console.log(`  bytes:      ${profile.bytes}`);
       console.log(`  duration:   ${profile.durationMs} ms`);
@@ -236,6 +347,13 @@ async function main() {
     profiledSubscriptions: subscriptionIds.length,
     targets,
     profiles,
+    journeyOverlap: compareFeeds(profiles, fingerprints),
+    comparisonNotes: [
+      "Exact journey overlap uses a hash of line, provider journey reference, ordered stop references and planned call times.",
+      "Structural overlap excludes provider journey references and is a weaker candidate signal.",
+      "A high overlap is a review signal, never an automatic instruction to remove a subscription.",
+      "This inventory is read-only and does not change production subscription configuration.",
+    ],
   };
 
   await import("node:fs/promises").then(({ writeFile }) =>
