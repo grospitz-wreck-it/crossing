@@ -1,0 +1,57 @@
+name: OpenBoards worker checks
+
+on:
+  pull_request:
+    paths:
+      - "workers/openboards-refresh/**"
+      - "packages/db-api-client/src/openBoards*.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/openboards-worker-check.yml"
+  push:
+    branches:
+      - "perf/openboards-turso-usage"
+    paths:
+      - "workers/openboards-refresh/**"
+      - "packages/db-api-client/src/openBoards*.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/openboards-worker-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  typecheck-and-sqlite-json:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: TypeScript check for OpenBoards worker
+        run: npx tsc --noEmit -p workers/openboards-refresh/tsconfig.json
+      - name: Verify SQLite JSON1 query used by observation pruning
+        run: |
+          node --input-type=module <<'NODE'
+          import { createClient } from "@libsql/client";
+          const db = createClient({ url: "file::memory:" });
+          try {
+            const result = await db.execute({
+              sql: "SELECT value FROM json_each(?) ORDER BY value",
+              args: ['["journey-a|123|arrivals","journey-b|456|departures"]'],
+            });
+            const values = result.rows.map((row) => String(row.value));
+            if (values.length !== 2 || values[0] !== "journey-a|123|arrivals" || values[1] !== "journey-b|456|departures") {
+              throw new Error("SQLite json_each returned unexpected values: " + JSON.stringify(values));
+            }
+            console.log("SQLite json_each OK");
+          } finally {
+            db.close();
+          }
+          NODE
