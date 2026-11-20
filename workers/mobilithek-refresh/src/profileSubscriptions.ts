@@ -29,7 +29,7 @@ const SUBSCRIPTION_LABELS: Record<string, string> = {
   "1027362616334266368": "DELFI-Realtime SIRI ET Rhein-Sieg",
   "1027363211925434368": "DELFI-Realtime SIRI ET Mittelthüringen",
   "1027363132866998272": "DELFI-Realtime SIRI ET Rhein-Neckar-Dreieck",
-  "102736308815550544": "DELFI-Realtime SIRI ET Saarland",
+  "1027363088155500544": "DELFI-Realtime SIRI ET Saarland",
   "1027363432285736960": "SIRI-ET Niedersachsen und Bremen (VBN)",
 };
 
@@ -158,7 +158,10 @@ async function main() {
   console.log(" Mobilithek Subscription Profiling");
   console.log(" EINMALIGE INVENTUR – KEIN SNAPSHOT-WRITE");
   console.log("==============================================\n");
-  console.log(`Configured subscriptions: ${config.subscriptionIds.length}`);
+  const subscriptionIds = unique([...Object.keys(SUBSCRIPTION_LABELS), ...config.subscriptionIds]);
+
+  console.log(`Subscriptions to profile: ${subscriptionIds.length}`);
+  console.log(`Configured environment subscriptions: ${config.subscriptionIds.length}`);
   console.log(`Known screenshot subscriptions: ${Object.keys(SUBSCRIPTION_LABELS).length}`);
   console.log(`Mode: ${useDemand ? "LIVE DEMAND" : "NO DEMAND MATCHING"}`);
   if (useDemand) console.log(`Demand crossings: ${demand.length}`);
@@ -181,9 +184,9 @@ async function main() {
     error?: string;
   }> = [];
 
-  for (const [index, subscriptionId] of config.subscriptionIds.entries()) {
+  for (const [index, subscriptionId] of subscriptionIds.entries()) {
     const subscriptionLabel = SUBSCRIPTION_LABELS[subscriptionId] || "Unbekanntes / nicht in Screenshot-Liste";
-    console.log(`[${index + 1}/${config.subscriptionIds.length}] ${subscriptionLabel}`);
+    console.log(`[${index + 1}/${subscriptionIds.length}] ${subscriptionLabel}`);
     console.log(`  ID: ${subscriptionId}`);
 
     try {
@@ -230,6 +233,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     mode: useDemand ? "live-demand" : "feed-inventory-only",
     configuredSubscriptions: config.subscriptionIds.length,
+    profiledSubscriptions: subscriptionIds.length,
     targets,
     profiles,
   };
