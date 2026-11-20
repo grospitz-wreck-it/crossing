@@ -30,9 +30,9 @@ type ProbeResult = {
 };
 
 const initialCandidates: Candidate[] = [
-  { name: "Büttgen · 3,1 km", identifierType: "evaNumbers", identifier: "8001261" },
-  { name: "Neuss Hbf · 3,5 km", identifierType: "evaNumbers", identifier: "8000274" },
-  { name: "Neuss Am Kaiser · 4,2 km", identifierType: "evaNumbers", identifier: "8004320" },
+  { name: "IKEA Kaarst", identifierType: "evaNumbers", identifier: "8000438" },
+  { name: "Kaarst Mitte/Holzbüttgen", identifierType: "evaNumbers", identifier: "8000432" },
+  { name: "Kaarster Bahnhof", identifierType: "evaNumbers", identifier: "8003141" },
 ];
 
 function DirectionPanel({ title, result }: { title: string; result: DirectionResult }) {
