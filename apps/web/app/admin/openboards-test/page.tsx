@@ -2,7 +2,20 @@
 
 import { useEffect, useState } from "react";
 
-type Crossing = { id: string; name: string; evas: string[] };
+type Crossing = {
+  id: string; name: string; evas: string[]; stationCount?: number;
+  coveredStationCount?: number; stationsWithoutJobs?: number;
+  stationsWithoutObservations?: number;
+  stations?: Array<{
+    eva: string; arrivalsJob: boolean; departuresJob: boolean;
+    jobCount: number; failedJobs: number; observationCount: number;
+    latestObservedAt: string | null;
+  }>;
+};
+type Inventory = {
+  activeCrossings: number; crossingsWithoutEvas: number; crossingsWithEvas: number;
+  activeQueueJobs: number; stationsWithObservations: number;
+};
 type Observation = {
   key: string; journeyId: string; eva: string; direction: string; eventTime: string;
   scheduledTime: string | null; timeType: string; line: string; category: string;
@@ -16,7 +29,7 @@ type QueueJob = {
   lastStatus: string | null; consecutiveFailures: number; lastError: string | null;
 };
 type Payload = {
-  ok: boolean; crossings?: Crossing[]; crossing?: Crossing; observations?: Observation[];
+  ok: boolean; crossings?: Crossing[]; crossing?: Crossing; inventory?: Inventory; observations?: Observation[];
   queue?: QueueJob[]; summary?: { observationCount: number; arrivals: number; departures: number; latestObservedAt: string | null; queueJobs: number; failedJobs: number };
   error?: string; warning?: string;
 };
@@ -29,6 +42,7 @@ function time(value: string | null | undefined) {
 
 export default function OpenBoardsTestPage() {
   const [crossings, setCrossings] = useState<Crossing[]>([]);
+  const [inventory, setInventory] = useState<Inventory | null>(null);
   const [selected, setSelected] = useState("");
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -41,6 +55,7 @@ export default function OpenBoardsTestPage() {
       const result: Payload = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || "Testansicht ist nicht aktiviert.");
       setCrossings(result.crossings || []);
+      setInventory(result.inventory || null);
     } catch (e) { setError(e instanceof Error ? e.message : "Laden fehlgeschlagen."); }
     finally { setLoading(false); }
   }
@@ -69,6 +84,44 @@ export default function OpenBoardsTestPage() {
         </div>
         <button onClick={() => void loadSelected()} disabled={!selected || loading} style={{ padding: "10px 14px", borderRadius: 8, border: "1px solid #8886", background: "transparent" }}>Aktualisieren</button>
       </div>
+
+      {inventory && (
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 12, marginTop: 24 }}>
+          {[
+            ["Aktive Bahnübergänge", inventory.activeCrossings],
+            ["Mit EVA-Zuordnung", inventory.crossingsWithEvas],
+            ["Ohne EVAs", inventory.crossingsWithoutEvas],
+            ["Aktive Queue-Jobs", inventory.activeQueueJobs],
+            ["EVAs mit Beobachtungen", inventory.stationsWithObservations],
+          ].map(([label, value]) => (
+            <div key={String(label)} style={{ padding: 14, border: "1px solid #8884", borderRadius: 10 }}>
+              <div style={{ fontSize: 12, opacity: .65 }}>{label}</div>
+              <div style={{ fontSize: 25, fontWeight: 700 }}>{value}</div>
+            </div>
+          ))}
+        </section>
+      )}
+
+      {crossings.length > 0 && (
+        <section style={{ marginTop: 24 }}>
+          <h2 style={{ fontSize: 19, fontWeight: 650 }}>Abdeckung aller aktiven Bahnübergänge</h2>
+          <p style={{ fontSize: 13, opacity: .7 }}>Eine EVA gilt erst als vollständig versorgt, wenn Ankunfts- und Abfahrts-Job vorhanden sind. Beobachtungen werden separat gezählt.</p>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr>{["Bahnübergang","EVAs","Jobs vollständig","EVAs ohne Jobs","EVAs ohne Beobachtungen"].map(x => <th key={x} style={{ textAlign: "left", padding: 9, borderBottom: "1px solid #8885" }}>{x}</th>)}</tr></thead>
+              <tbody>{crossings.map(crossing => (
+                <tr key={crossing.id}>
+                  <td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{crossing.name}</td>
+                  <td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{crossing.stationCount ?? crossing.evas.length}</td>
+                  <td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{crossing.coveredStationCount ?? 0}</td>
+                  <td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{crossing.stationsWithoutJobs ?? crossing.evas.length}</td>
+                  <td style={{ padding: 9, borderBottom: "1px solid #8883" }}>{crossing.stationsWithoutObservations ?? crossing.evas.length}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <section style={{ marginTop: 24, padding: 16, border: "1px solid #8884", borderRadius: 12 }}>
         <label htmlFor="crossing" style={{ display: "block", fontWeight: 600, marginBottom: 8 }}>Bahnübergang auswählen</label>
