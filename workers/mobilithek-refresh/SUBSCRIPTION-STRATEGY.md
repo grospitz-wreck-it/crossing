@@ -74,3 +74,42 @@ Eine Subscription wird also nicht gelöscht, sondern zunächst deaktiviert und f
 - Es gibt keine automatische Aktivierung oder Deaktivierung.
 - Keine Feed-Entscheidung allein anhand von Bytevolumen, Stationsnamen oder einem einzelnen Profil-Lauf.
 - Vor einer produktiven Umstellung sind Tests und ein expliziter Rollback-Pfad erforderlich.
+
+## DB OpenBoards als zentrale Echtzeitquelle
+
+Die Deutsche Bahn stellt OpenBoards mit einem Free-Nutzungsplan von **10 Anfragen pro Sekunde** bereit. Die API liefert Abfahrten und Ankünfte für deutsche Eisenbahnstationen (schwere Schiene), inklusive Soll-/Prognosezeiten, Gleisen, Via-Halten, Ausfällen und Hinweisen. Die Endpunkte sind getrennte POST-Aufrufe für `/arrivals` und `/departures`.
+
+Für Crossings ist das ein viel gezielterer Ansatz als das regelmäßige Herunterladen großer regionaler Mobilithek-SIRI-Feeds: Wir fragen nur die EVAs ab, die aus dem aktuellen Bedarf aktiver Bahnübergänge hervorgehen, bündeln mehrere EVAs pro Anfrage und aktualisieren die Beobachtungen bedarfsgesteuert.
+
+### Bereits im Repository vorhanden
+
+- `openBoardsClient.ts`: API-Client mit EVA-Batches, 20-Sekunden-Cache und In-Flight-Deduplizierung.
+- `openBoardsNormalizer.ts`: Normalisierung von Abfahrts-/Ankunftszeilen und Via-EVAs.
+- `openBoardsScheduler.ts`: Zusammenfassung aktiver EVA-Bedarfe in deduplizierte Jobs.
+- `openBoardsQueueStore.ts`: persistente Queue, atomare Job-Claims, Backoff und ein globaler DB-basierter Request-Slot.
+- `008_openboards_scheduler.sql`: Tabellen für Queue und globalen Scheduler-Zustand.
+
+**Der entscheidende Punkt:** Diese Teile sind bislang nur ein Fundament. Der Queue-Store und der globale Limiter sind noch nicht in einen laufenden Refresh-Worker eingebunden; der OpenBoards-Client verwendet aktuell zusätzlich nur einen pro Runtime geltenden In-Memory-Limiter. Die API wird daher noch nicht produktiv zur Versorgung der Prognose genutzt.
+
+### Zielarchitektur
+
+1. Ein eigener OpenBoards-Refresh-Worker läuft unabhängig vom Mobilithek-Worker.
+2. Er liest den aktuellen aktiven Bedarf aus Turso und ermittelt daraus die Beobachtungs-EVAs.
+3. Gleiche EVAs werden über mehrere Bahnübergänge hinweg dedupliziert und in kleine EVA-Batches gebündelt.
+4. Für jede Batch werden Ankunfts- und Abfahrtstafel als getrennte Jobs geplant.
+5. Jeder echte Upstream-Aufruf reserviert zuerst atomar einen globalen Request-Slot in Turso. Damit gilt das Limit über mehrere Worker-Instanzen hinweg; wir zielen bewusst auf etwa 6–7 Requests/s statt die 10/s auszureizen.
+6. Die Antworten werden normalisiert und als eigene OpenBoards-Beobachtungen gespeichert. Die bestehende Mobilithek-Tabelle und ihre Leser werden zunächst nicht umgedeutet.
+7. Erst nach einem Shadow-Vergleich werden OpenBoards-Daten in die Prognose übernommen. Mobilithek bleibt bis zum Nachweis der Abdeckung als Fallback/Ergänzung verfügbar.
+
+### Fachliche Grenzen
+
+OpenBoards liefert nur Eisenbahnverkehre („schwere Schiene“), keine Busse, U-Bahnen oder Straßenbahnen. Außerdem ist eine Bahnhofstafel keine garantierte vollständige Zuglauf-API: Die Via-Halte sind wertvoller Laufwegkontext, aber nicht zwingend eine vollständige Streckenliste. Deshalb muss das Matching über konkrete EVA-Referenzen und die vorhandenen Strecken-/BÜ-Regeln erfolgen; ein bloßer Textvergleich der Bahnhofsnamen reicht nicht.
+
+Für Kirchlengern und OWL wird OpenBoards zuerst als gezielte Referenzversorgung aufgebaut. Die übrigen Testbahnhöfe bleiben eigene Testfälle und werden nicht stillschweigend entfernt.
+
+### Rollout-Schranken
+
+- Erst separater Worker und eigene Beobachtungstabelle, kein Überschreiben von Mobilithek-Snapshots.
+- Erst read-only/Shadow-Auswertung, keine Prognoseumschaltung.
+- Keine automatische Reduktion von Mobilithek, bevor die OpenBoards-Abdeckung je aktivem BÜ nachgewiesen ist.
+- Erst nach erfolgreichem Build, kontrollierten API-Proben und fachlichem Vergleich produktiv aktivieren.
