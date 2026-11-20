@@ -1,0 +1,107 @@
+import type { Client } from "@libsql/client";
+import type { TrainObservation } from "../../shared-types/src";
+import type { OpenBoardsStationObservation } from "./openBoardsNormalizer";
+
+function parseStringArray(value: unknown): string[] {
+  try {
+    const parsed = value ? JSON.parse(String(value)) : [];
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Read unexpired OpenBoards observations for a bounded set of station EVAs. */
+export async function getOpenBoardsObservations(
+  db: Client,
+  evaNumbers: string[],
+  options: { from?: string; to?: string; limit?: number } = {},
+): Promise<OpenBoardsStationObservation[]> {
+  const evas = [...new Set(evaNumbers.map((value) => String(value).trim()).filter(Boolean))];
+  if (!evas.length) return [];
+
+  const limit = Math.max(1, Math.min(10_000, Math.floor(options.limit ?? 2_000)));
+  const clauses = [
+    `eva_number IN (${evas.map(() => "?").join(",")})`,
+    "expires_at > ?",
+  ];
+  const args: Array<string | number> = [...evas, new Date().toISOString()];
+
+  if (options.from) {
+    clauses.push("event_time >= ?");
+    args.push(options.from);
+  }
+  if (options.to) {
+    clauses.push("event_time <= ?");
+    args.push(options.to);
+  }
+
+  const result = await db.execute({
+    sql: `SELECT journey_id, eva_number, direction, event_time, scheduled_time,
+                 time_type, line, category, journey_number, origin_eva,
+                 destination_eva, via_evas_json, route_evas_json,
+                 route_names_json, platform, cancelled, observed_at
+          FROM openboards_observations
+          WHERE ${clauses.join(" AND ")}
+          ORDER BY event_time ASC
+          LIMIT ?`,
+    args: [...args, limit],
+  });
+
+  return (result.rows as Array<Record<string, unknown>>).map((row) => ({
+    source: "openboards",
+    journeyId: String(row.journey_id || ""),
+    evaNumber: String(row.eva_number || ""),
+    direction: String(row.direction) as "arrivals" | "departures",
+    eventTime: String(row.event_time || ""),
+    scheduledTime: row.scheduled_time == null ? undefined : String(row.scheduled_time),
+    timeType: String(row.time_type || "UNKNOWN"),
+    line: String(row.line || ""),
+    category: String(row.category || ""),
+    journeyNumber: Number(row.journey_number || 0),
+    originEva: row.origin_eva == null ? undefined : String(row.origin_eva),
+    destinationEva: row.destination_eva == null ? undefined : String(row.destination_eva),
+    viaEvas: parseStringArray(row.via_evas_json),
+    routeEvas: parseStringArray(row.route_evas_json),
+    routeNames: parseStringArray(row.route_names_json),
+    platform: row.platform == null ? undefined : String(row.platform),
+    cancelled: Number(row.cancelled || 0) === 1,
+    observedAt: row.observed_at == null ? undefined : String(row.observed_at),
+  }));
+}
+
+/**
+ * Convert an OpenBoards board observation to the shared, source-neutral
+ * prediction input. OpenBoards route context remains partial by definition.
+ */
+export function toTrainObservation(
+  observation: OpenBoardsStationObservation,
+  observedAt = new Date().toISOString(),
+): TrainObservation {
+  const timeQuality =
+    observation.timeType === "REAL" || observation.timeType === "PREVIEW"
+      ? observation.timeType
+      : "UNKNOWN";
+
+  return {
+    source: "openboards",
+    journeyId: observation.journeyId,
+    stationRef: observation.evaNumber,
+    direction: observation.direction,
+    observedAt: observation.observedAt || observedAt,
+    eventTime: observation.eventTime,
+    scheduledTime: observation.scheduledTime,
+    timeQuality,
+    line: observation.line,
+    category: observation.category,
+    journeyNumber: observation.journeyNumber,
+    originRef: observation.originEva,
+    destinationRef: observation.destinationEva,
+    viaRefs: observation.viaEvas,
+    routeRefs: observation.routeEvas,
+    routeNames: observation.routeNames,
+    routeCompleteness: observation.routeEvas.length ? "partial" : "unknown",
+    platform: observation.platform,
+    cancelled: observation.cancelled,
+  };
+}
