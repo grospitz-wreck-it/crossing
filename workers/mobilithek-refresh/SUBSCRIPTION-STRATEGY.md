@@ -113,3 +113,29 @@ Für Kirchlengern und OWL wird OpenBoards zuerst als gezielte Referenzversorgung
 - Erst read-only/Shadow-Auswertung, keine Prognoseumschaltung.
 - Keine automatische Reduktion von Mobilithek, bevor die OpenBoards-Abdeckung je aktivem BÜ nachgewiesen ist.
 - Erst nach erfolgreichem Build, kontrollierten API-Proben und fachlichem Vergleich produktiv aktivieren.
+
+## Implementierungsstand OpenBoards Shadow Worker (20.11.2026)
+
+Der erste getrennte Worker liegt unter `workers/openboards-refresh/`.
+
+Bereits umgesetzt:
+- eigener Wrangler-Worker mit Cron-Ausführung einmal pro Minute;
+- eigene Demand-Ermittlung aus aktiven Crossing-Zuordnungen;
+- OWL-Kernstandorte mit Priorität 10 / Standardintervall 60 Sekunden;
+- übrige aktive Test-/Explorationsstandorte mit Priorität 100 / Standardintervall 300 Sekunden;
+- deduplizierte EVA-Batches, getrennt nach Prioritätsgruppe und Ankunft/Abfahrt;
+- persistente Queue mit atomarem Claiming und Fehler-Backoff;
+- accountweiter Turso-Request-Slot mit 150 ms Abstand (ca. 6,7 Requests/Sekunde);
+- explizite Credential-Übergabe für Cloudflare Worker ohne Node-`process.env`;
+- eigene Tabellen für OpenBoards-Beobachtungen und Refresh-Läufe (Migration 009);
+- erfolgreiche Antworten ersetzen nur den jeweiligen EVA-/Richtungsbestand; Fehler lassen letzte erfolgreiche Beobachtungen unangetastet.
+
+Wichtige Grenze:
+- Der Worker schreibt ausschließlich nach `openboards_observations`, `openboards_refresh_jobs`,
+  `openboards_scheduler_state` und `openboards_refresh_runs`.
+- Er verändert weder `mobilithek_train_snapshot` noch die Forecast-Ausgabe.
+- Es gibt noch keine OpenBoards-Prognoseintegration und keinen produktiven Quellenwechsel.
+- Vor dem ersten Lauf müssen Migration 008 und 009 auf derselben Turso-Datenbank angewendet
+  und die vier Secrets gesetzt sein. Deployment und Live-Test sind noch nicht erfolgt.
+
+Setup und Betriebsdetails stehen in `workers/openboards-refresh/README.md`.
