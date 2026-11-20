@@ -14,6 +14,7 @@ export {
   filterMobilithekTrains,
 } from "./mobilithekTimetable";
 export { filterEventsByDemand, getDemandMatches, getDemandMatchDetails } from "./filterDemand";
+export { normalizeMobilithekProductCategory } from "./mobilithekTimetable";
 export { getSnapshotThroughTrains } from "./getSnapshotThroughTrains";
 
 export type {
