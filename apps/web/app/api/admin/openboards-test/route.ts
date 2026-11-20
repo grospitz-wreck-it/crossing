@@ -23,27 +23,89 @@ export async function GET(request: Request) {
   const crossingId = String(searchParams.get("crossingId") || "").trim();
 
   try {
+    // The diagnostic inventory must show every active crossing, not only
+    // crossings currently assigned to a user. This is read-only.
     const crossingsResult = await db.execute({
       sql: `SELECT id, name, reference_stations
             FROM crossings
             WHERE status = 'active'
-              AND (
-                EXISTS (SELECT 1 FROM user_crossings uc WHERE uc.crossing_id = crossings.id)
-                OR EXISTS (SELECT 1 FROM user_settings us WHERE us.default_crossing_id = crossings.id)
-              )
             ORDER BY name COLLATE NOCASE
-            LIMIT 200`,
+            LIMIT 500`,
     });
 
-    const crossings = (crossingsResult.rows as Array<Record<string, unknown>>).map((row) => ({
+    const baseCrossings = (crossingsResult.rows as Array<Record<string, unknown>>).map((row) => ({
       id: String(row.id),
       name: String(row.name || row.id),
       evas: parseEvas(row.reference_stations),
     }));
 
     if (!crossingId) {
-      return Response.json({ ok: true, crossings }, { headers: { "Cache-Control": "no-store" } });
+      const [queueInventoryResult, observationInventoryResult] = await Promise.all([
+        db.execute({
+          sql: `SELECT job_key, direction, eva_numbers_json, last_status
+                FROM openboards_refresh_jobs
+                WHERE is_active = 1`,
+        }),
+        db.execute({
+          sql: `SELECT eva_number, COUNT(*) AS observation_count,
+                       MAX(observed_at) AS latest_observed_at
+                FROM openboards_observations
+                WHERE expires_at > ?
+                GROUP BY eva_number`,
+          args: [new Date().toISOString()],
+        }),
+      ]);
+
+      const activeJobs = (queueInventoryResult.rows as Array<Record<string, unknown>>).map((row) => ({
+        direction: String(row.direction || ""),
+        evas: parseEvas(row.eva_numbers_json),
+        status: String(row.last_status || "waiting"),
+      }));
+      const observationsByEva = new Map(
+        (observationInventoryResult.rows as Array<Record<string, unknown>>).map((row) => [
+          String(row.eva_number || ""),
+          { count: Number(row.observation_count || 0), latest: row.latest_observed_at == null ? null : String(row.latest_observed_at) },
+        ]),
+      );
+
+      const crossings = baseCrossings.map((crossing) => {
+        const stations = crossing.evas.map((eva) => {
+          const jobs = activeJobs.filter((job) => job.evas.includes(eva));
+          const observation = observationsByEva.get(eva);
+          return {
+            eva,
+            arrivalsJob: jobs.some((job) => job.direction === "arrivals"),
+            departuresJob: jobs.some((job) => job.direction === "departures"),
+            jobCount: jobs.length,
+            failedJobs: jobs.filter((job) => job.status === "error").length,
+            observationCount: observation?.count || 0,
+            latestObservedAt: observation?.latest || null,
+          };
+        });
+        return {
+          ...crossing,
+          stationCount: crossing.evas.length,
+          coveredStationCount: stations.filter((station) => station.arrivalsJob && station.departuresJob).length,
+          stationsWithoutJobs: stations.filter((station) => station.jobCount === 0).length,
+          stationsWithoutObservations: stations.filter((station) => station.observationCount === 0).length,
+          stations,
+        };
+      });
+
+      return Response.json({
+        ok: true,
+        crossings,
+        inventory: {
+          activeCrossings: crossings.length,
+          crossingsWithoutEvas: crossings.filter((item) => item.evas.length === 0).length,
+          crossingsWithEvas: crossings.filter((item) => item.evas.length > 0).length,
+          activeQueueJobs: activeJobs.length,
+          stationsWithObservations: observationsByEva.size,
+        },
+      }, { headers: { "Cache-Control": "no-store" } });
     }
+
+    const crossings = baseCrossings;
 
     const crossing = crossings.find((item) => item.id === crossingId);
     if (!crossing) {
