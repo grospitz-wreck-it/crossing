@@ -1,9 +1,8 @@
 import { createClient, type Client } from "@libsql/client/web";
 import {
   fetchOpenBoardsForStations,
-  type OpenBoardsStationObservation,
 } from "../../../packages/db-api-client/src/openBoardsClient";
-import { normalizeOpenBoardsBatches } from "../../../packages/db-api-client/src/openBoardsNormalizer";
+import { normalizeOpenBoardsBatches, type OpenBoardsStationObservation } from "../../../packages/db-api-client/src/openBoardsNormalizer";
 import {
   buildOpenBoardsQueueJobs,
   type OpenBoardsQueueDemand,
@@ -25,13 +24,6 @@ export interface Env {
   OPENBOARDS_CORE_INTERVAL_MS?: string;
   OPENBOARDS_EXPLORATORY_INTERVAL_MS?: string;
 }
-
-type DemandStation = {
-  eva: string;
-  name: string;
-  priority: number;
-  intervalMs: number;
-};
 
 const OWL_STATIONS = [
   "kirchlengern", "herford", "buende", "bünde", "bielefeld", "loehne", "löhne",
@@ -136,9 +128,8 @@ async function loadDemand(db: Client, env: Env): Promise<OpenBoardsQueueDemand[]
       if (station) evas.add(station.eva);
     }
 
-    const stations = [...evas].map((eva) => stationByEva.get(eva)).filter(
-      (item): item is { eva: string; name: string } => Boolean(item),
-    );
+    // Keep configured EVAs even if the optional station catalogue has no name for them.
+    const stations = [...evas].map((eva) => stationByEva.get(eva) || { eva, name: eva });
     const isCore = stations.some((station) => isOwlStation(station.name));
     demandByCrossing.set(crossingId, {
       crossingId,
@@ -216,7 +207,7 @@ async function persistObservations(
       VALUES (?, ?, ?, ?, ?, 'success', ?)`,
     args: [jobKey, direction, JSON.stringify(evas), observedIso, new Date().toISOString(), observations.length],
   });
-  await db.execute("DELETE FROM openboards_observations WHERE expires_at < datetime('now')");
+  await db.execute("DELETE FROM openboards_observations WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
 }
 
 async function recordFailure(
@@ -246,7 +237,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   const jobs = buildOpenBoardsQueueJobs(demand, { batchSize });
   await syncOpenBoardsQueue(db, jobs);
 
-  const maxJobs = Math.max(1, Math.min(20, Number(env.OPENBOARDS_MAX_JOBS_PER_RUN || 8)));
+  const maxJobs = Math.max(1, Math.min(20, Number(env.OPENBOARDS_MAX_JOBS_PER_RUN || 20)));
   let processed = 0;
   let observationsWritten = 0;
   const errors: string[] = [];
