@@ -30,9 +30,9 @@ type ProbeResult = {
 };
 
 const initialCandidates: Candidate[] = [
-  { name: "IKEA Kaarst", identifierType: "dhids", identifier: "" },
-  { name: "Kaarst Mitte/Holzbüttgen", identifierType: "dhids", identifier: "" },
-  { name: "Kaarster Bahnhof", identifierType: "dhids", identifier: "" },
+  { name: "Büttgen · 3,1 km", identifierType: "evaNumbers", identifier: "8001261" },
+  { name: "Neuss Hbf · 3,5 km", identifierType: "evaNumbers", identifier: "8000274" },
+  { name: "Neuss Am Kaiser · 4,2 km", identifierType: "evaNumbers", identifier: "8004320" },
 ];
 
 function DirectionPanel({ title, result }: { title: string; result: DirectionResult }) {
@@ -83,6 +83,11 @@ export default function OpenBoardsS28ProbePage() {
   }
 
   async function runProbe() {
+    const validCandidates = candidates.filter((item) => item.identifier.trim());
+    if (!validCandidates.length) {
+      setError("Bitte mindestens eine Stations-ID eintragen.");
+      return;
+    }
     setLoading(true);
     setError("");
     setResults([]);
@@ -91,7 +96,7 @@ export default function OpenBoardsS28ProbePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         cache: "no-store",
-        body: JSON.stringify({ candidates }),
+        body: JSON.stringify({ candidates: validCandidates }),
       });
       const payload = await response.json();
       if (!response.ok || !payload.ok) throw new Error(payload.error || "Diagnose fehlgeschlagen.");
@@ -137,10 +142,10 @@ export default function OpenBoardsS28ProbePage() {
       </section>
 
       <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
-        <button onClick={() => void runProbe()} disabled={loading || candidates.some((item) => !item.identifier.trim())} style={{ padding: "11px 16px", borderRadius: 8, border: 0, background: "#111827", color: "white", fontWeight: 650, opacity: loading || candidates.some((item) => !item.identifier.trim()) ? .5 : 1 }}>
+        <button onClick={() => void runProbe()} disabled={loading || !candidates.some((item) => item.identifier.trim())} style={{ padding: "11px 16px", borderRadius: 8, border: 0, background: "#111827", color: "white", fontWeight: 650, opacity: loading || !candidates.some((item) => item.identifier.trim()) ? .5 : 1 }}>
           {loading ? "OpenBoards wird abgefragt …" : "S28-Test starten"}
         </button>
-        <span style={{ fontSize: 12, opacity: .65 }}>Maximal 6 Requests · Ankunft und Abfahrt je Haltepunkt</span>
+        <span style={{ fontSize: 12, opacity: .65 }}>Maximal 6 Requests · Leere Zeilen werden übersprungen</span>
       </div>
 
       {error && <p role="alert" style={{ color: "#c2410c", padding: 12, background: "#c2410c12", borderRadius: 8 }}>{error}</p>}
