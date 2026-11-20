@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "workers/openboards-refresh/**"
+      - "apps/web/app/admin/openboards-test/**"
+      - "apps/web/app/api/admin/openboards-test/**"
       - "scripts/openboards-refresh-integration-test.cjs"
       - "packages/db-api-client/src/openBoards*.ts"
       - "packages/db-api-client/sql/00[89]_openboards_*.sql"
