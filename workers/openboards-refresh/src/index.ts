@@ -114,7 +114,7 @@ async function loadDemand(
 
   const [crossingsResult, catalogResult] = await Promise.all([
     db.execute(`
-      SELECT c.id, c.reference_stations, c.through_rules
+      SELECT c.id, c.observation_evas, c.reference_stations, c.through_rules
       FROM crossings c
       WHERE c.status = 'active'
         AND (
@@ -145,7 +145,12 @@ async function loadDemand(
     const evas = new Set<string>();
     const stationNames: string[] = [];
 
-    for (const value of parseArray(row.reference_stations)) {
+    // Admin saves selected DB observation stations in observation_evas.
+    // Keep reference_stations as a backwards-compatible legacy source.
+    for (const value of [
+      ...parseArray(row.observation_evas),
+      ...parseArray(row.reference_stations),
+    ]) {
       const eva = String(value || "").trim();
       if (eva) evas.add(eva);
     }
