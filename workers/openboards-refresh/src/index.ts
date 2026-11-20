@@ -177,19 +177,30 @@ async function persistObservations(
   observedAt: Date,
 ): Promise<void> {
   const observedIso = observedAt.toISOString();
+  const validObservations = observations.filter((item) =>
+    Number.isFinite(new Date(item.eventTime).getTime()),
+  );
+  const observationKeys = validObservations.map((item) =>
+    [item.journeyId, item.evaNumber, item.direction].join("|"),
+  );
   const statements: Array<{ sql: string; args: Array<string | number | null> }> = [
     {
+      // Keep unchanged journeys in place. Only remove observations that were
+      // absent from this successful board response; this avoids a full
+      // delete-and-reinsert cycle for every refresh.
       sql: `DELETE FROM openboards_observations
             WHERE direction = ?
-              AND eva_number IN (${evas.map(() => "?").join(",")})`,
-      args: [direction, ...evas],
+              AND eva_number IN (${evas.map(() => "?").join(",")})
+              AND observation_key NOT IN (
+                SELECT value FROM json_each(?)
+              )`,
+      args: [direction, ...evas, JSON.stringify(observationKeys)],
     },
   ];
 
-  for (const item of observations) {
+  for (const item of validObservations) {
     const observationKey = [item.journeyId, item.evaNumber, item.direction].join("|");
     const eventTime = new Date(item.eventTime);
-    if (!Number.isFinite(eventTime.getTime())) continue;
     const expiresAt = new Date(Math.max(eventTime.getTime() + 60 * 60_000, observedAt.getTime() + 30 * 60_000)).toISOString();
     statements.push({
       sql: `INSERT INTO openboards_observations (
@@ -231,7 +242,7 @@ async function persistObservations(
     sql: `INSERT INTO openboards_refresh_runs
       (job_key, direction, eva_numbers_json, requested_at, completed_at, status, observation_count)
       VALUES (?, ?, ?, ?, ?, 'success', ?)`,
-    args: [jobKey, direction, JSON.stringify(evas), observedIso, new Date().toISOString(), observations.length],
+    args: [jobKey, direction, JSON.stringify(evas), observedIso, new Date().toISOString(), validObservations.length],
   });
   await db.execute("DELETE FROM openboards_observations WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
 }
