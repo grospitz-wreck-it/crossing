@@ -57,6 +57,8 @@ and the caller sends `Authorization: Bearer <token>`.
 - The worker caches active crossing demand and the station catalogue in-memory
   for up to five minutes, then reconciles the persistent queue. Isolate restarts
   cause a fresh read and reconciliation.
+- Expired-observation cleanup runs at most once per warm isolate per hour, after
+  a run that processed at least one job; cleanup errors do not fail board refreshes.
 - EVAs are deduplicated across crossings and batched separately by priority.
 - Primary reference EVAs are retained even when the optional station catalogue
   has no matching display name. Secondary through-rule station names are added
