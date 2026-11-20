@@ -124,7 +124,13 @@ export async function fetchOpenBoardsBoard(
 
   const body = {
     stopPlaceOrStation: { evaNumbers },
-    // Stable within the short cache window so simultaneous/repeated callers\n    // share one board request instead of creating a new cache key every ms.\n    timeWindow: {\n      timeStart:\n        options.timeStart ||\n        new Date(Math.floor(Date.now() / CACHE_TTL_MS) * CACHE_TTL_MS).toISOString(),\n    },
+    // Stable within the short cache window so simultaneous/repeated callers
+    // share one board request instead of creating a new cache key every ms.
+    timeWindow: {
+      timeStart:
+        options.timeStart ||
+        new Date(Math.floor(Date.now() / CACHE_TTL_MS) * CACHE_TTL_MS).toISOString(),
+    },
     maxViaStops: options.maxViaStops ?? 5,
     maxEntriesPerTransportType: options.maxEntriesPerTransportType ?? 25,
     languages: options.languages ?? ["deu"],
