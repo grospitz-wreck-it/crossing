@@ -55,9 +55,15 @@ jobs:
       - name: Compile real OpenBoards queue modules for integration test
         run: |
           rm -rf .tmp/openboards-test
-          npx tsc packages/db-api-client/src/openBoardsQueueStore.ts packages/db-api-client/src/openBoardsScheduler.ts packages/db-api-client/src/openBoardsObservations.ts \
+          npx tsc packages/db-api-client/src/openBoardsQueueStore.ts packages/db-api-client/src/openBoardsScheduler.ts \
             --target ES2022 --module commonjs --moduleResolution node --skipLibCheck \
             --esModuleInterop --outDir .tmp/openboards-test
+      - name: Compile OpenBoards observation matcher
+        run: |
+          rm -rf .tmp/openboards-match-test
+          npx tsc packages/db-api-client/src/openBoardsObservations.ts \
+            --target ES2022 --module commonjs --moduleResolution node --skipLibCheck \
+            --esModuleInterop --rootDir . --outDir .tmp/openboards-match-test
       - name: Run isolated OpenBoards refresh integration flow
         run: node scripts/openboards-refresh-integration-test.cjs
       - name: Test strict OpenBoards-to-Mobilithek event matching
