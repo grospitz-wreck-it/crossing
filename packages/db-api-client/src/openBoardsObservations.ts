@@ -71,6 +71,53 @@ export async function getOpenBoardsObservations(
 }
 
 /**
+ * Find a strict station-level match between an OpenBoards board row and a
+ * Mobilithek-derived route candidate. Route identity stays with Mobilithek;
+ * OpenBoards contributes only the live time for the same train/station event.
+ */
+export function findMatchingOpenBoardsObservation(
+  candidate: {
+    observationEva: string;
+    observationDirection: "arrivals" | "departures" | "unknown";
+    observationScheduledTime?: string;
+    line?: string;
+    journeyNumber?: number;
+  },
+  observations: OpenBoardsStationObservation[],
+): OpenBoardsStationObservation | null {
+  const eva = String(candidate.observationEva || "").trim();
+  const journeyNumber = Number(candidate.journeyNumber || 0);
+  const line = String(candidate.line || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const scheduledAt = Date.parse(String(candidate.observationScheduledTime || ""));
+
+  // Without all three stable anchors, do not guess from a line or time alone.
+  if (!eva || !journeyNumber || !line || candidate.observationDirection === "unknown" || !Number.isFinite(scheduledAt)) {
+    return null;
+  }
+
+  const matches = observations
+    .filter((observation) => {
+      if (observation.evaNumber !== eva || observation.direction !== candidate.observationDirection) return false;
+      if (Number(observation.journeyNumber || 0) !== journeyNumber) return false;
+      if (String(observation.line || "").toUpperCase().replace(/[^A-Z0-9]/g, "") !== line) return false;
+      if (observation.timeType !== "REAL" && observation.timeType !== "PREVIEW") return false;
+      const eventAt = Date.parse(observation.eventTime);
+      const boardScheduledAt = Date.parse(String(observation.scheduledTime || ""));
+      return Number.isFinite(eventAt) && Number.isFinite(boardScheduledAt) && Math.abs(boardScheduledAt - scheduledAt) <= 180_000;
+    })
+    .sort((a, b) => {
+      const quality = (value: string) => value === "REAL" ? 0 : 1;
+      const aDelta = Math.abs(Date.parse(String(a.scheduledTime)) - scheduledAt);
+      const bDelta = Math.abs(Date.parse(String(b.scheduledTime)) - scheduledAt);
+      if (quality(a.timeType) !== quality(b.timeType)) return quality(a.timeType) - quality(b.timeType);
+      if (aDelta !== bDelta) return aDelta - bDelta;
+      return Date.parse(String(b.observedAt || "")) - Date.parse(String(a.observedAt || ""));
+    });
+
+  return matches[0] || null;
+}
+
+/**
  * Convert an OpenBoards board observation to the shared, source-neutral
  * prediction input. OpenBoards route context remains partial by definition.
  */
