@@ -35,6 +35,7 @@ export default function CrossingsAdmin() {
   const [forecastError, setForecastError] = useState("");
   const lookupTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lookupRequest = useRef(0);
+  const stationRequest = useRef(0);
   const [form, setForm] = useState({ id: "", name: "", eva: "", lat: "", lon: "", closeOffsetSeconds: "80", openOffsetSeconds: "20", confidence: "0.5", trainSourceMode: "hybrid" });
 
   async function load() { const res = await fetch("/api/admin/crossings", { cache: "no-store" }); if (res.ok) setCrossings(await res.json()); }
@@ -60,24 +61,49 @@ export default function CrossingsAdmin() {
     finally { if (requestId === lookupRequest.current) setStationLoading(false); }
   }
   async function loadStationCandidates(candidate: RailwayCandidate) {
+    const requestId = ++stationRequest.current;
     if (!location || !candidate.relationId) {
       setStationCandidates([]);
       setSelectedObservationStations([]);
+      setStationCandidateLoading(false);
       return;
     }
     setStationCandidateLoading(true);
+    setStationCandidates([]);
+    setLookupError("");
+    const url = `/api/admin/crossings/stations?lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}&relationId=${encodeURIComponent(candidate.relationId)}`;
+    let lastError: unknown = null;
     try {
-      const response = await fetch(`/api/admin/crossings/stations?lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}&relationId=${encodeURIComponent(candidate.relationId)}`, { cache: "no-store" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "DB-Stationen konnten nicht ermittelt werden.");
-      setStationCandidates(Array.isArray(data.stations) ? data.stations : []);
-      setSelectedObservationStations([]);
+      // Overpass/Turso can occasionally abort a request under load. Retry twice,
+      // but never let an older route selection overwrite the current one.
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (requestId !== stationRequest.current) return;
+        try {
+          const response = await fetch(url, { cache: "no-store" });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || `DB-Stationen konnten nicht ermittelt werden (${response.status}).`);
+          if (requestId !== stationRequest.current) return;
+          setStationCandidates(Array.isArray(data.stations) ? data.stations : []);
+          setSelectedObservationStations([]);
+          return;
+        } catch (error) {
+          lastError = error;
+          const message = error instanceof Error ? error.message : String(error);
+          const retryable = /abort|timeout|temporar|network|fetch failed/i.test(message);
+          if (!retryable || attempt === 2) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+        }
+      }
     } catch (error) {
+      if (requestId !== stationRequest.current) return;
       setStationCandidates([]);
       setSelectedObservationStations([]);
-      setLookupError(error instanceof Error ? error.message : "DB-Stationen konnten nicht ermittelt werden.");
+      const message = error instanceof Error ? error.message : String(error || lastError || "");
+      setLookupError(/abort|timeout|temporar|network|fetch failed/i.test(message)
+        ? "Die Bahnhofssuche wurde vorübergehend unterbrochen. Bitte die Strecke erneut auswählen."
+        : message || "DB-Stationen konnten nicht ermittelt werden.");
     } finally {
-      setStationCandidateLoading(false);
+      if (requestId === stationRequest.current) setStationCandidateLoading(false);
     }
   }
   function setStationSide(station: StationCandidate, side: "before" | "after") {
