@@ -14,7 +14,41 @@ function normalizeRouteName(value: string) { return value.trim().toLowerCase().r
 function makeCandidate(lat: number, lon: number, geometry: Point[], tags: Record<string, string | undefined>, wayId: number, source: string): Candidate | null { const distanceMeters = geometryDistanceMeters(lat, lon, geometry); if (!Number.isFinite(distanceMeters) || distanceMeters > 200) return null; const infrastructureType = tags.railway === "tram" ? "tram" : tags.railway === "light_rail" ? "light_rail" : "rail"; return { kind: "track", routeType: infrastructureType === "tram" ? "tram" : infrastructureType === "light_rail" ? "light_rail" : "track", infrastructureType, ref: String(tags.ref || ""), name: String(tags.name || ""), from: String(tags.from || ""), to: String(tags.to || ""), distanceMeters: Math.round(distanceMeters), wayId, relationId: null, lineRelations: [], source, waysCount: 1, segments: [geometry] }; }
 function mergeLineRelations(target: LineRelation[], incoming: LineRelation[]) { const seen = new Set(target.map((relation) => relation.id)); for (const relation of incoming) { if (seen.has(relation.id)) continue; target.push(relation); seen.add(relation.id); } }
 function enrichFromRelations(candidate: Candidate) { const relations = candidate.lineRelations; candidate.ref = candidate.ref || relations.map((r) => r.ref).find(Boolean) || ""; candidate.name = candidate.name || relations.map((r) => r.name).find(Boolean) || ""; candidate.from = candidate.from || relations.map((r) => r.from).find(Boolean) || ""; candidate.to = candidate.to || relations.map((r) => r.to).find(Boolean) || ""; candidate.relationId = candidate.relationId ?? relations[0]?.id ?? null; candidate.kind = relations.length ? "route" : "track"; }
-function groupCandidates(candidates: Candidate[]) { const grouped = new Map<string, Candidate>(); for (const candidate of candidates) { enrichFromRelations(candidate); if (!candidate.lineRelations.length && !candidate.ref) continue; const ref = normalizeRouteRef(candidate.ref); const relationRefs = candidate.lineRelations.map((r) => normalizeRouteRef(r.ref)).filter(Boolean).sort(); const name = normalizeRouteName(candidate.name); const key = ref ? `ref:${candidate.infrastructureType}:${ref}` : relationRefs.length ? `relations:${candidate.infrastructureType}:${relationRefs.join(",")}` : `name:${candidate.infrastructureType}:${name}`; const existing = grouped.get(key); if (!existing) { grouped.set(key, { ...candidate, segments: [...candidate.segments], lineRelations: [...candidate.lineRelations] }); continue; } existing.kind = "route"; existing.ref = existing.ref || candidate.ref; existing.name = existing.name || candidate.name; existing.from = existing.from || candidate.from; existing.to = existing.to || candidate.to; existing.relationId = existing.relationId ?? candidate.relationId; existing.waysCount += candidate.waysCount; existing.distanceMeters = Math.min(existing.distanceMeters, candidate.distanceMeters); existing.segments.push(...candidate.segments); mergeLineRelations(existing.lineRelations, candidate.lineRelations); enrichFromRelations(existing); } return [...grouped.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 8); }
+function groupCandidates(candidates: Candidate[]) {
+  const grouped = new Map<string, Candidate>();
+  for (const candidate of candidates) {
+    enrichFromRelations(candidate);
+    const ref = normalizeRouteRef(candidate.ref);
+    const relationRefs = candidate.lineRelations.map((r) => normalizeRouteRef(r.ref)).filter(Boolean).sort();
+    const name = normalizeRouteName(candidate.name);
+    // Keep unnamed physical railway ways too. They are still useful OSM
+    // geometry and must be visible/selectable on the map even without a route relation.
+    const key = ref
+      ? `ref:${candidate.infrastructureType}:${ref}`
+      : relationRefs.length
+        ? `relations:${candidate.infrastructureType}:${relationRefs.join(",")}`
+        : candidate.lineRelations.length
+          ? `relation-id:${candidate.infrastructureType}:${candidate.lineRelations.map((r) => r.id).sort((a, b) => a - b).join(",")}`
+          : `way:${candidate.infrastructureType}:${candidate.wayId}`;
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, { ...candidate, segments: [...candidate.segments], lineRelations: [...candidate.lineRelations] });
+      continue;
+    }
+    existing.kind = existing.lineRelations.length || candidate.lineRelations.length ? "route" : "track";
+    existing.ref = existing.ref || candidate.ref;
+    existing.name = existing.name || candidate.name;
+    existing.from = existing.from || candidate.from;
+    existing.to = existing.to || candidate.to;
+    existing.relationId = existing.relationId ?? candidate.relationId;
+    existing.waysCount += candidate.waysCount;
+    existing.distanceMeters = Math.min(existing.distanceMeters, candidate.distanceMeters);
+    existing.segments.push(...candidate.segments);
+    mergeLineRelations(existing.lineRelations, candidate.lineRelations);
+    enrichFromRelations(existing);
+  }
+  return [...grouped.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 20);
+}
 
 async function tryOverpass(lat: number, lon: number) {
   // Query only railway infrastructure near the crossing, then resolve the
