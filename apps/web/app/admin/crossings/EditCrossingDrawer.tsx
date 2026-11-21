@@ -115,7 +115,7 @@ function editMapMercator(lat: number, lon: number, zoom: number) {
   return { x: ((lon + 180) / 360) * n, y: ((1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2) * n };
 }
 function EditInfrastructureMap({ lat, lon, candidates, stations, selectedEva, onSelectStation }: { lat: number; lon: number; candidates: InfrastructureCandidate[]; stations: NearbyStation[]; selectedEva: string; onSelectStation: (station: NearbyStation) => void }) {
-  const width = 700, height = 280, zoom = 14;
+  const width = 700, height = 280, zoom = 11;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return <div style={{ padding: 16, color: "#68717d" }}>Bitte gültige Koordinaten eingeben.</div>;
   const center = editMapMercator(lat, lon, zoom), originX = center.x * 256 - width / 2, originY = center.y * 256 - height / 2;
   const tileX = Math.floor(center.x), tileY = Math.floor(center.y);
