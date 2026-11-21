@@ -115,6 +115,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         line:train.line,
         category:train.category,
         journeyNumber:train.journeyNumber,
+        journeyRef:train.journeyRef,
         origin:train.origin,
         destination:train.destination,
         platform:train.platform,
@@ -151,6 +152,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)
       });
     }
-    const unique=Array.from(new Map(trains.map(t=>[`${t.line}-${t.category}-${t.journeyNumber}`,t])).values()); const payload=toPayload(crossing,unique,lineHints); await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"mobilithek-snapshot"}});
+    const unique=Array.from(new Map(trains.map(t=>[
+      t.journeyRef || `${t.line}-${t.category}-${t.journeyNumber}-${t.crossingTime}`,
+      t,
+    ])).values()); const payload=toPayload(crossing,unique,lineHints); await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
 }
