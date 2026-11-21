@@ -2,12 +2,13 @@ import { db } from "../../../../../lib/db";
 import { getStationTimetable } from "../../../../../../../../packages/db-api-client/src/getStationTimetable";
 import { getMobilithekTrainRegistry, type MobilithekTrainEvent } from "../../../../../../../../packages/db-api-client/src/mobilithekTimetable";
 import { loadCrossingOsmRoute, readCrossingForecastCache, writeCrossingForecastCache } from "../../../../../lib/crossingForecastCache";
+import { DEFAULT_CLOSURE_MERGE_GAP_SECONDS, shouldMergeClosures } from "../../../../../lib/closureMerge";
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
 const MAX_DIRECT_OBSERVATION_STATIONS = 6;
 const MAX_RULE_STATIONS = 8;
 const FORECAST_TIMETABLE_HOURS = 1;
 const FORECAST_CACHE_TTL_MS = 60_000;
-const FORECAST_VERSION = 5;
+const FORECAST_VERSION = 6;
 function normalizeStationName(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function normalizeLine(value: unknown) { return String(value || "").toUpperCase().replace(/\s+/g, "").replace(/[._-]/g, ""); }
 function routeIndex(route: string[], station: string) { const target = normalizeStationName(station); if (!target) return -1; return route.findIndex((stop) => { const value = normalizeStationName(stop); return value === target || value.includes(target) || target.includes(value); }); }
@@ -136,7 +137,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   for (const eva of contextEvas.slice(0, 2)) if (!storedThroughRules.some((rule: any) => String(rule.observationEva || "") === eva)) stationResults.push({ eva, stationName: stationNameByEva.get(eva) || eva, role: "context", rule: false, ok: true });
   const trains = [...trainsByKey.values()].filter((train) => train.etaSeconds > 0).sort((a, b) => a.etaSeconds - b.etaSeconds);
   const closures: any[] = [];
-  for (const train of trains) { const start = new Date(train.closeAt); const end = new Date(train.openAt); const last = closures[closures.length - 1]; if (!last || start.getTime() > last.end.getTime() + 30000) closures.push({ start, end, trains: [train] }); else { if (end.getTime() > last.end.getTime()) last.end = end; last.trains.push(train); } }
+  for (const train of trains) { const start = new Date(train.closeAt); const end = new Date(train.openAt); const last = closures[closures.length - 1]; if (!last || !shouldMergeClosures(last.end, start, DEFAULT_CLOSURE_MERGE_GAP_SECONDS)) closures.push({ start, end, trains: [train] }); else { if (end.getTime() > last.end.getTime()) last.end = end; last.trains.push(train); } }
   const nextClosure = closures.find((closure) => closure.end.getTime() > now) || null;
   let state = "OPEN"; if (nextClosure && now >= nextClosure.start.getTime() && now < nextClosure.end.getTime()) state = "CLOSED";
   diagnostics.finalUniqueTrains = trains.length;
