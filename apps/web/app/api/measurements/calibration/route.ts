@@ -98,7 +98,7 @@ export async function GET() {
       const id = String(row.prediction_id ?? "");
       const event = String(row.event_type ?? "");
       const at = timestamp(row.actual_at);
-      if (!id || !at || (event !== "close" && event !== "open")) continue;
+      if (!id || at === null || (event !== "close" && event !== "open")) continue;
 
       const dedupeKey = `${id}|${event}|${at}`;
       if (seen.has(dedupeKey)) continue;
@@ -178,15 +178,18 @@ export async function GET() {
       patternMap.set(key, values);
     }
 
+    const MIN_PATTERN_SAMPLES = 20;
     const patterns = Array.from(patternMap, ([trainKey, deltas]) => ({
       trainKey,
       samples: deltas.length,
       medianDurationDeltaSeconds: median(deltas),
+      timingCalibrationReady: deltas.length >= MIN_PATTERN_SAMPLES,
     })).sort((a, b) => b.samples - a.samples);
+    const timingCalibrationReady = patterns.some((pattern) => pattern.timingCalibrationReady);
 
     return Response.json({
       generatedAt: new Date().toISOString(),
-      mode: "read-only-calibration",
+      mode: "read-only-timing-calibration",
       source: {
         precision: "exact",
         excludesTestMeasurements: true,
@@ -206,8 +209,10 @@ export async function GET() {
         medianCloseDeltaSeconds: median(closeDeltas),
         medianOpenDeltaSeconds: median(openDeltas),
         medianDurationDeltaSeconds: median(durationDeltas),
-        minimumSamplesForAutomaticCalibration: 20,
-        automaticCalibrationReady: eligible.length >= 20,
+        minimumSamplesPerTrainPattern: MIN_PATTERN_SAMPLES,
+        timingCalibrationReady,
+        mergeGapCalibrationReady: false,
+        mergeGapCalibrationReason: "Exact close/open measurements describe closure timing and duration, not the open gaps between separate closures. They cannot safely determine a merge threshold.",
       },
       patterns,
       cycles: cycles.sort((a, b) =>
