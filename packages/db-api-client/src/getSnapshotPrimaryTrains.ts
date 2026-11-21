@@ -67,7 +67,10 @@ export async function getSnapshotPrimaryTrains(
   );
 
   const now = Date.now();
-  const from = new Date(now - 5 * 60_000).toISOString();
+  // Snapshot actual_time is often the journey's first call, not the
+  // timestamp at the crossing. Long-distance services can start hours earlier
+  // and reach the reference station within the prediction window.
+  const from = new Date(now - 6 * 60 * 60_000).toISOString();
   const to = new Date(now + 3 * 60 * 60_000).toISOString();
 
   const result = await db.execute({
