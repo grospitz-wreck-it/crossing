@@ -2,7 +2,7 @@ const assert = (condition, message) => {
   if (!condition) throw new Error(message);
 };
 
-const { findMatchingOpenBoardsObservation } = require("../.tmp/openboards-test/openBoardsObservations.js");
+const { findMatchingOpenBoardsObservation } = require("../.tmp/openboards-match-test/packages/db-api-client/src/openBoardsObservations.js");
 
 const candidate = {
   observationEva: "8003288",
