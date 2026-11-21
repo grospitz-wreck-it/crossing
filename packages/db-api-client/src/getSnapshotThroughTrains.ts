@@ -13,6 +13,7 @@ export type SnapshotThroughTrain = {
   observationEva: string;
   observationStation: string;
   observationActualTime: string;
+  observationScheduledTime: string;
   fallbackOffsetSeconds: number;
   trackDistanceMeters: number;
   direction: "eastbound" | "westbound" | "unknown";
@@ -200,6 +201,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
           observationEva: String(rule.observationEva || ""),
           observationStation,
           observationActualTime: parsedObservation.toISOString(),
+          observationScheduledTime: String(observationCall?.planned || observationTime),
           fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300),
           trackDistanceMeters: Number(rule.trackDistanceMeters || 0),
           direction: rule.direction === "unknown" ? expectedDirection : rule.direction,
