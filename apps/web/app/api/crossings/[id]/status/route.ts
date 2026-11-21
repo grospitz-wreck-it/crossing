@@ -38,10 +38,9 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const diversionRules = jsonArray(row.diversion_rules);
   const rerouteWatchRules = jsonArray(row.reroute_watch_rules);
   const referenceStations = jsonArray(row.reference_stations).map(String).map((value) => value.trim()).filter(Boolean);
-  const primaryObservationEvas = Array.from(new Set(
-    (referenceStations.length ? referenceStations : stationRows.filter((s) => s.role === "primary" || s.role === "observation").map((s) => String(s.eva || "").trim())).filter(Boolean),
-  ));
-  if (!primaryObservationEvas.length && row.eva) primaryObservationEvas.push(String(row.eva).trim());
+  // Only explicitly configured reference stations are primary stops.
+  // Automatically discovered observation/context stations stay secondary.
+  const primaryObservationEvas = Array.from(new Set(referenceStations));
   const stationNameByEva = new Map<string, string>();
   for (const station of stationRows) {
     const eva = String(station.eva || "").trim();
@@ -172,10 +171,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
   }
 
-  const primaryObservationEvas: string[] = Array.from(new Set((crossing.primaryObservationEvas || []).map(String).map((value) => value.trim()).filter(Boolean)));
+  const primaryObservationEvas: string[] = Array.from(new Set((crossing.referenceStations || []).map(String).map((value) => value.trim()).filter(Boolean)));
   const primarySnapshotPromise = (async () => {
     const started = performance.now();
-    const value = await getSnapshotPrimaryTrains(db, { ...crossing, observationEvas: primaryObservationEvas }).catch(() => null);
+    const value = await getSnapshotPrimaryTrains(db, crossing).catch(() => null);
     timing.observationEventsMs = performance.now() - started;
     return value;
   })();
