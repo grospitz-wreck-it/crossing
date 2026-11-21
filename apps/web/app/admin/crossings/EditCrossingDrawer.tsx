@@ -115,7 +115,8 @@ function editMapMercator(lat: number, lon: number, zoom: number) {
   return { x: ((lon + 180) / 360) * n, y: ((1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2) * n };
 }
 function EditInfrastructureMap({ lat, lon, candidates, stations, selectedEva, onSelectStation }: { lat: number; lon: number; candidates: InfrastructureCandidate[]; stations: NearbyStation[]; selectedEva: string; onSelectStation: (station: NearbyStation) => void }) {
-  const width = 700, height = 280, zoom = 11;
+  const [zoom, setZoom] = useState(13);
+  const width = 700, height = 280;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return <div style={{ padding: 16, color: "#68717d" }}>Bitte gültige Koordinaten eingeben.</div>;
   const center = editMapMercator(lat, lon, zoom), originX = center.x * 256 - width / 2, originY = center.y * 256 - height / 2;
   const tileX = Math.floor(center.x), tileY = Math.floor(center.y);
@@ -131,6 +132,7 @@ function EditInfrastructureMap({ lat, lon, candidates, stations, selectedEva, on
       <circle cx={crossing.x} cy={crossing.y} r="12" fill="#dc2626" stroke="#fff" strokeWidth="4"/><circle cx={crossing.x} cy={crossing.y} r="4" fill="#fff"/>
     </svg>
     {stations.map(station=>{const p=project({lat:station.lat,lon:station.lon});return <button key={station.eva} type="button" title={station.name} aria-label={`${station.name} auf Karte auswählen`} onClick={()=>onSelectStation(station)} style={{position:"absolute",left:`${p.x/width*100}%`,top:`${p.y/height*100}%`,transform:"translate(-50%,-50%)",width:28,height:28,border:0,background:"transparent",cursor:"pointer"}}/>;})}
+    <div style={{position:"absolute",right:10,top:10,zIndex:5,display:"grid",gap:4}}><button type="button" aria-label="Karte vergrößern" onClick={()=>setZoom(v=>Math.min(18,v+1))} style={{width:34,height:34,border:"1px solid #d1d5db",borderRadius:7,background:"#fff",fontSize:20,fontWeight:800,cursor:"pointer"}}>+</button><button type="button" aria-label="Karte verkleinern" onClick={()=>setZoom(v=>Math.max(9,v-1))} style={{width:34,height:34,border:"1px solid #d1d5db",borderRadius:7,background:"#fff",fontSize:20,fontWeight:800,cursor:"pointer"}}>−</button></div>
     <div style={{position:"absolute",left:10,bottom:10,display:"flex",gap:10,flexWrap:"wrap",padding:"6px 9px",borderRadius:8,background:"rgba(255,255,255,.94)",fontSize:10,fontWeight:700,pointerEvents:"none"}}><span>🔴 BÜ</span><span>🔵 DB-Bahnhof</span><span style={{color:"#b91c1c"}}>━ OSM-Gleis</span></div>
     <div style={{position:"absolute",right:8,top:8,background:"rgba(255,255,255,.94)",padding:"5px 8px",borderRadius:7,fontSize:10,pointerEvents:"none"}}>© OpenStreetMap</div>
   </div>;
