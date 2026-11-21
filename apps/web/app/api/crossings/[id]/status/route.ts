@@ -37,11 +37,11 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const throughRules = jsonArray(row.through_rules);
   const diversionRules = jsonArray(row.diversion_rules);
   const rerouteWatchRules = jsonArray(row.reroute_watch_rules);
+  const rules = jsonArray(row.rules);
   const referenceStations = jsonArray(row.reference_stations).map(String).map((value) => value.trim()).filter(Boolean);
-  const primaryObservationEvas = Array.from(new Set(
-    (referenceStations.length ? referenceStations : stationRows.filter((s) => s.role === "primary" || s.role === "observation").map((s) => String(s.eva || "").trim())).filter(Boolean),
-  ));
-  if (!primaryObservationEvas.length && row.eva) primaryObservationEvas.push(String(row.eva).trim());
+  // Only explicitly configured reference stations are primary stops.
+  // Automatically discovered observation/context stations stay secondary.
+  const primaryObservationEvas = Array.from(new Set(referenceStations));
   const stationNameByEva = new Map<string, string>();
   for (const station of stationRows) {
     const eva = String(station.eva || "").trim();
@@ -54,7 +54,7 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
 async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
-      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,train_source_mode,observation_evas,reference_stations,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
+      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,train_source_mode,rules,observation_evas,reference_stations,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
       db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }),
     ]);
     const row: any = result.rows[0];
@@ -153,7 +153,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   timing.loadCrossingMs = performance.now() - loadStarted;
   if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
   const mergeGapSeconds = resolveClosureMergeGapSeconds(process.env.CROSSING_MERGE_GAP_SECONDS);
-  const lineHints = !crossing.eva && ((crossing.requiredRouteStops || []).includes("2530") || String(crossing.name || "").includes("2530")) ? ["S28"] : [];
+  const explicitLineHints = jsonArray(crossing.rules).flatMap((rule: any) =>
+    Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
+  ).filter(Boolean);
+  const lineHints = explicitLineHints.length
+    ? Array.from(new Set(explicitLineHints))
+    : (!crossing.eva && ((crossing.requiredRouteStops || []).includes("2530") || String(crossing.name || "").includes("2530")) ? ["S28"] : []);
 
   if (lineHints.length) {
     const started = performance.now();
@@ -172,10 +177,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
   }
 
-  const primaryObservationEvas: string[] = Array.from(new Set((crossing.primaryObservationEvas || []).map(String).map((value) => value.trim()).filter(Boolean)));
+  const primaryObservationEvas: string[] = Array.from(new Set((crossing.referenceStations || []).map(String).map((value) => value.trim()).filter(Boolean)));
   const primarySnapshotPromise = (async () => {
     const started = performance.now();
-    const value = await getSnapshotPrimaryTrains(db, { ...crossing, observationEvas: primaryObservationEvas }).catch(() => null);
+    const value = await getSnapshotPrimaryTrains(db, crossing).catch(() => null);
     timing.observationEventsMs = performance.now() - started;
     return value;
   })();

@@ -21,143 +21,93 @@ export type SnapshotPrimaryTrain = {
 };
 
 function parseJson(value: unknown, fallback: unknown) {
-  try {
-    return value ? JSON.parse(String(value)) : fallback;
-  } catch {
-    return fallback;
-  }
+  try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; }
 }
-
 function normalizeStation(value: unknown): string {
-  return String(value || "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\\u0300-\\u036f]/g, "")
-    .replace(/hauptbahnhof|hbf|bahnhof|westf\\.?|westfalen/gi, " ")
-    .replace(/[^a-z0-9]+/g, "")
-    .trim();
+  return String(value || "").toLowerCase().normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
+    .replace(/[^a-z0-9]+/g, "").trim();
 }
-
 function normalizeEva(value: unknown): string {
   const raw = String(value || "").trim();
-  const match = raw.match(/(?:^|[^0-9])(\\d{7})(?:$|[^0-9])/);
+  const match = raw.match(/(?:^|[^0-9])(\d{7})(?:$|[^0-9])/);
   return match?.[1] || raw;
 }
-
 function stationCallMatches(call: any, eva: string, stationName?: string) {
   const targetEva = normalizeEva(eva);
-  const stopPoint = normalizeEva(call?.stopPointRef);
-  const stopPlace = normalizeEva(call?.stopPlaceRef);
-  if (targetEva && (stopPoint === targetEva || stopPlace === targetEva)) return true;
-
+  if (targetEva && (normalizeEva(call?.stopPointRef) === targetEva || normalizeEva(call?.stopPlaceRef) === targetEva)) return true;
   const targetName = normalizeStation(stationName);
-  if (!targetName) return false;
   const callName = normalizeStation(call?.name || call?.stopPointName || call?.stopPlaceName);
-  return Boolean(callName && (callName === targetName || callName.includes(targetName) || targetName.includes(callName)));
+  return Boolean(targetName && callName && (callName === targetName || callName.includes(targetName) || targetName.includes(callName)));
 }
 
-export async function getSnapshotPrimaryTrains(
-  db: Client,
-  crossing: Crossing,
-): Promise<SnapshotPrimaryTrain[] | null> {
-  const observationEvas = Array.from(
-    new Set(
-      (crossing.observationEvas || [])
-        .map(String)
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
-  );
-
-  if (!observationEvas.length) return [];
-
-  const primaryObservationStations = Array.isArray((crossing as any).primaryObservationStations)
-    ? (crossing as any).primaryObservationStations.map(String).map((value: string) => value.trim()).filter(Boolean)
-    : [];
+export async function getSnapshotPrimaryTrains(db: Client, crossing: Crossing): Promise<SnapshotPrimaryTrain[] | null> {
+  // Primary means an explicitly configured reference station only. Automatically
+  // discovered observation/context stations must never be promoted to primary.
+  const primaryEvas: string[] = Array.from(new Set<string>(
+    (((crossing as any).referenceStations || []) as unknown[])
+      .map((value: unknown) => String(value).trim())
+      .filter((value: string) => Boolean(value)),
+  ));
+  if (!primaryEvas.length) return [];
 
   try {
+    const stationResult = await db.execute({
+      sql: "SELECT eva,name FROM railway_station_catalog WHERE eva IN (" + primaryEvas.map(() => "?").join(",") + ")",
+      args: primaryEvas,
+    });
+    const stationNames = new Map<string, string>((stationResult.rows as any[])
+      .map((row): [string, string] => [String(row.eva || "").trim(), String(row.name || "").trim()])
+      .filter(([eva, name]) => Boolean(eva && name)));
+
     const now = Date.now();
     const from = new Date(now - 5 * 60_000).toISOString();
     const to = new Date(now + 3 * 60 * 60_000).toISOString();
-
     const result = await db.execute({
       sql: `SELECT line,category,journey_number,journey_ref,origin,destination,calls_json,delay_minutes,actual_time,scheduled_time
-            FROM mobilithek_train_snapshot
-            WHERE actual_time >= ? AND actual_time <= ?
-            ORDER BY actual_time ASC
-            LIMIT 5000`,
+            FROM mobilithek_train_snapshot WHERE actual_time >= ? AND actual_time <= ? LIMIT 1500`,
       args: [from, to],
     });
 
-    const stationNames = new Map<string, string>();
-    for (const eva of observationEvas) {
-      stationNames.set(eva, primaryObservationStations[stationNames.size] || eva);
-    }
-
     const candidates: SnapshotPrimaryTrain[] = [];
-
     for (const row of result.rows as any[]) {
       const calls = parseJson(row.calls_json, []);
-      if (!Array.isArray(calls)) continue;
-
-      for (let evaIndex = 0; evaIndex < observationEvas.length; evaIndex += 1) {
-        const eva = observationEvas[evaIndex];
-        const stationName = primaryObservationStations[evaIndex];
+      if (!Array.isArray(calls) || !calls.length) continue;
+      for (const eva of primaryEvas) {
+        const stationName = stationNames.get(eva) || "";
         const call = calls.find((entry: any) => stationCallMatches(entry, eva, stationName));
         if (!call) continue;
-
-        const observationTime =
-          call.actual ||
-          call.planned ||
-          row.actual_time ||
-          row.scheduled_time;
-        const observationScheduledTime =
-          call.plannedArrival || call.plannedDeparture || call.planned || row.scheduled_time;
-        const observationDirection = call.actualArrival || call.plannedArrival
-          ? "arrivals"
-          : call.actualDeparture || call.plannedDeparture
-            ? "departures"
-            : "unknown";
-
+        const observationTime = call.actual || call.planned || row.actual_time || row.scheduled_time;
         const parsed = new Date(observationTime);
         if (!Number.isFinite(parsed.getTime())) continue;
-
-        const line = String(row.line || "").trim();
-        const category = String(row.category || "").trim();
-        const journeyNumber = Number(row.journey_number || 0);
-
+        const planned = call.plannedArrival || call.plannedDeparture || call.planned || row.scheduled_time;
+        const observationDirection = call.actualArrival || call.plannedArrival ? "arrivals"
+          : call.actualDeparture || call.plannedDeparture ? "departures" : "unknown";
         candidates.push({
           type: "primary-stop",
-          line,
-          category,
-          journeyNumber,
+          line: String(row.line || "").trim(),
+          category: String(row.category || "").trim(),
+          journeyNumber: Number(row.journey_number || 0),
           journeyRef: row.journey_ref ? String(row.journey_ref) : undefined,
-          destination: row.destination ? String(row.destination) : undefined,
           origin: row.origin ? String(row.origin) : undefined,
+          destination: row.destination ? String(row.destination) : undefined,
+          platform: call.platform ? String(call.platform) : undefined,
           delayMinutes: Number(row.delay_minutes || 0),
           observationEva: eva,
-          observationStation: stationNames.get(eva) || eva,
+          observationStation: stationName || eva,
           observationActualTime: parsed.toISOString(),
-          observationScheduledTime: observationScheduledTime ? new Date(observationScheduledTime).toISOString() : undefined,
+          observationScheduledTime: planned ? new Date(planned).toISOString() : undefined,
           observationDirection,
           crossingTime: parsed.toISOString(),
           detection: "snapshot-primary-stop",
         });
-
         break;
       }
     }
-
-    const unique = Array.from(
-      new Map(
-        candidates.map((train) => [
-          `${train.category}-${train.journeyNumber}-${train.journeyRef || ""}-${train.observationEva}`,
-          train,
-        ]),
-      ).values(),
-    );
-
-    return unique;
+    return Array.from(new Map(candidates.map((train) => [
+      train.journeyRef || `${train.category}-${train.journeyNumber}-${train.observationEva}`, train,
+    ])).values()).sort((a, b) => Date.parse(a.crossingTime) - Date.parse(b.crossingTime));
   } catch (error) {
     console.warn("[Mobilithek] primary snapshot unavailable", error);
     return null;
