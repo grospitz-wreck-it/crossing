@@ -78,10 +78,43 @@ function getDb(env: Env): Client {
   return dbClient;
 }
 
-async function loadDemand(db: Client, env: Env): Promise<OpenBoardsQueueDemand[]> {
+const DEMAND_CACHE_TTL_MS = 5 * 60_000;
+let cachedDemand: OpenBoardsQueueDemand[] | null = null;
+let cachedDemandAt = 0;
+let cachedDemandDbUrl = "";
+let demandCacheNeedsSync = true;
+
+// Expired rows are housekeeping, not part of each board refresh. Keep the
+// cleanup to at most once per warm isolate per hour instead of once per job.
+const OBSERVATION_CLEANUP_INTERVAL_MS = 60 * 60_000;
+let lastObservationCleanupAt = 0;
+
+async function cleanupExpiredObservations(db: Client): Promise<void> {
+  const now = Date.now();
+  if (now - lastObservationCleanupAt < OBSERVATION_CLEANUP_INTERVAL_MS) return;
+
+  await db.execute(
+    "DELETE FROM openboards_observations WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+  );
+  lastObservationCleanupAt = now;
+}
+
+async function loadDemand(
+  db: Client,
+  env: Env,
+): Promise<OpenBoardsQueueDemand[]> {
+  const now = Date.now();
+  if (
+    cachedDemand &&
+    cachedDemandDbUrl === env.TURSO_DATABASE_URL &&
+    now - cachedDemandAt < DEMAND_CACHE_TTL_MS
+  ) {
+    return cachedDemand.map((item) => ({ ...item, evaNumbers: [...item.evaNumbers] }));
+  }
+
   const [crossingsResult, catalogResult] = await Promise.all([
     db.execute(`
-      SELECT c.id, c.reference_stations, c.through_rules
+      SELECT c.id, c.name, c.observation_evas, c.reference_stations, c.through_rules
       FROM crossings c
       WHERE c.status = 'active'
         AND (
@@ -112,7 +145,12 @@ async function loadDemand(db: Client, env: Env): Promise<OpenBoardsQueueDemand[]
     const evas = new Set<string>();
     const stationNames: string[] = [];
 
-    for (const value of parseArray(row.reference_stations)) {
+    // Admin saves selected DB observation stations in observation_evas.
+    // Keep reference_stations as a backwards-compatible legacy source.
+    for (const value of [
+      ...parseArray(row.observation_evas),
+      ...parseArray(row.reference_stations),
+    ]) {
       const eva = String(value || "").trim();
       if (eva) evas.add(eva);
     }
@@ -131,7 +169,7 @@ async function loadDemand(db: Client, env: Env): Promise<OpenBoardsQueueDemand[]
 
     // Keep configured EVAs even if the optional station catalogue has no name for them.
     const stations = [...evas].map((eva) => stationByEva.get(eva) || { eva, name: eva });
-    const isCore = stations.some((station) => isOwlStation(station.name));
+    const isCore = isOwlStation(String(row.name || "")) || stations.some((station) => isOwlStation(station.name));
     demandByCrossing.set(crossingId, {
       crossingId,
       evaNumbers: stations.map((station) => station.eva),
@@ -140,31 +178,48 @@ async function loadDemand(db: Client, env: Env): Promise<OpenBoardsQueueDemand[]
     });
   }
 
-  return [...demandByCrossing.values()].filter((item) => item.evaNumbers.length > 0);
+  const demand = [...demandByCrossing.values()]
+    .filter((item) => item.evaNumbers.length > 0);
+
+  cachedDemand = demand.map((item) => ({ ...item, evaNumbers: [...item.evaNumbers] }));
+  cachedDemandAt = now;
+  cachedDemandDbUrl = env.TURSO_DATABASE_URL;
+  demandCacheNeedsSync = true;
+  return demand;
 }
 
 async function persistObservations(
   db: Client,
-  jobKey: string,
   direction: "arrivals" | "departures",
   evas: string[],
   observations: OpenBoardsStationObservation[],
   observedAt: Date,
 ): Promise<void> {
   const observedIso = observedAt.toISOString();
+  const validObservations = observations.filter((item) =>
+    Number.isFinite(new Date(item.eventTime).getTime()),
+  );
+  const observationKeys = validObservations.map((item) =>
+    [item.journeyId, item.evaNumber, item.direction].join("|"),
+  );
   const statements: Array<{ sql: string; args: Array<string | number | null> }> = [
     {
+      // Keep unchanged journeys in place. Only remove observations that were
+      // absent from this successful board response; this avoids a full
+      // delete-and-reinsert cycle for every refresh.
       sql: `DELETE FROM openboards_observations
             WHERE direction = ?
-              AND eva_number IN (${evas.map(() => "?").join(",")})`,
-      args: [direction, ...evas],
+              AND eva_number IN (${evas.map(() => "?").join(",")})
+              AND observation_key NOT IN (
+                SELECT value FROM json_each(?)
+              )`,
+      args: [direction, ...evas, JSON.stringify(observationKeys)],
     },
   ];
 
-  for (const item of observations) {
+  for (const item of validObservations) {
     const observationKey = [item.journeyId, item.evaNumber, item.direction].join("|");
     const eventTime = new Date(item.eventTime);
-    if (!Number.isFinite(eventTime.getTime())) continue;
     const expiresAt = new Date(Math.max(eventTime.getTime() + 60 * 60_000, observedAt.getTime() + 30 * 60_000)).toISOString();
     statements.push({
       sql: `INSERT INTO openboards_observations (
@@ -189,7 +244,21 @@ async function persistObservations(
         cancelled = excluded.cancelled,
         observed_at = excluded.observed_at,
         expires_at = excluded.expires_at,
-        updated_at = excluded.updated_at`,
+        updated_at = excluded.updated_at
+      WHERE openboards_observations.event_time IS NOT excluded.event_time
+         OR openboards_observations.scheduled_time IS NOT excluded.scheduled_time
+         OR openboards_observations.time_type IS NOT excluded.time_type
+         OR openboards_observations.line IS NOT excluded.line
+         OR openboards_observations.category IS NOT excluded.category
+         OR openboards_observations.journey_number IS NOT excluded.journey_number
+         OR openboards_observations.origin_eva IS NOT excluded.origin_eva
+         OR openboards_observations.destination_eva IS NOT excluded.destination_eva
+         OR openboards_observations.via_evas_json IS NOT excluded.via_evas_json
+         OR openboards_observations.route_evas_json IS NOT excluded.route_evas_json
+         OR openboards_observations.route_names_json IS NOT excluded.route_names_json
+         OR openboards_observations.platform IS NOT excluded.platform
+         OR openboards_observations.cancelled IS NOT excluded.cancelled
+         OR julianday(excluded.observed_at) - julianday(openboards_observations.observed_at) >= (10.0 / 1440.0)`,
       args: [
         observationKey, item.journeyId, item.evaNumber, item.direction,
         eventTime.toISOString(), item.scheduledTime || null, item.timeType,
@@ -202,13 +271,8 @@ async function persistObservations(
   }
 
   await db.batch(statements, "write");
-  await db.execute({
-    sql: `INSERT INTO openboards_refresh_runs
-      (job_key, direction, eva_numbers_json, requested_at, completed_at, status, observation_count)
-      VALUES (?, ?, ?, ?, ?, 'success', ?)`,
-    args: [jobKey, direction, JSON.stringify(evas), observedIso, new Date().toISOString(), observations.length],
-  });
-  await db.execute("DELETE FROM openboards_observations WHERE expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");
+  // Successful run timestamps/counts live on the queue row. Keep the
+  // append-only run log for failures only to avoid one permanent row per poll.
 }
 
 async function recordFailure(
@@ -236,7 +300,14 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   const demand = await loadDemand(db, env);
   const batchSize = Math.max(1, Math.min(20, Number(env.OPENBOARDS_BATCH_SIZE || 5)));
   const jobs = buildOpenBoardsQueueJobs(demand, { batchSize });
-  await syncOpenBoardsQueue(db, jobs);
+
+  // Active crossing demand and the station catalogue are relatively static.
+  // Reconcile the persistent queue only when the five-minute demand cache is
+  // refreshed; keep the flag set if reconciliation fails so the next run retries.
+  if (demandCacheNeedsSync) {
+    await syncOpenBoardsQueue(db, jobs);
+    demandCacheNeedsSync = false;
+  }
 
   const maxJobs = Math.max(1, Math.min(20, Number(env.OPENBOARDS_MAX_JOBS_PER_RUN || 20)));
   let processed = 0;
@@ -268,7 +339,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
         },
       });
       const observations = normalizeOpenBoardsBatches(batches);
-      await persistObservations(db, job.jobKey, job.direction, job.evaNumbers, observations, requestedAt);
+      await persistObservations(db, job.direction, job.evaNumbers, observations, requestedAt);
       observationsWritten += observations.length;
       await finishOpenBoardsJob(db, job, { ok: true });
     } catch (error) {
@@ -280,6 +351,15 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
         console.error("[OpenBoards] failed to record error", logError);
       }
       await finishOpenBoardsJob(db, job, { ok: false, error: message });
+    }
+  }
+
+  if (processed > 0) {
+    try {
+      await cleanupExpiredObservations(db);
+    } catch (error) {
+      // Housekeeping must not turn otherwise successful refreshes into failures.
+      console.error("[OpenBoards] expired-observation cleanup failed", error);
     }
   }
 
@@ -322,6 +402,18 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
+    const hour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Berlin",
+        hour: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date()),
+    );
+
+    if (hour < 8 || hour >= 23) {
+      return;
+    }
+
     const result = await runRefresh(env);
     console.log("[OpenBoards] refresh result", result);
   },

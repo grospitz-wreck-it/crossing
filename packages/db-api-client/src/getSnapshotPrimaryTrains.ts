@@ -14,6 +14,8 @@ export type SnapshotPrimaryTrain = {
   observationEva: string;
   observationStation: string;
   observationActualTime: string;
+  observationScheduledTime?: string;
+  observationDirection: "arrivals" | "departures" | "unknown";
   crossingTime: string;
   detection: "snapshot-primary-stop";
 };
@@ -109,6 +111,13 @@ export async function getSnapshotPrimaryTrains(
           call.planned ||
           row.actual_time ||
           row.scheduled_time;
+        const observationScheduledTime =
+          call.plannedArrival || call.plannedDeparture || call.planned || row.scheduled_time;
+        const observationDirection = call.actualArrival || call.plannedArrival
+          ? "arrivals"
+          : call.actualDeparture || call.plannedDeparture
+            ? "departures"
+            : "unknown";
 
         const parsed = new Date(observationTime);
         if (!Number.isFinite(parsed.getTime())) continue;
@@ -129,6 +138,8 @@ export async function getSnapshotPrimaryTrains(
           observationEva: eva,
           observationStation: stationNames.get(eva) || eva,
           observationActualTime: parsed.toISOString(),
+          observationScheduledTime: observationScheduledTime ? new Date(observationScheduledTime).toISOString() : undefined,
+          observationDirection,
           crossingTime: parsed.toISOString(),
           detection: "snapshot-primary-stop",
         });

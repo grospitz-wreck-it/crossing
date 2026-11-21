@@ -88,13 +88,15 @@ export function normalizeOpenBoardsBatch(
   for (const placeValue of stopPlaces) {
     const place = asObject(placeValue);
     const eva = evaOf(place);
-    const localized = Array.isArray(place.localizedNames) ? place.localizedNames : [];
-    const german = localized.find((entry: any) => entry?.language === "deu");
+    const localized = Array.isArray(place.localizedNames)
+      ? place.localizedNames as Array<Record<string, unknown>>
+      : [];
+    const german = localized.find((entry) => entry.language === "deu");
     const name = asText(german?.name ?? localized[0]?.name ?? place.name);
     if (eva && name) namesByEva.set(eva, name);
   }
 
-  return rows.map((rowValue: unknown) => {
+  return rows.map((rowValue: unknown): OpenBoardsStationObservation => {
     const row = asObject(rowValue);
     const transport = asObject(row.transport);
     const journeyInfo = asObject(row.journeyInfo);
@@ -126,7 +128,7 @@ export function normalizeOpenBoardsBatch(
       platform: asText(row.platform?.name ?? row.platform) || undefined,
       cancelled: Boolean(row.cancelled ?? row.isCancelled ?? false),
     };
-  }).filter((observation) =>
+  }).filter((observation: OpenBoardsStationObservation) =>
     Boolean(observation.journeyId && observation.evaNumber && observation.eventTime),
   );
 }

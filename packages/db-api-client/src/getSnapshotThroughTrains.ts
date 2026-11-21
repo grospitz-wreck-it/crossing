@@ -13,6 +13,8 @@ export type SnapshotThroughTrain = {
   observationEva: string;
   observationStation: string;
   observationActualTime: string;
+  observationScheduledTime?: string;
+  observationDirection: "arrivals" | "departures" | "unknown";
   fallbackOffsetSeconds: number;
   trackDistanceMeters: number;
   direction: "eastbound" | "westbound" | "unknown";
@@ -150,6 +152,12 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
 
         const observationCall = snapshotCallsContain(calls, observationStation, String(rule.observationEva || ""));
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
+        const observationScheduledTime = observationCall?.plannedArrival || observationCall?.plannedDeparture || observationCall?.planned || row.scheduled_time;
+        const observationDirection = observationCall?.actualArrival || observationCall?.plannedArrival
+          ? "arrivals"
+          : observationCall?.actualDeparture || observationCall?.plannedDeparture
+            ? "departures"
+            : "unknown";
         const parsedObservation = new Date(observationTime);
         if (!Number.isFinite(parsedObservation.getTime())) continue;
 
@@ -171,6 +179,8 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
           observationEva: String(rule.observationEva || ""),
           observationStation,
           observationActualTime: parsedObservation.toISOString(),
+          observationScheduledTime: observationScheduledTime ? new Date(observationScheduledTime).toISOString() : undefined,
+          observationDirection,
           fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300),
           trackDistanceMeters: Number(rule.trackDistanceMeters || 0),
           direction: rule.direction === "unknown" ? expectedDirection : rule.direction,

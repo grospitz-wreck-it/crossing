@@ -1,12 +1,18 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "crossings-openboards-refresh",
+  "name": "meineschranke-openboards",
   "main": "./src/index.ts",
   "compatibility_date": "2026-11-20",
-  "triggers": {
-    "crons": ["* * * * *"]
+  "vars": {
+    "OPENBOARDS_CORE_INTERVAL_MS": "120000",
+    "OPENBOARDS_EXPLORATORY_INTERVAL_MS": "600000"
   },
   "observability": {
     "enabled": true
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
   }
 }

@@ -41,6 +41,11 @@ export async function syncOpenBoardsQueue(
         priority = excluded.priority,
         is_active = 1,
         updated_at = excluded.updated_at
+      WHERE openboards_refresh_jobs.direction IS NOT excluded.direction
+         OR openboards_refresh_jobs.eva_numbers_json IS NOT excluded.eva_numbers_json
+         OR openboards_refresh_jobs.interval_ms IS NOT excluded.interval_ms
+         OR openboards_refresh_jobs.priority IS NOT excluded.priority
+         OR openboards_refresh_jobs.is_active IS NOT 1
     `,
     args: [
       job.jobKey,
@@ -67,7 +72,8 @@ export async function syncOpenBoardsQueue(
   await db.execute({
     sql: `UPDATE openboards_refresh_jobs
           SET is_active = 0, updated_at = ?
-          WHERE job_key NOT IN (${placeholders(activeKeys.length)})`,
+          WHERE is_active = 1
+            AND job_key NOT IN (${placeholders(activeKeys.length)})`,
     args: [now, ...activeKeys],
   });
 }

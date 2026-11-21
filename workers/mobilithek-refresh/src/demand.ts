@@ -65,6 +65,7 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
     SELECT DISTINCT
       c.id,
       c.required_route_stops,
+      c.observation_evas,
       c.reference_stations,
       c.through_rules,
       c.diversion_rules,
@@ -96,7 +97,10 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
   return (result.rows as any[]).map((row) => {
     const primaryObservationEvas = Array.from(
       new Set(
-        parseJson<string[]>(row.reference_stations, [])
+        [
+          ...parseJson<string[]>(row.observation_evas, []),
+          ...parseJson<string[]>(row.reference_stations, []),
+        ]
           .map(String)
           .map((value) => value.trim())
           .filter(Boolean),
