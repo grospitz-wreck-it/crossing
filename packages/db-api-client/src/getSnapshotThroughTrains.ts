@@ -120,8 +120,25 @@ function parseJson(value: unknown, fallback: any) {
   try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; }
 }
 
-function snapshotCallsContain(calls: any[], station: string) {
+function normalizeEva(value: unknown) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/(?:^|[^0-9])(\d{7})(?:$|[^0-9])/);
+  return match?.[1] || raw;
+}
+
+function snapshotCallsContain(calls: any[], station: string, observationEva: string) {
+  const targetEva = normalizeEva(observationEva);
+  if (targetEva) {
+    const byEva = calls.find((call) =>
+      normalizeEva(call?.stopPointRef) === targetEva ||
+      normalizeEva(call?.stopPlaceRef) === targetEva
+    );
+    if (byEva) return byEva;
+  }
+
   const target = normalizeStationName(station);
+  if (!target) return undefined;
+
   return calls.find((call) => {
     const value = normalizeStationName(String(call?.name || ""));
     return value === target || value.includes(target) || target.includes(value);
@@ -131,7 +148,7 @@ function snapshotCallsContain(calls: any[], station: string) {
 export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): Promise<SnapshotThroughTrain[] | null> {
   try {
     const lineHints = lineHintsForCrossing(crossing);
-    const rules = (crossing.throughRules || []).filter((rule: any) => String(rule?.role || "") === "context" || String(rule?.side || "") === "unknown") as any[];
+    const rules = (crossing.throughRules || []) as any[];
     if (!rules.length) return null;
 
     const now = Date.now();
@@ -160,7 +177,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
         const observationStation = String(rule.observationStation || "");
         if (!matchesRoute(route, calls, observationStation, crossing.requiredRouteStops || [])) continue;
 
-        const observationCall = snapshotCallsContain(calls, observationStation);
+        const observationCall = snapshotCallsContain(calls, observationStation, String(rule.observationEva || ''));
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
         const parsedObservation = new Date(observationTime);
         if (!Number.isFinite(parsedObservation.getTime())) continue;
