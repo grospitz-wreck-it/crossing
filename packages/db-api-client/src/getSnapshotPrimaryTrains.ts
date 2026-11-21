@@ -38,7 +38,11 @@ function stationMatches(value: string, wanted: string) {
 function refMatches(value: unknown, eva: string) {
   const raw = String(value ?? "").trim();
   if (!raw || !eva) return false;
-  const normalizeRef = (v: string) => v.replace(/^\D+/, "").replace(/\D+$/, "");
+  const normalizeRef = (v: string) => {
+    const evaMatch = v.match(/(?:^|\D)(\d{7})(?:\D|$)/);
+    if (evaMatch) return evaMatch[1];
+    return v.replace(/\D/g, "");
+  };
   const a = normalizeRef(raw);
   const b = normalizeRef(eva);
   return Boolean(a && b && (a === b || raw === eva));
@@ -111,7 +115,11 @@ export async function getSnapshotPrimaryTrains(
       const rule = (crossing.throughRules || []).find(
         (item: any) => String(item?.observationEva || "").trim() === eva,
       );
-      const offsetSeconds = Math.max(30, Number(rule?.fallbackOffsetSeconds || 300));
+      // A call at the crossing's own EVA is the closest available event timestamp.
+      // Do not add a neighbouring-station travel offset to it.
+      const offsetSeconds = eva === String(crossing.eva || "").trim()
+        ? 0
+        : Math.max(30, Number(rule?.fallbackOffsetSeconds || 300));
       const crossingTime = new Date(parsedTime.getTime() + offsetSeconds * 1000);
       if (crossingTime.getTime() < now - 60_000 || crossingTime.getTime() > now + 3 * 60 * 60_000) continue;
 
