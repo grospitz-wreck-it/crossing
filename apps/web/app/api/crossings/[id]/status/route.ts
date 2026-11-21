@@ -141,7 +141,7 @@ function logTimingSummary(id: string, timing: TimingState, counts: Record<string
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const timing: TimingState = { debug: STATUS_TIMING_DEBUG, startedAt: performance.now(), cacheReadMs: 0, loadCrossingMs: 0, localEventsMs: 0, observationEventsMs: 0, throughTrainsMs: 0, divertedTrainsMs: 0, reroutedTrainsMs: 0, infrastructureForecastMs: 0, filterDirectMs: 0, filterThroughMs: 0, routeProximityMs: 0, osmFilterMs: 0, closuresMs: 0, cacheWriteMs: 0, osmDecisions: [] };
-  const counts = { localCandidates: 0, observationCandidates: 0, throughCandidates: 0, divertedCandidates: 0, reroutedCandidates: 0, directFiltered: 0, throughFiltered: 0, allowCalls: 0, accepted: 0, rejected: 0, finalTrains: 0, finalClosures: 0 };
+  const counts = { localCandidates: 0, observationCandidates: 0, throughCandidates: 0, divertedCandidates: 0, reroutedCandidates: 0, directFiltered: 0, throughFiltered: 0, allowCalls: 0, accepted: 0, rejected: 0, finalTrains: 0, finalClosures: 0, openBoardsMatched: 0 };
   const cacheKey = `status:${id}`;
   const cacheStarted = performance.now();
   const cached = await readCrossingForecastCache<any>(cacheKey, STATUS_CACHE_TTL_MS);
