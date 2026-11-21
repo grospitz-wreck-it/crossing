@@ -161,7 +161,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         scheduledTime: train.scheduledTime,
       }, realtimeObservations);
       const liveTime = realtime?.eventTime || train.arrival;
-      const offsetSeconds = Math.max(30, Number((crossing.throughRules || []).find((rule: any) => String(rule.observationEva) === train.stationEva)?.fallbackOffsetSeconds || 300));
+      // A primary call at the crossing's own EVA is already the crossing event.
+      // Only remote observation stations need a track-travel offset.
+      const offsetSeconds = String(train.stationEva) === String(crossing.eva)
+        ? 0
+        : Math.max(30, Number((crossing.throughRules || []).find((rule: any) => String(rule.observationEva) === train.stationEva)?.fallbackOffsetSeconds || 300));
       const predictedCrossingTime = new Date(Date.parse(liveTime) + offsetSeconds * 1000).toISOString();
       trains.push({
         id:`primary-${train.stationEva}-${train.category}-${train.journeyNumber}`,
@@ -183,7 +187,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         realtimeTimeType:realtime?.timeType || null,
         crossingTime:predictedCrossingTime,
         arrival:train.arrival,
-        etaSeconds:Math.floor((Date.parse(train.crossingTime)-Date.now())/1000)
+        etaSeconds:Math.floor((Date.parse(predictedCrossingTime)-Date.now())/1000)
       });
     }
 
