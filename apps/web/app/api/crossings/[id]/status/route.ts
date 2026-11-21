@@ -89,7 +89,10 @@ async function allowTrainForCrossing(crossingId: string, crossing: any, train: a
   if (timing) timing.osmFilterMs += elapsed;
 
   timing?.osmDecisions.push(`[CROSSING DECISION] journey=${journey} line=${line} OSM=${result.status} way=${result.railwayWayId ?? "?"} score=${result.score?.toFixed(3) ?? "?"} ${elapsed.toFixed(1)}ms`);
-  const allowed = result.status === "matched";
+  // A prepared OSM profile may positively reject a route. Missing or
+  // unavailable profiles stay non-blocking so the established Mobilithek
+  // route/rule checks remain the fallback while profile coverage is built.
+  const allowed = result.status !== "rejected";
   timing?.osmDecisions.push(`[CROSSING DECISION] journey=${journey} line=${line} FINAL=${allowed ? "ACCEPT" : "REJECT"} reason=osm-${result.status}`);
   return allowed;
 }
