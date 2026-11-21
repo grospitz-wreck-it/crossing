@@ -1,0 +1,70 @@
+.panel {
+  position: fixed;
+  z-index: 9999;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-radius: 14px;
+  background: rgba(12, 18, 28, .96);
+  color: #e8edf5;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .4);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 3px;
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
+
+.hint {
+  margin-bottom: 8px;
+  opacity: .6;
+  font-family: system-ui, sans-serif;
+}
+
+.lines {
+  max-height: 210px;
+  overflow: auto;
+  border-top: 1px solid rgba(255, 255, 255, .12);
+  padding-top: 7px;
+}
+
+.line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.line span {
+  display: inline-block;
+  width: 42px;
+  opacity: .5;
+}
+
+.wait { color: #ffd166; }
+.ok { color: #8ee6a8; }
+.error { color: #ff8d8d; }
+
+@media (max-width: 600px) {
+  .panel {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    padding: 11px 12px;
+    font-size: 11px;
+  }
+
+  .lines {
+    max-height: 180px;
+  }
+}

@@ -42,6 +42,7 @@ const files = [
   "apps/web/sql/006_railway_station_catalog.sql",
   "apps/web/sql/008_crossing_train_source_mode.sql",
   "migrations/20260823_crossing_locations.sql",
+  "packages/db-api-client/sql/006_mobilithek_train_snapshot_indexes.sql",
 ];
 
 for (const file of files) {
@@ -49,7 +50,6 @@ for (const file of files) {
 
   const sql = fs.readFileSync(file, "utf8");
 
-  // PRAGMA / Transaktionshüllen entfernen.
   const cleaned = sql
     .replace(/^\s*PRAGMA[^;]*;\s*$/gim, "")
     .replace(/^\s*BEGIN TRANSACTION;\s*$/gim, "")
@@ -67,47 +67,10 @@ for (const file of files) {
       .find(Boolean) || "";
 
     console.log(`→ ${firstLine.slice(0, 120)}`);
-
     await db.execute(statement);
   }
 
   console.log(`OK: ${file}`);
-}
-
-console.log("\n=== VERIFY TABLES ===");
-
-const tables = [
-  "railway_stations",
-  "crossing_station_links",
-  "railway_station_catalog",
-  "crossing_locations",
-];
-
-for (const table of tables) {
-  const result = await db.execute({
-    sql: `
-      SELECT name
-      FROM sqlite_master
-      WHERE type = 'table'
-        AND name = ?
-      LIMIT 1
-    `,
-    args: [table],
-  });
-
-  console.log(
-    `${table}: ${result.rows.length ? "OK" : "MISSING"}`
-  );
-}
-
-console.log("\n=== VERIFY COUNTS ===");
-
-for (const table of tables) {
-  const result = await db.execute(
-    `SELECT COUNT(*) AS count FROM ${table}`
-  );
-
-  console.log(`${table}: ${result.rows[0].count}`);
 }
 
 console.log("\nDONE");

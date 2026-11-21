@@ -141,6 +141,51 @@ function upsertStatement(row: SnapshotRow) {
   };
 }
 
+export async function writeSubscriptionBatch(
+  events: SnapshotEvent[],
+  subscriptionId: string,
+  refreshedAt: string,
+) {
+  if (!events.length) return;
+  const db = getDb();
+  const statements = events
+    .filter(({ subscriptionId: eventSubscriptionId }) => eventSubscriptionId === subscriptionId)
+    .map(({ event }) => toSnapshotRow(subscriptionId, event, refreshedAt))
+    .map(upsertStatement);
+  if (statements.length) await db.batch(statements, "write");
+}
+export async function cleanupSubscriptionSnapshots(subscriptionIds: string[], refreshedAt: string) {
+  if (!subscriptionIds.length) return;
+  const db = getDb();
+  const placeholders = subscriptionIds.map(() => "?").join(", ");
+  await db.execute({
+    sql: `DELETE FROM mobilithek_train_snapshot
+      WHERE source_subscription_id IN (${placeholders}) AND refreshed_at < ?`,
+    args: [...subscriptionIds, refreshedAt],
+  });
+  console.log(`[Mobilithek Worker] subscription snapshot cleanup: ${subscriptionIds.length} subscriptions`);
+}
+
+export async function finalizeRefreshStatus(
+  refreshStartedAt: string,
+  refreshedAt: string,
+  stats: { subscriptionCount: number; successful: number; failed: number; eventCount: number },
+) {
+  const db = getDb();
+  await db.execute({
+    sql: `INSERT INTO mobilithek_refresh_status (
+      id, started_at, finished_at, status, subscription_count,
+      successful_subscriptions, failed_subscriptions, event_count, error
+    ) VALUES (1, ?, ?, 'success', ?, ?, ?, ?, NULL)
+    ON CONFLICT(id) DO UPDATE SET started_at = excluded.started_at,
+      finished_at = excluded.finished_at, status = excluded.status,
+      subscription_count = excluded.subscription_count,
+      successful_subscriptions = excluded.successful_subscriptions,
+      failed_subscriptions = excluded.failed_subscriptions,
+      event_count = excluded.event_count, error = NULL`,
+    args: [refreshStartedAt, refreshedAt, stats.subscriptionCount, stats.successful, stats.failed, stats.eventCount],
+  });
+}
 export async function writeSnapshot(
   events: SnapshotEvent[],
   refreshStartedAt: string,

@@ -1,8 +1,15 @@
 import { configureDb } from "./db.js";
-import { filterEventsByDemand } from "./filterDemand.js";
 import { loadDemandCrossings } from "./demand.js";
-import { fetchRelayDiagnostics, fetchRelayPing, refreshOnce } from "./cloudflareMobilithek.js";
-import { writeSnapshot } from "./snapshot.js";
+import {
+  fetchRelayDiagnostics,
+  fetchRelayPing,
+  refreshOnce,
+} from "./cloudflareMobilithek.js";
+import {
+  cleanupSubscriptionSnapshots,
+  finalizeRefreshStatus,
+  writeSubscriptionBatch,
+} from "./snapshot.js";
 
 export interface Env {
   TURSO_DATABASE_URL: string;
@@ -53,12 +60,14 @@ async function probe(
   fetcher: typeof fetch,
 ): Promise<Record<string, unknown>> {
   const startedAt = Date.now();
+
   try {
     const response = await fetcher(url, {
       method: "GET",
       headers: { "user-agent": "Crossings-mTLS-Diagnostic/1.0" },
     });
     const body = (await response.text()).slice(0, 4000);
+
     return {
       label,
       url,
@@ -124,6 +133,7 @@ async function runMtlsCompare(env: Env): Promise<Response> {
       env.MOBILITHEK_CLIENT_TEST.fetch.bind(env.MOBILITHEK_CLIENT_TEST),
     ),
   ];
+
   return Response.json({ tests });
 }
 
@@ -132,12 +142,16 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
   configureDb(env);
 
   const demand = await loadDemandCrossings();
-  console.log("[Mobilithek Worker] demanded crossings", demand.map((item) => ({
-    id: item.id,
-    primaryObservationEvas: item.primaryObservationEvas,
-    primaryObservationStations: item.primaryObservationStations,
-    observationStations: item.observationStations,
-  })));
+
+  console.log(
+    "[Mobilithek Worker] demanded crossings",
+    demand.map((item) => ({
+      id: item.id,
+      primaryObservationEvas: item.primaryObservationEvas,
+      primaryObservationStations: item.primaryObservationStations,
+      secondaryRules: item.secondaryRules,
+    })),
+  );
 
   if (demand.length === 0) {
     return { status: "idle", demandedCrossings: 0 };
@@ -148,59 +162,36 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     throw new Error("Keine Mobilithek-Subscription-IDs konfiguriert");
   }
 
-  console.log(`[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`);
-
-  const primaryDebug = demand
-    .filter((item) =>
-      item.primaryObservationEvas?.includes("8003288") ||
-      item.primaryObservationStations?.some((name) =>
-        String(name).toLowerCase().includes("kirchlengern"),
-      ),
-    )
-    .map((item) => ({
-      id: item.id,
-      primaryObservationEvas: item.primaryObservationEvas,
-      primaryObservationStations: item.primaryObservationStations,
-    }));
-
-  console.log("[Mobilithek Worker] primary debug demand", primaryDebug);
-
-  const result = await refreshOnce(env, subscriptionIds, demand);
-  const demandedEvents = filterEventsByDemand(result.events, demand);
-
-  const primaryDebugEvents = result.events.filter(({ event }) =>
-    (event.calls || []).some((call) =>
-      ["8003288"].includes(String(call.stopPointRef || "").trim()) ||
-      ["8003288"].includes(String(call.stopPlaceRef || "").trim()) ||
-      String(call.name || "").toLowerCase().includes("kirchlengern"),
-    ),
+  console.log(
+    `[Mobilithek Worker] subscriptions=${subscriptionIds.join(",")}`,
   );
 
-  console.log("[Mobilithek Worker] primary debug events", {
-    total: primaryDebugEvents.length,
-    sample: primaryDebugEvents.slice(0, 10).map(({ subscriptionId, event }) => ({
-      subscriptionId,
-      line: event.line,
-      category: event.category,
-      journeyRef: event.journeyRef,
-      calls: (event.calls || [])
-        .filter((call) =>
-          String(call.stopPointRef || "").trim() === "8003288" ||
-          String(call.stopPlaceRef || "").trim() === "8003288" ||
-          String(call.name || "").toLowerCase().includes("kirchlengern"),
-        )
-        .slice(0, 5)
-        .map((call) => ({
-          name: call.name,
-          stopPointRef: call.stopPointRef,
-          stopPlaceRef: call.stopPlaceRef,
-        })),
-    })),
-  });
+  const refreshedAt = new Date().toISOString();
+
+  // Stream each subscription into Turso in bounded batches.
+  // Do not collect all events in memory or depend on result.events.
+  const result = await refreshOnce(
+    env,
+    subscriptionIds,
+    demand,
+    async (subscriptionId, events) => {
+      await writeSubscriptionBatch(events, subscriptionId, refreshedAt);
+    },
+  );
+
+  const failedSubscriptionIds = new Set(
+    result.errors.map((error) => error.subscriptionId),
+  );
+
+  const successfulSubscriptionIds = subscriptionIds.filter(
+    (subscriptionId) => !failedSubscriptionIds.has(subscriptionId),
+  );
+
+  const demandedEventCount = result.acceptedEvents;
 
   console.log(
     `[Mobilithek Worker] parsedEvents=${result.parsedEvents} ` +
-      `accepted=${result.acceptedEvents} demandedEvents=${demandedEvents.length}`,
+      `accepted=${result.acceptedEvents} demandedEvents=${demandedEventCount}`,
   );
 
   if (result.successful === 0) {
@@ -209,22 +200,24 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     );
   }
 
-  if (demandedEvents.length === 0) {
+  if (demandedEventCount === 0) {
     throw new Error(
       "Mobilithek lieferte keine Zugdaten für die aktuell nachgefragten BÜs",
     );
   }
 
-  await writeSnapshot(
-    demandedEvents,
-    startedAt,
-    {
-      subscriptionCount: result.subscriptionCount,
-      successful: result.successful,
-      failed: result.failed,
-    },
-    [...subscriptionIds, ...RETIRED_TRAIN_SUBSCRIPTION_IDS],
+  // Also clean snapshots from retired feeds after a successful refresh.
+  await cleanupSubscriptionSnapshots(
+    [...successfulSubscriptionIds, ...RETIRED_TRAIN_SUBSCRIPTION_IDS],
+    refreshedAt,
   );
+
+  await finalizeRefreshStatus(startedAt, refreshedAt, {
+    subscriptionCount: result.subscriptionCount,
+    successful: result.successful,
+    failed: result.failed,
+    eventCount: demandedEventCount,
+  });
 
   return {
     status: "success",
@@ -233,28 +226,34 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
     successful: result.successful,
     failed: result.failed,
     parsedEvents: result.parsedEvents,
-    demandedEvents: demandedEvents.length,
+    demandedEvents: demandedEventCount,
   };
 }
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
     if (url.pathname === "/health") {
       return Response.json({ ok: true, service: "mobilithek-refresh" });
     }
+
     if (url.pathname === "/mtls-test") {
       return runMtlsCompare(env);
     }
+
     if (url.pathname === "/debug") {
       try {
         configureDb(env);
         const demand = await loadDemandCrossings();
 
+        // Read-only relay ping: no upstream Mobilithek call and no DB writes.
         if (url.searchParams.get("ping") === "1") {
           const startedAt = Date.now();
+
           try {
             const result = await fetchRelayPing(env);
+
             return Response.json({
               status: "ok",
               mode: "read-only-ping",
@@ -266,28 +265,43 @@ export default {
               note: "No Mobilithek upstream call and no Turso snapshot writes were performed.",
             });
           } catch (error) {
-            return Response.json({
-              status: "error",
-              mode: "read-only-ping",
-              durationMs: Date.now() - startedAt,
-              error: error instanceof Error ? error.message : String(error),
-              note: "No Mobilithek upstream call and no Turso snapshot writes were performed.",
-            }, { status: 502 });
+            return Response.json(
+              {
+                status: "error",
+                mode: "read-only-ping",
+                durationMs: Date.now() - startedAt,
+                error: error instanceof Error ? error.message : String(error),
+                note: "No Mobilithek upstream call and no Turso snapshot writes were performed.",
+              },
+              { status: 502 },
+            );
           }
         }
 
+        // Read-only diagnostic: probes the relay and applies production demand
+        // filtering. No snapshot writes or cleanup/finalization are performed.
         if (url.searchParams.get("probe") === "1") {
-          const requestedSubscription = url.searchParams.get("subscription")?.trim();
+          const requestedSubscription = url.searchParams
+            .get("subscription")
+            ?.trim();
+
           const allSubscriptionIds = getSubscriptionIds(env);
           const subscriptionIds = requestedSubscription
             ? allSubscriptionIds.filter((id) => id === requestedSubscription)
             : allSubscriptionIds;
 
           const probes: Array<Record<string, unknown>> = [];
+
           for (const subscriptionId of subscriptionIds) {
             const startedAt = Date.now();
+
             try {
-              const result = await fetchRelayDiagnostics(env, subscriptionId, demand);
+              const result = await fetchRelayDiagnostics(
+                env,
+                subscriptionId,
+                demand,
+              );
+
               probes.push({
                 subscriptionId,
                 durationMs: Date.now() - startedAt,
@@ -305,6 +319,7 @@ export default {
           let relayConfig: Record<string, unknown> = {
             configured: Boolean(env.MOBILITHEK_RELAY_URL),
           };
+
           if (env.MOBILITHEK_RELAY_URL) {
             try {
               const relayUrl = new URL(env.MOBILITHEK_RELAY_URL);
@@ -332,14 +347,31 @@ export default {
           });
         }
 
+        let relayConfig: Record<string, unknown> = {
+          configured: Boolean(env.MOBILITHEK_RELAY_URL),
+        };
+
+        if (env.MOBILITHEK_RELAY_URL) {
+          try {
+            const relayUrl = new URL(env.MOBILITHEK_RELAY_URL);
+            relayConfig = {
+              configured: true,
+              protocol: relayUrl.protocol,
+              host: relayUrl.host,
+              pathname: relayUrl.pathname,
+              hasQuery: relayUrl.search.length > 0,
+            };
+          } catch {
+            relayConfig = { configured: true, url: "invalid-url" };
+          }
+        }
+
         return Response.json({
           status: "ok",
           demandedCrossings: demand.length,
           subscriptions: getSubscriptionIds(env),
           excludedSubscriptions: RETIRED_TRAIN_SUBSCRIPTION_IDS,
-          relayConfig: {
-            configured: Boolean(env.MOBILITHEK_RELAY_URL),
-          },
+          relayConfig,
           demand: demand.map((crossing) => ({
             id: crossing.id,
             primaryObservationEvas: crossing.primaryObservationEvas,
@@ -352,6 +384,7 @@ export default {
           "[Mobilithek Worker] debug failed",
           error instanceof Error ? error.stack || error.message : String(error),
         );
+
         return Response.json(
           {
             status: "error",
@@ -361,6 +394,7 @@ export default {
         );
       }
     }
+
     if (url.pathname === "/run") {
       try {
         const result = await runRefresh(env);
@@ -370,6 +404,7 @@ export default {
           "[Mobilithek Worker] manual refresh failed",
           error instanceof Error ? error.stack || error.message : String(error),
         );
+
         return Response.json(
           {
             status: "error",
@@ -379,6 +414,7 @@ export default {
         );
       }
     }
+
     return new Response("Mobilithek refresh worker", { status: 200 });
   },
 

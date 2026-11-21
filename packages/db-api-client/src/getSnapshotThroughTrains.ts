@@ -13,8 +13,6 @@ export type SnapshotThroughTrain = {
   observationEva: string;
   observationStation: string;
   observationActualTime: string;
-  observationScheduledTime?: string;
-  observationDirection: "arrivals" | "departures" | "unknown";
   fallbackOffsetSeconds: number;
   trackDistanceMeters: number;
   direction: "eastbound" | "westbound" | "unknown";
@@ -42,7 +40,18 @@ function routeIndex(route: string[], station: string) {
   });
 }
 
-function matchesRoute(trainRoute: string[], observationStation: string, requiredRouteStops: string[]) {
+function matchingStops(trainRoute: string[], calls: any[], observationStation: string, requiredRouteStops: string[]) {
+  const callRoute = calls
+    .map((call) => String(call?.name || "").trim())
+    .filter(Boolean);
+  const requiredAnchors = requiredRouteStops.filter((stop) => !/^\d{2,6}$/.test(String(stop).trim()));
+  const callHasObservation = routeIndex(callRoute, observationStation) >= 0;
+  const callAnchorCount = requiredAnchors.filter((stop) => routeIndex(callRoute, stop) >= 0).length;
+  return callRoute.length && (callHasObservation || callAnchorCount >= 2) ? callRoute : trainRoute;
+}
+
+function matchesRoute(trainRoute: string[], calls: any[], observationStation: string, requiredRouteStops: string[]) {
+  trainRoute = matchingStops(trainRoute, calls, observationStation, requiredRouteStops);
   if (!trainRoute.length) return false;
   const infrastructureRefs = requiredRouteStops.filter((stop) => /^\d{2,6}$/.test(String(stop).trim()));
   if (infrastructureRefs.length) return routeIndex(trainRoute, observationStation) >= 0;
@@ -51,14 +60,13 @@ function matchesRoute(trainRoute: string[], observationStation: string, required
     .map((stop, order) => ({ stop, order, index: routeIndex(trainRoute, stop) }))
     .filter((entry) => entry.index >= 0);
 
-  if (anchors.length < 2) {
-    return routeIndex(trainRoute, observationStation) >= 0;
-  }
+  if (anchors.length < 2) return routeIndex(trainRoute, observationStation) >= 0;
 
   const ordered = [...anchors].sort((a, b) => a.order - b.order);
   for (let i = 1; i < ordered.length; i += 1) {
     if (ordered[i - 1].index >= ordered[i].index) return false;
   }
+
   const observationIndex = routeIndex(trainRoute, observationStation);
   if (observationIndex >= 0) {
     if (observationIndex < ordered[0].index || observationIndex > ordered[ordered.length - 1].index) return false;
@@ -84,7 +92,23 @@ function directionForRoute(route: string[], observationStation: string, required
   return "unknown" as const;
 }
 
-function ruleAllowsTrain(rule: any, train: { category?: string; line?: string }) {
+function lineHintsForCrossing(crossing: Crossing): string[] {
+  return Array.from(new Set(
+    (crossing.rules || []).flatMap((rule: any) =>
+      Array.isArray(rule?.lineHints) ? rule.lineHints.map(String) : []
+    )
+  )).filter(Boolean);
+}
+
+function ruleAllowsTrain(rule: any, train: { category?: string; line?: string }, lineHints: string[]) {
+  if (lineHints.length) {
+    const line = String(train.line || "").toUpperCase().replace(/\s+/g, "");
+    const category = String(train.category || "").toUpperCase().replace(/\s+/g, "");
+    return lineHints.some((hint) => {
+      const wanted = String(hint).toUpperCase().replace(/\s+/g, "");
+      return wanted && (line === wanted || line.includes(wanted) || wanted.includes(line) || category === wanted);
+    });
+  }
   const categories = Array.isArray(rule.categories) ? rule.categories : [];
   if (!categories.length) return true;
   const line = String(train.line || "").toUpperCase();
@@ -96,45 +120,31 @@ function parseJson(value: unknown, fallback: any) {
   try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; }
 }
 
-function normalizeEva(value: unknown) {
-  const raw = String(value || "").trim();
-  const match = raw.match(/(?:^|[^0-9])(\d{7})(?:$|[^0-9])/);
-  return match?.[1] || raw;
-}
-
-function snapshotCallsContain(calls: any[], station: string, observationEva: string) {
-  const targetEva = normalizeEva(observationEva);
-  if (targetEva) {
-    const byEva = calls.find((call) =>
-      normalizeEva(call?.stopPointRef) === targetEva ||
-      normalizeEva(call?.stopPlaceRef) === targetEva
-    );
-    if (byEva) return byEva;
-  }
-
+function snapshotCallsContain(calls: any[], station: string) {
   const target = normalizeStationName(station);
-  if (!target) return undefined;
   return calls.find((call) => {
     const value = normalizeStationName(String(call?.name || ""));
-    return Boolean(value && (value === target || value.includes(target) || target.includes(value)));
+    return value === target || value.includes(target) || target.includes(value);
   });
 }
 
 export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): Promise<SnapshotThroughTrain[] | null> {
   try {
-    const rules = (crossing.throughRules?.length
-      ? crossing.throughRules
-      : crossing.observationEvas.map((eva: string) => ({ observationEva: eva, observationStation: eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }))) as any[];
+    const lineHints = lineHintsForCrossing(crossing);
+    const rules = (crossing.throughRules || []).filter((rule: any) => String(rule?.role || "") === "context" || String(rule?.side || "") === "unknown") as any[];
     if (!rules.length) return null;
 
     const now = Date.now();
-    // actual_time is the first relevant call of the whole journey, not
-    // necessarily the observation station. Keep a wider journey window here;
-    // the observation call and predicted crossing time are filtered below.
     const from = new Date(now - 24 * 60 * 60_000).toISOString();
-    const to = new Date(now + 24 * 60 * 60_000).toISOString();
+    const to = new Date(now + 3 * 60 * 60_000).toISOString();
+
+    // Do not ORDER BY here. The status layer sorts the small candidate set later.
+    // Without an actual_time index an ORDER BY forces SQLite/Turso to scan and sort
+    // the whole snapshot table before applying LIMIT, which was causing ~100s loads.
+    // The production migration adds the proper index; removing the sort also keeps
+    // the endpoint bounded while that migration propagates.
     const result = await db.execute({
-      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction FROM mobilithek_train_snapshot WHERE actual_time >= ? AND actual_time <= ? ORDER BY actual_time ASC LIMIT 5000`,
+      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction FROM mobilithek_train_snapshot WHERE actual_time >= ? AND actual_time <= ? LIMIT 1500`,
       args: [from, to],
     });
 
@@ -146,18 +156,12 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       const train = { line: String(row.line || ""), category: String(row.category || "") };
 
       for (const rule of rules) {
-        if (!ruleAllowsTrain(rule, train)) continue;
+        if (!ruleAllowsTrain(rule, train, lineHints)) continue;
         const observationStation = String(rule.observationStation || "");
-        if (!matchesRoute(route, observationStation, crossing.requiredRouteStops || [])) continue;
+        if (!matchesRoute(route, calls, observationStation, crossing.requiredRouteStops || [])) continue;
 
-        const observationCall = snapshotCallsContain(calls, observationStation, String(rule.observationEva || ""));
+        const observationCall = snapshotCallsContain(calls, observationStation);
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
-        const observationScheduledTime = observationCall?.plannedArrival || observationCall?.plannedDeparture || observationCall?.planned || row.scheduled_time;
-        const observationDirection = observationCall?.actualArrival || observationCall?.plannedArrival
-          ? "arrivals"
-          : observationCall?.actualDeparture || observationCall?.plannedDeparture
-            ? "departures"
-            : "unknown";
         const parsedObservation = new Date(observationTime);
         if (!Number.isFinite(parsedObservation.getTime())) continue;
 
@@ -179,8 +183,6 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
           observationEva: String(rule.observationEva || ""),
           observationStation,
           observationActualTime: parsedObservation.toISOString(),
-          observationScheduledTime: observationScheduledTime ? new Date(observationScheduledTime).toISOString() : undefined,
-          observationDirection,
           fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300),
           trackDistanceMeters: Number(rule.trackDistanceMeters || 0),
           direction: rule.direction === "unknown" ? expectedDirection : rule.direction,

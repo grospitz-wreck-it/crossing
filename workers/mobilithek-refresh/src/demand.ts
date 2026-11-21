@@ -18,8 +18,6 @@ export type SecondaryRuleGroup = {
 type DemandCrossing = {
   id: string;
   requiredRouteStops: string[];
-  categories: string[];
-  observationStations: string[];
   primaryObservationEvas: string[];
   primaryObservationStations: string[];
   secondaryRules: SecondaryRuleGroup[];
@@ -58,6 +56,30 @@ function collectThroughRules(value: unknown): SecondaryRuleGroup[] {
     }));
 }
 
+async function loadStationNames(
+  db: ReturnType<typeof getDb>,
+  evas: string[],
+): Promise<Map<string, string>> {
+  if (!evas.length) return new Map();
+
+  const result = await db.execute({
+    sql:
+      "SELECT eva, name FROM railway_station_catalog WHERE eva IN (" +
+      evas.map(() => "?").join(",") +
+      ")",
+    args: evas,
+  });
+
+  return new Map(
+    (result.rows as any[])
+      .map((row) => [
+        String(row.eva || "").trim(),
+        String(row.name || "").trim(),
+      ] as const)
+      .filter(([eva, name]) => Boolean(eva && name)),
+  );
+}
+
 export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
   const db = getDb();
 
@@ -65,11 +87,8 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
     SELECT DISTINCT
       c.id,
       c.required_route_stops,
-      c.observation_evas,
       c.reference_stations,
-      c.through_rules,
-      c.diversion_rules,
-      c.reroute_watch_rules
+      c.through_rules
     FROM crossings c
     WHERE c.status = 'active'
       AND (
@@ -86,52 +105,47 @@ export async function loadDemandCrossings(): Promise<DemandCrossing[]> {
       )
   `);
 
-  const catalog = await db.execute(`SELECT eva, name FROM railway_station_catalog`);
-  const stationNamesByEva = new Map<string, string>();
-  for (const station of catalog.rows as any[]) {
-    const eva = String(station.eva || "").trim();
-    const name = String(station.name || "").trim();
-    if (eva && name) stationNamesByEva.set(eva, name);
-  }
+  const rows = result.rows as any[];
 
-  return (result.rows as any[]).map((row) => {
+  const allPrimaryEvas = Array.from(
+    new Set(
+      rows.flatMap((row) =>
+        parseJson<string[]>(row.reference_stations, [])
+          .map(String)
+          .map((value) => value.trim())
+          .filter(Boolean),
+      ),
+    ),
+  );
+
+  const stationNames = await loadStationNames(db, allPrimaryEvas);
+
+  return rows.map((row) => {
     const primaryObservationEvas = Array.from(
       new Set(
-        [
-          ...parseJson<string[]>(row.observation_evas, []),
-          ...parseJson<string[]>(row.reference_stations, []),
-        ]
+        parseJson<string[]>(row.reference_stations, [])
           .map(String)
           .map((value) => value.trim())
           .filter(Boolean),
       ),
     );
 
-    const primaryObservationStations = primaryObservationEvas
-      .map((eva) => stationNamesByEva.get(eva))
-      .filter((value): value is string => Boolean(value));
-
-    // Secondary demand is intentionally limited to regular through-rules for
-    // now. Diversion/reroute rules are retained in the database but are not
-    // treated as permanently active demand until a real diversion state can
-    // be detected. This avoids turning conditional rules into false positives.
-    const secondaryRules = collectThroughRules(row.through_rules);
-
-    const categories = Array.from(
-      new Set(secondaryRules.flatMap((rule) => rule.categories || [])),
-    );
-
-    const observationStations = Array.from(
+    const primaryObservationStations = Array.from(
       new Set(
-        secondaryRules.flatMap((rule) => rule.observationStations),
+        primaryObservationEvas
+          .map((eva) => stationNames.get(eva))
+          .filter((value): value is string => Boolean(value)),
       ),
     );
+
+    // Only regular through-rules are active secondary demand for now.
+    // Diversion and reroute rules remain conditional and must not create
+    // permanent demand before an actual diversion state is detected.
+    const secondaryRules = collectThroughRules(row.through_rules);
 
     return {
       id: String(row.id),
       requiredRouteStops: parseJson<string[]>(row.required_route_stops, []).map(String),
-      categories,
-      observationStations,
       primaryObservationEvas,
       primaryObservationStations,
       secondaryRules,

@@ -192,9 +192,9 @@ function parseBodyFromRoot(root: any): MobilithekTrainEvent[] {
           raw: JSON.stringify(call),
         });
       }
-      const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef"]) || "";
+      const name = firstText(call, ["StopPointName", "StopPlaceName", "DestinationName", "StopPointRef", "StopPlaceRef", "StopPlaceRefId"]) || "";
       const stopPointRef = firstText(call, ["StopPointRef"]);
-      const stopPlaceRef = firstText(call, ["StopPlaceRef"]);
+      const stopPlaceRef = firstText(call, ["StopPlaceRef", "StopPlaceRefId"]);
       const plannedArrival = dateValue(call, ["AimedArrivalTime", "PlannedArrivalTime"]);
       let actualArrival = dateValue(call, ["ExpectedArrivalTime", "EstimatedArrivalTime", "ActualArrivalTime"]);
       const plannedDeparture = dateValue(call, ["AimedDepartureTime", "PlannedDepartureTime"]);
