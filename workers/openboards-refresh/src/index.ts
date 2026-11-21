@@ -402,6 +402,18 @@ export default {
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
+    const hour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Europe/Berlin",
+        hour: "2-digit",
+        hourCycle: "h23",
+      }).format(new Date()),
+    );
+
+    if (hour < 8 || hour >= 23) {
+      return;
+    }
+
     const result = await runRefresh(env);
     console.log("[OpenBoards] refresh result", result);
   },
