@@ -6,6 +6,7 @@ export type SnapshotThroughTrain = {
   line: string;
   category: string;
   journeyNumber: number;
+  journeyRef?: string;
   destination?: string;
   origin?: string;
   route: string[];
@@ -127,6 +128,39 @@ function normalizeEva(value: unknown) {
   return match?.[1] || raw;
 }
 
+async function resolveStationNames(db: Client, routes: string[][], calls: any[][]) {
+  const evas = new Set<string>();
+  for (const value of routes.flat()) {
+    if (/^\d{7}$/.test(String(value).trim())) evas.add(String(value).trim());
+  }
+  for (const list of calls) {
+    for (const call of list) {
+      for (const ref of [call?.stopPointRef, call?.stopPlaceRef]) {
+        const eva = normalizeEva(ref);
+        if (/^\d{7}$/.test(eva)) evas.add(eva);
+      }
+    }
+  }
+
+  const names = new Map<string, string>();
+  const values = Array.from(evas);
+  // Stay below SQLite's bind-parameter limit and keep this lookup bounded.
+  for (let offset = 0; offset < values.length; offset += 400) {
+    const chunk = values.slice(offset, offset + 400);
+    if (!chunk.length) continue;
+    const result = await db.execute({
+      sql: `SELECT eva,name FROM railway_station_catalog WHERE eva IN (${chunk.map(() => "?").join(",")})`,
+      args: chunk,
+    });
+    for (const row of result.rows as any[]) {
+      const eva = normalizeEva(row.eva);
+      const name = String(row.name || "").trim();
+      if (eva && name) names.set(eva, name);
+    }
+  }
+  return names;
+}
+
 function snapshotCallsContain(calls: any[], station: string, observationEva: string) {
   const targetEva = normalizeEva(observationEva);
   if (targetEva) {
@@ -166,19 +200,35 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       args: [from, to],
     });
 
+    const rows = result.rows as any[];
+    const parsed = rows.map((row) => ({
+      row,
+      route: parseJson(row.route_json, []).map(String).filter(Boolean),
+      calls: parseJson(row.calls_json, []),
+    }));
+    const stationNames = await resolveStationNames(
+      db,
+      parsed.map((item) => item.route),
+      parsed.map((item) => item.calls),
+    );
+
     const candidates: SnapshotThroughTrain[] = [];
-    for (const row of result.rows as any[]) {
-      const route = parseJson(row.route_json, []).map(String).filter(Boolean);
-      const calls = parseJson(row.calls_json, []);
+    for (const item of parsed) {
+      const { row, calls } = item;
+      const route = item.route.map((stop) => {
+        const eva = normalizeEva(stop);
+        return stationNames.get(eva) || stop;
+      });
       if (route.length < 2) continue;
       const train = { line: String(row.line || ""), category: String(row.category || "") };
 
       for (const rule of rules) {
         if (!ruleAllowsTrain(rule, train, lineHints)) continue;
-        const observationStation = String(rule.observationStation || "");
+        const observationEva = String(rule.observationEva || "");
+        const observationStation = stationNames.get(normalizeEva(observationEva)) || String(rule.observationStation || "");
         if (!matchesRoute(route, calls, observationStation, crossing.requiredRouteStops || [])) continue;
 
-        const observationCall = snapshotCallsContain(calls, observationStation, String(rule.observationEva || ''));
+        const observationCall = snapshotCallsContain(calls, observationStation, observationEva);
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
         const parsedObservation = new Date(observationTime);
         if (!Number.isFinite(parsedObservation.getTime())) continue;
@@ -194,6 +244,7 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
           line: String(row.line || ""),
           category: String(row.category || ""),
           journeyNumber: Number(row.journey_number || 0),
+          journeyRef: row.journey_ref ? String(row.journey_ref) : undefined,
           destination: row.destination ? String(row.destination) : undefined,
           origin: row.origin ? String(row.origin) : undefined,
           route,
@@ -212,7 +263,10 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
       }
     }
 
-    const uniqueCandidates = Array.from(new Map(candidates.map((train) => [`${train.category}-${train.journeyNumber}`, train])).values());
+    const uniqueCandidates = Array.from(new Map(candidates.map((train) => [
+      train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`,
+      train,
+    ])).values());
     return uniqueCandidates.length ? uniqueCandidates : null;
   } catch (error) {
     console.warn("Mobilithek snapshot unavailable", error);
