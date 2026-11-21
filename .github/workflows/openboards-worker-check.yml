@@ -7,6 +7,10 @@ on:
       - "apps/web/app/admin/openboards-test/**"
       - "apps/web/app/api/admin/openboards-test/**"
       - "scripts/openboards-refresh-integration-test.cjs"
+      - "scripts/openboards-observation-match-test.cjs"
+      - "apps/web/app/api/crossings/**"
+      - "apps/web/tsconfig.json"
+      - "packages/db-api-client/src/getSnapshot*.ts"
       - "packages/db-api-client/src/openBoards*.ts"
       - "packages/db-api-client/sql/00[89]_openboards_*.sql"
       - "package.json"
@@ -15,8 +19,13 @@ on:
   push:
     branches:
       - "perf/openboards-turso-usage"
+      - "feat/osm-openboards-integration"
     paths:
       - "workers/openboards-refresh/**"
+      - "scripts/openboards-observation-match-test.cjs"
+      - "apps/web/app/api/crossings/**"
+      - "apps/web/tsconfig.json"
+      - "packages/db-api-client/src/getSnapshot*.ts"
       - "packages/db-api-client/src/openBoards*.ts"
       - "packages/db-api-client/sql/00[89]_openboards_*.sql"
       - "package.json"
@@ -39,16 +48,20 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: TypeScript check for web app
+        run: npx tsc --noEmit -p apps/web/tsconfig.json
       - name: TypeScript check for OpenBoards worker
         run: npx tsc --noEmit -p workers/openboards-refresh/tsconfig.json
       - name: Compile real OpenBoards queue modules for integration test
         run: |
           rm -rf .tmp/openboards-test
-          npx tsc packages/db-api-client/src/openBoardsQueueStore.ts packages/db-api-client/src/openBoardsScheduler.ts \
+          npx tsc packages/db-api-client/src/openBoardsQueueStore.ts packages/db-api-client/src/openBoardsScheduler.ts packages/db-api-client/src/openBoardsObservations.ts \
             --target ES2022 --module commonjs --moduleResolution node --skipLibCheck \
             --esModuleInterop --outDir .tmp/openboards-test
       - name: Run isolated OpenBoards refresh integration flow
         run: node scripts/openboards-refresh-integration-test.cjs
+      - name: Test strict OpenBoards-to-Mobilithek event matching
+        run: node scripts/openboards-observation-match-test.cjs
       - name: Exercise OpenBoards SQL against isolated libSQL database
         run: |
           node --input-type=module <<'NODE'
