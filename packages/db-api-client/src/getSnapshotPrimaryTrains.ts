@@ -45,8 +45,10 @@ function stationCallMatches(call: any, eva: string, stationName?: string) {
 export async function getSnapshotPrimaryTrains(db: Client, crossing: Crossing): Promise<SnapshotPrimaryTrain[] | null> {
   // Primary means an explicitly configured reference station only. Automatically
   // discovered observation/context stations must never be promoted to primary.
-  const primaryEvas = Array.from(new Set(
-    ((crossing as any).referenceStations || []).map((value: unknown) => String(value).trim()).filter(Boolean),
+  const primaryEvas: string[] = Array.from(new Set<string>(
+    (((crossing as any).referenceStations || []) as unknown[])
+      .map((value: unknown) => String(value).trim())
+      .filter((value: string) => Boolean(value)),
   ));
   if (!primaryEvas.length) return [];
 
@@ -55,8 +57,8 @@ export async function getSnapshotPrimaryTrains(db: Client, crossing: Crossing): 
       sql: "SELECT eva,name FROM railway_station_catalog WHERE eva IN (" + primaryEvas.map(() => "?").join(",") + ")",
       args: primaryEvas,
     });
-    const stationNames = new Map((stationResult.rows as any[])
-      .map((row) => [String(row.eva || "").trim(), String(row.name || "").trim()] as const)
+    const stationNames = new Map<string, string>((stationResult.rows as any[])
+      .map((row): [string, string] => [String(row.eva || "").trim(), String(row.name || "").trim()])
       .filter(([eva, name]) => Boolean(eva && name)));
 
     const now = Date.now();
