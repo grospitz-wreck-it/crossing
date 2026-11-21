@@ -11,6 +11,7 @@ import { withMemoryCache } from "../../../../../../../packages/db-api-client/src
 import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 import { isTrainRouteNearCrossing } from "../../../../lib/crossingRouteProximity";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
+import { resolveClosureMergeGapSeconds, shouldMergeClosures } from "../../../../lib/closureMerge";
 
 function jsonArray(value: unknown): any[] {
   if (Array.isArray(value)) return value;
@@ -151,6 +152,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const crossing = (await loadCrossing(id)) || staticCrossings.find(c => c.id === id);
   timing.loadCrossingMs = performance.now() - loadStarted;
   if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
+  const mergeGapSeconds = resolveClosureMergeGapSeconds(process.env.CROSSING_MERGE_GAP_SECONDS);
   const lineHints = !crossing.eva && ((crossing.requiredRouteStops || []).includes("2530") || String(crossing.name || "").includes("2530")) ? ["S28"] : [];
 
   if (lineHints.length) {
@@ -261,7 +263,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const closureStarted = performance.now(); const closures: any[] = [];
   for (const train of trains.filter(t => t.etaSeconds > 0)) {
     const crossingTime = new Date(train.crossingTime); const closeAt = new Date(crossingTime.getTime() - crossing.closeOffsetSeconds * 1000), openAt = new Date(crossingTime.getTime() + crossing.openOffsetSeconds * 1000), last = closures[closures.length - 1];
-    if (!last || closeAt.getTime() > last.end.getTime() + 30000) closures.push({ start: closeAt, end: openAt, trains: [train] }); else { if (openAt.getTime() > last.end.getTime()) last.end = openAt; last.trains.push(train); }
+    if (!last || !shouldMergeClosures(last.end, closeAt, mergeGapSeconds)) closures.push({ start: closeAt, end: openAt, trains: [train] }); else { if (openAt.getTime() > last.end.getTime()) last.end = openAt; last.trains.push(train); }
   }
   timing.closuresMs = performance.now() - closureStarted;
   const visibleClosures = closures.filter(c => c.start.getTime() <= Date.now() + 30 * 60 * 1000); const nextClosure = closures.find(c => c.end.getTime() > Date.now()) || null;
