@@ -145,7 +145,7 @@ function snapshotCallsContain(calls: any[], station: string, observationEva: str
 export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): Promise<SnapshotThroughTrain[] | null> {
   try {
     const lineHints = lineHintsForCrossing(crossing);
-    const rules = (crossing.throughRules || []).filter((rule: any) => String(rule?.role || "") === "context" || String(rule?.side || "") === "unknown") as any[];
+    const rules = (crossing.throughRules || []) as any[];
     if (!rules.length) return null;
 
     const now = Date.now();
