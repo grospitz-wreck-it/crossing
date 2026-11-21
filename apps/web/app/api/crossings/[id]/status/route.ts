@@ -65,7 +65,27 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id }=await params; const cacheKey=`status:${id}`; const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
-  const crossing=(await loadCrossing(id))||staticCrossings.find(c=>c.id===id);
+  let crossing = await loadCrossing(id);
+  if (!crossing) {
+    // Legacy app selections can still carry the old static id (e.g. "kirchlengern").
+    // Resolve that alias to the active database crossing with the same EVA so the
+    // frontend uses its configured reference stations and live snapshot data.
+    const legacyCrossing = staticCrossings.find((item) => item.id === id);
+    if (legacyCrossing?.eva) {
+      try {
+        const matches = await db.execute({
+          sql: "SELECT id FROM crossings WHERE eva = ? AND status = 'active' LIMIT 2",
+          args: [String(legacyCrossing.eva)],
+        });
+        if (matches.rows.length === 1) {
+          crossing = await loadCrossing(String((matches.rows[0] as any).id));
+        }
+      } catch (error) {
+        console.warn("[STATUS] legacy crossing alias lookup failed:", error);
+      }
+    }
+    crossing = crossing || legacyCrossing || null;
+  }
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
   const lineHints=lineHintsForCrossing(crossing);
   // PRIMARY is explicitly declared by reference_stations. Never treat automatically
