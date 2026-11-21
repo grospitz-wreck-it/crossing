@@ -8,7 +8,7 @@ const MAX_DIRECT_OBSERVATION_STATIONS = 6;
 const MAX_RULE_STATIONS = 8;
 const FORECAST_TIMETABLE_HOURS = 1;
 const FORECAST_CACHE_TTL_MS = 60_000;
-const FORECAST_VERSION = 6;
+const FORECAST_VERSION = 7;
 function normalizeStationName(value: string) { return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim(); }
 function normalizeLine(value: unknown) { return String(value || "").toUpperCase().replace(/\s+/g, "").replace(/[._-]/g, ""); }
 function routeIndex(route: string[], station: string) { const target = normalizeStationName(station); if (!target) return -1; return route.findIndex((stop) => { const value = normalizeStationName(stop); return value === target || value.includes(target) || target.includes(value); }); }
@@ -37,11 +37,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     )
   )).filter(Boolean);
   const isInfrastructureForecast = infrastructureRefs.length > 0 || /strecke\s*2530/i.test(String(crossing.name || ""));
-  const lineHints = explicitLineHints.length
-    ? explicitLineHints
-    : isInfrastructureForecast
-      ? [infrastructureRefs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || "")) ? "S28" : ""].filter(Boolean)
-      : Array.from(new Set([...(Array.isArray(osmRoute?.lineRelations) ? osmRoute.lineRelations.flatMap((relation: any) => [relation.ref, relation.name]).filter(Boolean) : []), ...storedRouteStops].map(String).filter(Boolean)));
+  // Only real railway line identifiers may constrain a train registry.
+  // Infrastructure IDs and station names are not train lines and must never
+  // be used as broad fallbacks (an empty filter previously admitted every train).
+  const osmLineHints = Array.isArray(osmRoute?.lineRelations)
+    ? osmRoute.lineRelations.flatMap((relation: any) => [relation.ref, relation.name]).map(String).map((value) => value.trim()).filter(Boolean)
+    : [];
+  const lineHints = Array.from(new Set([...explicitLineHints, ...osmLineHints]));
   const stationLinks = await db.execute({ sql: `SELECT eva,station_name,role,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }).catch(() => ({ rows: [] as any[] }));
   const stationNameByEva = new Map<string, string>();
   for (const row of stationLinks.rows as any[]) { const eva = String(row.eva || "").trim(); if (eva) stationNameByEva.set(eva, String(row.station_name || eva)); }
@@ -54,7 +56,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const trainsByKey = new Map<string, any>();
   const stationResults: any[] = [];
   const diagnostics: any = { mode: isInfrastructureForecast ? "infrastructure" : (!crossing.eva && storedThroughRules.length ? "through-rules" : "station-timetable"), registryTotal: 0, registryAfterLineFilter: 0, categories: {}, relevantCategoryCounts: { ICE: 0, IC: 0, EC: 0 }, categorySamples: [], stationChecks: [], registryFetchMs: 0, matchingMs: 0, candidateInsertions: 0, candidateRejectionsOutsideWindow: 0 };
-  if (isInfrastructureForecast) {
+  if (isInfrastructureForecast && lineHints.length === 0) {
+    // Fail closed: without a verified OSM/explicit railway line, a registry-wide
+    // query would produce unrelated trains and false crossing closures.
+    diagnostics.warning = "Keine verkehrende Eisenbahnlinie zugeordnet. OSM-Streckenrelation oder Linienauswahl prüfen.";
+    stationResults.push({ role: "infrastructure-observation", ok: false, count: 0, error: diagnostics.warning, lineHints: [] });
+  } else if (isInfrastructureForecast) {
     try {
       const registryStarted = performance.now();
       const registry = await getMobilithekTrainRegistry();
@@ -160,7 +167,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   diagnostics.infrastructureRefs = infrastructureRefs;
   diagnostics.rulesUsed = storedThroughRules.length;
   diagnostics.observationLinks = stationLinks.rows.length;
-  const payload = { forecastVersion: FORECAST_VERSION, diagnostics, crossing: { id: String(crossing.id), name: String(crossing.name), lat: Number(crossing.lat), lon: Number(crossing.lon), route: storedRouteStops, lineHints, infrastructureRefs }, state, nextClosure: nextClosure ? { start: nextClosure.start.toISOString(), end: nextClosure.end.toISOString(), closeInSeconds: Math.max(0, Math.floor((nextClosure.start.getTime() - now) / 1000)), openInSeconds: Math.max(0, Math.floor((nextClosure.end.getTime() - now) / 1000)), trains: nextClosure.trains } : null, closures: closures.slice(0, 30).map((closure) => ({ start: closure.start.toISOString(), end: closure.end.toISOString(), durationMinutes: Math.round((closure.end.getTime() - closure.start.getTime()) / 60000), trainCount: closure.trains.length, trains: closure.trains })), trains, stations: stationResults, rules: { requiredRouteStops: storedRouteStops, throughRules: storedThroughRules, diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules), apiProtection: { maxDirectObservationStations: MAX_DIRECT_OBSERVATION_STATIONS, maxRuleStations: MAX_RULE_STATIONS, timetableHours: FORECAST_TIMETABLE_HOURS, routeOnlyForInfrastructureCrossings: true } } };
+  const payload = { forecastVersion: FORECAST_VERSION, message: diagnostics.warning || undefined, diagnostics, crossing: { id: String(crossing.id), name: String(crossing.name), lat: Number(crossing.lat), lon: Number(crossing.lon), route: storedRouteStops, lineHints, infrastructureRefs }, state, nextClosure: nextClosure ? { start: nextClosure.start.toISOString(), end: nextClosure.end.toISOString(), closeInSeconds: Math.max(0, Math.floor((nextClosure.start.getTime() - now) / 1000)), openInSeconds: Math.max(0, Math.floor((nextClosure.end.getTime() - now) / 1000)), trains: nextClosure.trains } : null, closures: closures.slice(0, 30).map((closure) => ({ start: closure.start.toISOString(), end: closure.end.toISOString(), durationMinutes: Math.round((closure.end.getTime() - closure.start.getTime()) / 60000), trainCount: closure.trains.length, trains: closure.trains })), trains, stations: stationResults, rules: { requiredRouteStops: storedRouteStops, throughRules: storedThroughRules, diversionRules: jsonArray(crossing.diversion_rules), rerouteWatchRules: jsonArray(crossing.reroute_watch_rules), apiProtection: { maxDirectObservationStations: MAX_DIRECT_OBSERVATION_STATIONS, maxRuleStations: MAX_RULE_STATIONS, timetableHours: FORECAST_TIMETABLE_HOURS, routeOnlyForInfrastructureCrossings: true } } };
   await writeCrossingForecastCache(id, payload);
   return Response.json(payload, { headers: { "X-Crossing-Forecast-Cache": "MISS" } });
 }
