@@ -11,6 +11,7 @@ export type SnapshotPrimaryTrain = {
   delayMinutes: number;
   crossingTime: string;
   arrival: string;
+  scheduledTime: string;
 };
 
 function parseJson(value: unknown, fallback: any) {
@@ -127,6 +128,7 @@ export async function getSnapshotPrimaryTrains(
         delayMinutes: Number(row.delay_minutes || 0),
         crossingTime: crossingTime.toISOString(),
         arrival: parsedTime.toISOString(),
+        scheduledTime: String(call?.plannedDeparture || call?.plannedArrival || call?.planned || stationTime),
       });
       break;
     }
