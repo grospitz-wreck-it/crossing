@@ -1,6 +1,7 @@
 import { db } from "../../../../lib/db";
 import { getStationTimetable } from "../../../../../../../packages/db-api-client/src/getStationTimetable";
 import { getSnapshotPrimaryTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotPrimaryTrains";
+import { findMatchingOpenBoardsObservation, getOpenBoardsObservations } from "../../../../../../../packages/db-api-client/src/openBoardsObservations";
 import { getThroughTrains } from "../../../../../../../packages/db-api-client/src/getThroughTrains";
 import { getDivertedTrains } from "../../../../../../../packages/db-api-client/src/getDivertedTrains";
 import { getReroutedTrains } from "../../../../../../../packages/db-api-client/src/getReroutedTrains";
@@ -47,12 +48,12 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   }
   const sourceRules = throughRules.length ? throughRules : observationEvas.map(eva => ({ observationEva: eva, observationStation: stationNameByEva.get(eva) || eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }));
   const normalizedThroughRules = sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva);
-  return { id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas, primaryObservationEvas, referenceStations, contextEvas, requiredRouteStops, lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [], throughRules: normalizedThroughRules, diversionRules, rerouteWatchRules, confidence: Number(row.confidence || 0.5) };
+  return { id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), observationEvas, primaryObservationEvas, referenceStations, contextEvas, requiredRouteStops, lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20), rules: [], throughRules: normalizedThroughRules, diversionRules, rerouteWatchRules, confidence: Number(row.confidence || 0.5), trainSourceMode: String(row.train_source_mode || "mobilithek") };
 }
 async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
-      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,reference_stations,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
+      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,train_source_mode,observation_evas,reference_stations,context_evas,required_route_stops,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
       db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }),
     ]);
     const row: any = result.rows[0];
@@ -62,6 +63,35 @@ async function loadCrossing(id: string): Promise<any | null> {
     console.error("[STATUS] loadCrossing failed:", error);
     return null;
   }
+}
+
+
+function applyOpenBoardsTime(train: any, observations: any[]) {
+  const match = findMatchingOpenBoardsObservation({
+    observationEva: String(train?.observationEva || ""),
+    observationDirection: train?.observationDirection || "unknown",
+    observationScheduledTime: train?.observationScheduledTime,
+    line: train?.line,
+    journeyNumber: train?.journeyNumber,
+  }, observations);
+  if (!match) return train;
+
+  const eventAt = new Date(match.eventTime);
+  if (!Number.isFinite(eventAt.getTime())) return train;
+  const scheduledAt = match.scheduledTime ? new Date(match.scheduledTime) : null;
+  const offsetSeconds = Number(train?.fallbackOffsetSeconds || 0);
+  const crossingAt = new Date(eventAt.getTime() + offsetSeconds * 1000);
+
+  return {
+    ...train,
+    observationActualTime: eventAt.toISOString(),
+    crossingTime: crossingAt.toISOString(),
+    delayMinutes: scheduledAt && Number.isFinite(scheduledAt.getTime())
+      ? Math.round((eventAt.getTime() - scheduledAt.getTime()) / 60_000)
+      : train.delayMinutes,
+    source: "openboards",
+    sourceTimeQuality: match.timeType,
+  };
 }
 
 async function allowTrainForCrossing(crossingId: string, crossing: any, train: any, timing?: TimingState): Promise<boolean> {
@@ -156,14 +186,30 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     timing.localEventsMs = performance.now() - started;
     return value;
   });
-  const observationEventsPromise = Promise.resolve([]);
+  const useOpenBoards = crossing.trainSourceMode === "openboards" || crossing.trainSourceMode === "hybrid";
+  const openBoardsEvas = Array.from(new Set([
+    ...primaryObservationEvas,
+    ...(Array.isArray(crossing.throughRules) ? crossing.throughRules.map((rule: any) => String(rule.observationEva || "").trim()) : []),
+  ].filter(Boolean)));
+  const observationEventsPromise = (async () => {
+    if (!useOpenBoards || !openBoardsEvas.length) return [];
+    const started = performance.now();
+    const from = new Date(Date.now() - 5 * 60_000).toISOString();
+    const to = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
+    const value = await getOpenBoardsObservations(db, openBoardsEvas, { from, to, limit: 2000 }).catch(() => []);
+    timing.observationEventsMs = performance.now() - started;
+    return value;
+  })();
   const throughPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`through-${crossing.id}`, 5000, () => getThroughTrains(crossing, { snapshotOnly: true })).catch(() => []); timing.throughTrainsMs = performance.now() - started; return value; })();
   const divertedPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`diverted-${crossing.id}`, 5000, () => getDivertedTrains(crossing)).catch(() => []); timing.divertedTrainsMs = performance.now() - started; return value; })();
   const reroutedPromise = (async () => { const started = performance.now(); const value = await withMemoryCache(`rerouted-${crossing.id}`, 5000, () => getReroutedTrains(crossing)).catch(() => []); timing.reroutedTrainsMs = performance.now() - started; return value; })();
   const [localEvents, observationEvents, throughTrains, divertedTrains, reroutedTrains] = await Promise.all([localEventsPromise, observationEventsPromise, throughPromise, divertedPromise, reroutedPromise]);
+  const enrichedLocalEvents = localEvents.map((train: any) => applyOpenBoardsTime(train, observationEvents));
+  const enrichedThroughTrains = throughTrains.map((train: any) => applyOpenBoardsTime(train, observationEvents));
   counts.localCandidates = localEvents.length; counts.observationCandidates = observationEvents.length; counts.throughCandidates = throughTrains.length; counts.divertedCandidates = divertedTrains.length; counts.reroutedCandidates = reroutedTrains.length;
+  counts.openBoardsMatched = [...enrichedLocalEvents, ...enrichedThroughTrains].filter((train: any) => train.source === "openboards").length;
   const trains: any[] = [];
-  const directBase = [...localEvents, ...observationEvents.map((train: any) => ({ ...train, source: "observation", detection: "station-observation" }))];
+  const directBase = enrichedLocalEvents;
   const directEvents = directBase.filter((train: any) => !train.cancelled && lineMatchesHints(train, lineHints));
   counts.directFiltered = directEvents.length;
 
@@ -194,19 +240,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       direction: Array.isArray(train.route) ? getCrossingDirection(train.route) : "unknown",
       directionLabel: train.destination ? `Richtung ${train.destination}` : null,
       delayMinutes: train.delayMinutes,
+      source: train.source || "mobilithek",
+      timeQuality: train.sourceTimeQuality || "MOBILITHEK",
       crossingTime: crossingTime.toISOString(),
       arrival: crossingTime.toISOString(),
       etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000)
     });
   }
 
-  const throughFiltered = throughTrains.filter((train: any) => lineMatchesHints(train, lineHints));
+  const throughFiltered = enrichedThroughTrains.filter((train: any) => lineMatchesHints(train, lineHints));
   counts.throughFiltered = throughFiltered.length;
   const throughResults = await Promise.all(throughFiltered.map(async (train: any) => { counts.allowCalls++; const started = performance.now(); const allowed = await allowTrainForCrossing(crossing.id, crossing, train, timing); timing.filterThroughMs += performance.now() - started; return { train, allowed }; }));
   for (const { train, allowed } of throughResults) {
     if (!allowed) { counts.rejected++; continue; }
     counts.accepted++; const crossingTime = new Date(train.crossingTime);
-    trains.push({ id: `${train.category}-${train.journeyNumber}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Durchfahrt", delayMinutes: train.delayMinutes, crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000) });
+    trains.push({ id: `${train.category}-${train.journeyNumber}`, line: train.line, category: train.category, journeyNumber: train.journeyNumber, origin: train.origin, destination: train.destination, platform: undefined, isStoppingTrain: false, direction: train.direction, directionLabel: "Durchfahrt", delayMinutes: train.delayMinutes, source: train.source || "mobilithek", timeQuality: train.sourceTimeQuality || "MOBILITHEK", crossingTime: crossingTime.toISOString(), arrival: crossingTime.toISOString(), etaSeconds: Math.floor((crossingTime.getTime() - Date.now()) / 1000) });
   }
 
   trains.sort((a, b) => new Date(a.crossingTime).getTime() - new Date(b.crossingTime).getTime());
