@@ -42,7 +42,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const body = await request.json();
     const existing = await client.execute({ sql: `SELECT id FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
     if (!existing.rows.length) return Response.json({ error: "Crossing not found" }, { status: 404 });
-    const name = String(body.name ?? "").trim(), eva = String(body.eva ?? "").trim(), lat = Number(body.lat), lon = Number(body.lon), closeOffset = Number(body.closeOffsetSeconds), openOffset = Number(body.openOffsetSeconds), confidence = Number(body.confidence), status = body.status === "inactive" ? "inactive" : "active", trainSourceMode = ["openboards","mobilithek","hybrid"].includes(String(body.trainSourceMode)) ? String(body.trainSourceMode) : "mobilithek";
+    const name = String(body.name ?? "").trim(), eva = String(body.eva ?? "").trim(), lat = Number(body.lat), lon = Number(body.lon), closeOffset = Number(body.closeOffsetSeconds), openOffset = Number(body.openOffsetSeconds), confidence = Number(body.confidence), status = body.status === "inactive" ? "inactive" : "active", trainSourceMode = ["openboards","mobilithek","hybrid"].includes(String(body.trainSourceMode)) ? String(body.trainSourceMode) : "hybrid";
     if (!name) return Response.json({ error: "Bitte einen Namen vergeben." }, { status: 400 });
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) return Response.json({ error: "Ungültige Koordinaten." }, { status: 400 });
     if (!Number.isFinite(closeOffset) || !Number.isFinite(openOffset) || !Number.isFinite(confidence)) return Response.json({ error: "Ungültige Berechnungswerte." }, { status: 400 });

@@ -213,13 +213,14 @@ async function loadCorridorGraph(crossingId: string): Promise<CorridorGraph | nu
   if (pending) return pending;
   const promise = (async () => {
     const prepared = await loadPreparedCorridorGraph(crossingId);
-    if (prepared) {
-      corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: prepared });
-      return prepared;
+    if (!prepared) {
+      // Never expand an OSM graph in a live status request. Missing profiles
+      // remain unknown until the explicit admin preparation workflow builds them.
+      corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: null });
+      return null;
     }
-    // Compatibility path for crossings not prepared yet. The explicit
-    // preparation workflow should populate the profile before broad rollout.
-    return buildCorridorGraph(crossingId);
+    corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: prepared });
+    return prepared;
   })().finally(() => corridorGraphPromises.delete(crossingId));
   corridorGraphPromises.set(crossingId, promise);
   return promise;
