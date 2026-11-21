@@ -42,6 +42,7 @@ const files = [
   "apps/web/sql/006_railway_station_catalog.sql",
   "apps/web/sql/008_crossing_train_source_mode.sql",
   "migrations/20260823_crossing_locations.sql",
+  "packages/db-api-client/sql/006_mobilithek_train_snapshot_indexes.sql",
 ];
 
 for (const file of files) {
