@@ -1,6 +1,7 @@
 import { db } from "../../../../lib/db";
 import { getSnapshotPrimaryTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotPrimaryTrains";
 import { getSnapshotThroughTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotThroughTrains";
+import { getOpenBoardsObservations } from "../../../../../../../packages/db-api-client/src/openBoardsObservations";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
@@ -54,6 +55,39 @@ function lineHintsForCrossing(crossing: any): string[] {
   return !crossing.eva && (refs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || ""))) ? ["S28"] : [];
 }
 function lineMatches(train: any, hints: string[]) { if (!hints.length) return true; const normalize=(v:any)=>String(v||"").toUpperCase().replace(/\s+/g,"").replace(/[._-]/g,""); const line=normalize(train.line),cat=normalize(train.category); return hints.some(h=>{const x=normalize(h);return line===x||line.includes(x)||x.includes(line)||cat===x;}); }
+function normalizeTrainKey(value: unknown): string {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function matchOpenBoardsReal(
+  candidate: { stationEva: string; line: string; journeyNumber: number; scheduledTime?: string },
+  observations: any[],
+) {
+  const scheduledAt = Date.parse(String(candidate.scheduledTime || ""));
+  if (!candidate.stationEva || !candidate.journeyNumber || !candidate.line || !Number.isFinite(scheduledAt)) return null;
+  const line = normalizeTrainKey(candidate.line);
+  const matches = observations.filter((item) => {
+    if (String(item.evaNumber) !== String(candidate.stationEva)) return false;
+    if (Number(item.journeyNumber) !== Number(candidate.journeyNumber)) return false;
+    if (normalizeTrainKey(item.line) !== line) return false;
+    if (item.timeType !== "REAL" && item.timeType !== "PREVIEW") return false;
+    const boardScheduled = Date.parse(String(item.scheduledTime || ""));
+    const eventAt = Date.parse(String(item.eventTime || ""));
+    return Number.isFinite(boardScheduled) && Number.isFinite(eventAt) &&
+      Math.abs(boardScheduled - scheduledAt) <= 180_000;
+  });
+  matches.sort((a, b) => {
+    const quality = (item: any) => item.timeType === "REAL" ? 0 : 1;
+    if (quality(a) !== quality(b)) return quality(a) - quality(b);
+    const deltaA = Math.abs(Date.parse(a.scheduledTime) - scheduledAt);
+    const deltaB = Math.abs(Date.parse(b.scheduledTime) - scheduledAt);
+    if (deltaA !== deltaB) return deltaA - deltaB;
+    return Date.parse(String(b.observedAt || "")) - Date.parse(String(a.observedAt || ""));
+  });
+  const best = matches[0];
+  return best?.timeType === "REAL" ? best : null;
+}
+
 function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   const now=Date.now(); trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
   const closures:any[]=[];
@@ -108,7 +142,27 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // worker-fed Mobilithek snapshot. Automatically discovered observation EVAs
     // are deliberately excluded.
     const primarySnapshot=await getSnapshotPrimaryTrains(db,crossing);
+    const throughSnapshot=await getSnapshotThroughTrains(db,crossing);
+    const realtimeEvas = Array.from(new Set([
+      ...primaryEvas,
+      ...(crossing.throughRules || []).map((rule: any) => String(rule.observationEva || "").trim()),
+    ].filter(Boolean)));
+    const realtimeObservations = await getOpenBoardsObservations(db, realtimeEvas, {
+      from: new Date(Date.now() - 5 * 60_000).toISOString(),
+      to: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
+      limit: 1000,
+    });
+
     for(const train of primarySnapshot) {
+      const realtime = matchOpenBoardsReal({
+        stationEva: train.stationEva,
+        line: train.line,
+        journeyNumber: train.journeyNumber,
+        scheduledTime: train.scheduledTime,
+      }, realtimeObservations);
+      const liveTime = realtime?.eventTime || train.arrival;
+      const offsetSeconds = Math.max(30, Number((crossing.throughRules || []).find((rule: any) => String(rule.observationEva) === train.stationEva)?.fallbackOffsetSeconds || 300));
+      const predictedCrossingTime = new Date(Date.parse(liveTime) + offsetSeconds * 1000).toISOString();
       trains.push({
         id:`primary-${train.stationEva}-${train.category}-${train.journeyNumber}`,
         source:"primary-stop",
@@ -122,8 +176,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         isStoppingTrain:true,
         direction:getCrossingDirection([]),
         directionLabel:train.destination?`Richtung ${train.destination}`:null,
-        delayMinutes:train.delayMinutes,
-        crossingTime:train.crossingTime,
+        delayMinutes:realtime
+          ? Math.round((Date.parse(realtime.eventTime) - Date.parse(realtime.scheduledTime || train.scheduledTime)) / 60000)
+          : train.delayMinutes,
+        realtimeSource:realtime ? "DB OpenBoards REAL" : "Mobilithek",
+        realtimeTimeType:realtime?.timeType || null,
+        crossingTime:predictedCrossingTime,
         arrival:train.arrival,
         etaSeconds:Math.floor((Date.parse(train.crossingTime)-Date.now())/1000)
       });
@@ -131,9 +189,15 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
     // SECONDARY: context stations are evaluated in parallel with the primary
     // station-stop analysis. These candidates represent through-runs.
-    const snapshot=await getSnapshotThroughTrains(db,crossing);
-    for(const train of (snapshot||[]).filter((t:any)=>lineMatches(t,lineHints))) {
-      const crossingTime=new Date(train.crossingTime);
+    for(const train of (throughSnapshot||[]).filter((t:any)=>lineMatches(t,lineHints))) {
+      const realtime = matchOpenBoardsReal({
+        stationEva: train.observationEva,
+        line: train.line,
+        journeyNumber: train.journeyNumber,
+        scheduledTime: train.observationScheduledTime,
+      }, realtimeObservations);
+      const liveObservationTime = realtime?.eventTime || train.observationActualTime;
+      const crossingTime=new Date(Date.parse(liveObservationTime) + Number(train.fallbackOffsetSeconds || 300) * 1000);
       trains.push({
         id:`secondary-${train.category}-${train.journeyNumber}-${train.observationEva}`,
         source:"secondary-through",
@@ -146,7 +210,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         isStoppingTrain:false,
         direction:train.direction||getCrossingDirection(train.route),
         directionLabel:train.direction==="unknown"?"Durchfahrt":`Richtung ${train.direction}`,
-        delayMinutes:train.delayMinutes,
+        delayMinutes:realtime
+          ? Math.round((Date.parse(realtime.eventTime) - Date.parse(realtime.scheduledTime || train.observationScheduledTime)) / 60000)
+          : train.delayMinutes,
+        realtimeSource:realtime ? "DB OpenBoards REAL" : "Mobilithek",
+        realtimeTimeType:realtime?.timeType || null,
         crossingTime:crossingTime.toISOString(),
         arrival:crossingTime.toISOString(),
         etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)
