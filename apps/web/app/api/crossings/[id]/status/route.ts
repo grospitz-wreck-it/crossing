@@ -92,7 +92,10 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   const now=Date.now(); trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
   const closures:any[]=[];
   for(const train of trains.filter(t=>Date.parse(t.crossingTime)>now)) { const t=Date.parse(train.crossingTime); const start=new Date(t-crossing.closeOffsetSeconds*1000),end=new Date(t+crossing.openOffsetSeconds*1000); const last=closures[closures.length-1]; if(!last||start.getTime()>last.end.getTime()+30000)closures.push({start,end,trains:[train]});else{if(end>last.end)last.end=end;last.trains.push(train);} }
-  const visible=closures.filter(c=>c.start.getTime()<=now+30*60*1000); const next=closures.find(c=>c.end.getTime()>now)||null;
+  // The snapshot source covers up to three hours ahead. Return that same horizon
+  // to the UI; otherwise valid trains disappear between the hero and the later list.
+  const forecastHorizonMs = 3 * 60 * 60 * 1000;
+  const visible=closures.filter(c=>c.start.getTime()<=now+forecastHorizonMs); const next=closures.find(c=>c.end.getTime()>now)||null;
   return { crossing:{id:crossing.id,name:crossing.name,lat:crossing.lat,lon:crossing.lon}, state:next&&now>=next.start.getTime()?"CLOSED":"OPEN", nextCloseIn:next?Math.max(0,Math.floor((next.start.getTime()-now)/1000)):0, nextOpenIn:next?Math.max(0,Math.floor((next.end.getTime()-now)/1000)):0, phase:next?{start:next.start.toISOString(),end:next.end.toISOString(),durationMinutes:Math.round((next.end.getTime()-next.start.getTime())/60000),trainCount:next.trains.length,trains:next.trains}:null, closureCount:visible.length, closures:visible.map(c=>({start:c.start.toISOString(),end:c.end.toISOString(),durationMinutes:Math.round((c.end.getTime()-c.start.getTime())/60000),trainCount:c.trains.length,trains:c.trains})), trainCount:trains.length,trains,divertedTrains:[],lineHints };
 }
 
@@ -208,6 +211,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         line:train.line,
         category:train.category,
         journeyNumber:train.journeyNumber,
+        journeyRef:train.journeyRef,
         origin:train.origin,
         destination:train.destination,
         platform:undefined,
@@ -225,7 +229,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       });
     }
     const unique=Array.from(new Map(trains.map(t=>[
-      t.journeyRef || `${t.line}-${t.category}-${t.journeyNumber}-${t.crossingTime}`,
+      t.journeyRef || `${t.line}-${t.category}-${t.journeyNumber}-${t.origin || ""}-${t.destination || ""}`,
       t,
     ])).values()); const payload=toPayload(crossing,unique,lineHints); await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
