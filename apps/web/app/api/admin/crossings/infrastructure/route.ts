@@ -50,77 +50,78 @@ function groupCandidates(candidates: Candidate[]) {
   return [...grouped.values()].sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 20);
 }
 
+async function queryOverpass(endpoint: string, query: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 7000);
+  try {
+    const response = await fetch(`${endpoint}?${new URLSearchParams({ data: query }).toString()}`, {
+      cache: "no-store",
+      signal: controller.signal,
+      headers: { accept: "application/json", "user-agent": "Crossings/1.0 (meineschranke.com)" },
+    });
+    if (!response.ok) throw new Error(`HTTP_${response.status}`);
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function tryOverpass(lat: number, lon: number) {
-  // Query only railway infrastructure near the crossing, then resolve the
-  // route relations that actually contain those local ways.
-  const query = `[out:json][timeout:8];way(around:220,${lat},${lon})[railway~"^(rail|tram|light_rail)$"]->.localWays;.localWays out geom;rel(bw.localWays)[type=route][route~"^(train|tram|light_rail|railway|tracks)$"]->.localRoutes;.localRoutes out body;`;
+  // A single local query returns physical railway ways and the route relations
+  // containing them. Ask two public instances concurrently so one slow instance
+  // cannot consume the whole serverless request budget before the fallback starts.
+  const query = `[out:json][timeout:6];way(around:220,${lat},${lon})[railway~"^(rail|tram|light_rail)$"]->.localWays;.localWays out geom;rel(bw.localWays)[type=route][route~"^(train|tram|light_rail|railway|tracks)$"]->.localRoutes;.localRoutes out body;`;
   const endpoints = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
   ];
-  let lastError = "OSM-Bahnlinien konnten nicht ermittelt werden.";
-  for (const endpoint of endpoints) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 9000);
-      try {
-        const response = await fetch(`${endpoint}?${new URLSearchParams({ data: query }).toString()}`, {
-          cache: "no-store",
-          signal: controller.signal,
-          headers: { accept: "application/json", "user-agent": "Crossings/1.0 (meineschranke.com)" },
-        });
-        if (!response.ok) {
-          lastError = `${endpoint} HTTP_${response.status}`;
-          continue;
-        }
-        const data = await response.json();
-        const elements = Array.isArray(data?.elements) ? data.elements : [];
-        const ways = elements.filter((e: any) => e?.type === "way" && Array.isArray(e?.geometry));
-        const relations = elements.filter((e: any) => e?.type === "relation");
-        const localWayIds = new Set(ways
-          .filter((w: any) => INFRASTRUCTURE_TYPES.has(String(w.tags?.railway || "")))
-          .map((w: any) => Number(w.id)));
-        const relationByWay = new Map<number, LineRelation[]>();
-        for (const relation of relations) {
-          const routeType = String(relation.tags?.route || "");
-          if (relation.tags?.type !== "route" || !ROUTE_RELATION_TYPES.has(routeType)) continue;
-          const lineRelation: LineRelation = {
-            id: Number(relation.id), routeType, ref: String(relation.tags?.ref || ""),
-            name: String(relation.tags?.name || ""), from: String(relation.tags?.from || ""),
-            to: String(relation.tags?.to || ""),
-            network: relation.tags?.network ? String(relation.tags.network) : undefined,
-            operator: relation.tags?.operator ? String(relation.tags.operator) : undefined,
-          };
-          for (const member of relation.members || []) {
-            if (member.type !== "way") continue;
-            const wayId = Number(member.ref);
-            if (!localWayIds.has(wayId)) continue;
-            const list = relationByWay.get(wayId) || [];
-            list.push(lineRelation);
-            relationByWay.set(wayId, list);
-          }
-        }
-        const candidates: Candidate[] = [];
-        for (const way of ways) {
-          const geometry: Point[] = way.geometry
-            .map((p: any) => ({ lat: Number(p.lat), lon: Number(p.lon) }))
-            .filter((p: Point) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
-          if (geometry.length < 2 || !INFRASTRUCTURE_TYPES.has(String(way.tags?.railway || ""))) continue;
-          const local = makeCandidate(lat, lon, geometry, way.tags || {}, Number(way.id), "openstreetmap");
-          if (!local) continue;
-          local.lineRelations = relationByWay.get(Number(way.id)) || [];
-          enrichFromRelations(local);
-          candidates.push(local);
-        }
-        return { status: "OK" as const, candidates: groupCandidates(candidates), endpoint, wayCount: ways.length, relationCount: relations.length };
-      } finally {
-        clearTimeout(timeout);
-      }
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
+  let data: any;
+  try {
+    data = await Promise.any(endpoints.map((endpoint) => queryOverpass(endpoint, query)));
+  } catch (error) {
+    const reasons = error instanceof AggregateError ? error.errors : [error];
+    const details = reasons.map((item) => item instanceof Error ? item.message : String(item)).join("; ");
+    return { status: "OVERPASS_ERROR" as const, error: `OSM antwortet derzeit nicht rechtzeitig. Bitte in einigen Sekunden erneut versuchen. (${details})`, candidates: [] as Candidate[] };
+  }
+
+  const elements = Array.isArray(data?.elements) ? data.elements : [];
+  const ways = elements.filter((e: any) => e?.type === "way" && Array.isArray(e?.geometry));
+  const relations = elements.filter((e: any) => e?.type === "relation");
+  const localWayIds = new Set(ways
+    .filter((w: any) => INFRASTRUCTURE_TYPES.has(String(w.tags?.railway || "")))
+    .map((w: any) => Number(w.id)));
+  const relationByWay = new Map<number, LineRelation[]>();
+  for (const relation of relations) {
+    const routeType = String(relation.tags?.route || "");
+    if (relation.tags?.type !== "route" || !ROUTE_RELATION_TYPES.has(routeType)) continue;
+    const lineRelation: LineRelation = {
+      id: Number(relation.id), routeType, ref: String(relation.tags?.ref || ""),
+      name: String(relation.tags?.name || ""), from: String(relation.tags?.from || ""),
+      to: String(relation.tags?.to || ""),
+      network: relation.tags?.network ? String(relation.tags.network) : undefined,
+      operator: relation.tags?.operator ? String(relation.tags.operator) : undefined,
+    };
+    for (const member of relation.members || []) {
+      if (member.type !== "way") continue;
+      const wayId = Number(member.ref);
+      if (!localWayIds.has(wayId)) continue;
+      const list = relationByWay.get(wayId) || [];
+      list.push(lineRelation);
+      relationByWay.set(wayId, list);
     }
   }
-  return { status: "OVERPASS_ERROR" as const, error: lastError, candidates: [] as Candidate[] };
+  const candidates: Candidate[] = [];
+  for (const way of ways) {
+    const geometry: Point[] = way.geometry
+      .map((p: any) => ({ lat: Number(p.lat), lon: Number(p.lon) }))
+      .filter((p: Point) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+    if (geometry.length < 2 || !INFRASTRUCTURE_TYPES.has(String(way.tags?.railway || ""))) continue;
+    const local = makeCandidate(lat, lon, geometry, way.tags || {}, Number(way.id), "openstreetmap");
+    if (!local) continue;
+    local.lineRelations = relationByWay.get(Number(way.id)) || [];
+    enrichFromRelations(local);
+    candidates.push(local);
+  }
+  return { status: "OK" as const, candidates: groupCandidates(candidates), wayCount: ways.length, relationCount: relations.length };
 }
-
 export async function GET(request: Request) { const { searchParams } = new URL(request.url); const lat = Number(searchParams.get("lat")); const lon = Number(searchParams.get("lon")); if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) return NextResponse.json({ status: "INVALID_COORDINATES", candidates: [] }, { status: 400 }); const overpass = await tryOverpass(lat, lon); if (overpass.status === "OK") return NextResponse.json(overpass); return NextResponse.json({ status: "OSM_ERROR", error: overpass.error || "OSM-Bahnlinien konnten nicht ermittelt werden.", candidates: [] }); }
