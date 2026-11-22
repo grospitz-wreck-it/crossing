@@ -10,8 +10,15 @@ export async function GET(
     }>;
   }
 ) {
-  const { crossingId } =
+  const { crossingId: requestedCrossingId } =
     await params;
+
+  // Older clients may still store the legacy Kirchlengern ID while campaigns
+  // are linked to the canonical crossing record.
+  const legacyAliases: Record<string, string> = {
+    kirchlengern: "kirchlengern-bahnhof-lubbecker-str-b8095d49",
+  };
+  const crossingId = legacyAliases[requestedCrossingId] || requestedCrossingId;
 
   const result =
     await db.execute({
