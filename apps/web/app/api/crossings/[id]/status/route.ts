@@ -60,6 +60,43 @@ function normalizeTrainKey(value: unknown): string {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+async function addStationNames(db: any, trains: any[]) {
+  const evas = Array.from(new Set(
+    trains.flatMap((train) => [train.destination, train.origin])
+      .map((value) => String(value || "").trim())
+      .filter((value) => /^\\d{7}$/.test(value)),
+  ));
+  if (!evas.length) return trains;
+
+  try {
+    const result = await db.execute({
+      sql: `SELECT eva, name FROM railway_station_catalog WHERE eva IN (${evas.map(() => "?").join(",")})`,
+      args: evas,
+    });
+    const names = new Map((result.rows as any[]).map((row) => [
+      String(row.eva || "").trim(),
+      String(row.name || "").trim(),
+    ]));
+    return trains.map((train) => {
+      const destination = String(train.destination || "").trim();
+      const origin = String(train.origin || "").trim();
+      const destinationName = names.get(destination) || destination;
+      const originName = names.get(origin) || origin;
+      return {
+        ...train,
+        destination: destinationName || train.destination,
+        origin: originName || train.origin,
+        directionLabel: destinationName && /^\\d{7}$/.test(destination)
+          ? `Richtung ${destinationName}`
+          : train.directionLabel,
+      };
+    });
+  } catch (error) {
+    console.warn("[STATUS] station-name lookup failed:", error);
+    return trains;
+  }
+}
+
 function matchOpenBoardsReal(
   candidate: { stationEva: string; line: string; journeyNumber: number; scheduledTime?: string },
   observations: any[],
@@ -259,6 +296,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           crossingTime: candidate.crossingTime,
           realtimeSource: candidate.realtimeSource,
           realtimeTimeType: candidate.realtimeTimeType,
+          delayMinutes: candidate.delayMinutes,
         };
       } else {
         combined.push(candidate);
@@ -268,7 +306,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       t.journeyRef || `${t.line}-${t.category}-${t.journeyNumber}-${t.origin || ""}-${t.destination || ""}`,
       t,
     ])).values());
-    const payload=toPayload(crossing,unique,lineHints);
+    const enrichedTrains = await addStationNames(db, unique);
+    const payload=toPayload(crossing,enrichedTrains,lineHints);
     await writeCrossingForecastCache(cacheKey,payload);
     return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
