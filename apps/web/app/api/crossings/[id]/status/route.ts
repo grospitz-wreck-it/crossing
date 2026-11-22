@@ -90,8 +90,8 @@ function matchOpenBoardsReal(
 
 function normalizeStationKey(value: unknown): string {
   return String(value || "").toLowerCase().normalize("NFKD")
-    .replace(/[\\u0300-\\u036f]/g, "")
-    .replace(/hauptbahnhof|hbf|bahnhof|westf\\.?|westfalen/gi, " ")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
     .replace(/[^a-z0-9]+/g, "").trim();
 }
 
