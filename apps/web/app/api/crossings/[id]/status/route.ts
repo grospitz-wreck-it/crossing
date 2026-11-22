@@ -104,11 +104,18 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const { id }=await params;
   let crossing = await loadCrossing(id);
   if (!crossing) {
-    // Legacy app selections can still carry the old static id (e.g. "kirchlengern").
-    // Resolve that alias to the active database crossing with the same EVA so the
-    // frontend uses its configured reference stations and live snapshot data.
+    // Explicit aliases for legacy IDs still stored by older app clients.
+    // Do not infer these from EVA: multiple database crossings can share one station.
+    const legacyAliases: Record<string, string> = {
+      kirchlengern: "kirchlengern-bahnhof-lubbecker-str-b8095d49",
+    };
     const legacyCrossing = staticCrossings.find((item) => item.id === id);
-    if (legacyCrossing?.eva) {
+    const canonicalId = legacyAliases[id];
+    if (canonicalId) {
+      crossing = await loadCrossing(canonicalId);
+    }
+    // Keep the unique-EVA fallback for other legacy crossings without an explicit map.
+    if (!crossing && legacyCrossing?.eva) {
       try {
         const matches = await db.execute({
           sql: "SELECT id FROM crossings WHERE eva = ? LIMIT 2",
