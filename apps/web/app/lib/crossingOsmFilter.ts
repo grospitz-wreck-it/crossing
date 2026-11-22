@@ -52,13 +52,15 @@ async function loadStationCatalog() {
   if (stationCatalogPromise) return stationCatalogPromise;
   stationCatalogPromise = (async () => {
     try {
-      const result = await db.execute({ sql: `SELECT name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`, args: [] });
+      const result = await db.execute({ sql: `SELECT eva, name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`, args: [] });
       const byName = new Map<string, RouteStation>();
       for (const row of result.rows as any[]) {
         const name = String(row.name || "");
         const normalized = normalizeStationName(name);
         if (!normalized || byName.has(normalized)) continue;
         byName.set(normalized, { name, lat: Number(row.lat), lon: Number(row.lon) });
+        const eva = String(row.eva || "").trim();
+        if (eva) byName.set(normalizeStationName(eva), { name, lat: Number(row.lat), lon: Number(row.lon) });
       }
       stationCatalogCache = { expiresAt: Date.now() + CACHE_TTL_MS, value: byName };
       return byName;
