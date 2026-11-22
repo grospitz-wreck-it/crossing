@@ -8,8 +8,10 @@
 export type OpenBoardsDirection = "arrivals" | "departures";
 
 export type OpenBoardsOptions = {
-  /** ISO-8601 timestamp. Defaults to now. */
+  /** ISO-8601 start timestamp. Defaults to the current cache bucket. */
   timeStart?: string;
+  /** Optional ISO-8601 end timestamp for a bounded forecast window. */
+  timeEnd?: string;
   /** Number of via stops requested from DB. */
   maxViaStops?: number;
   /** Maximum board entries per transport type. */
@@ -135,6 +137,7 @@ export async function fetchOpenBoardsBoard(
       timeStart:
         options.timeStart ||
         new Date(Math.floor(Date.now() / CACHE_TTL_MS) * CACHE_TTL_MS).toISOString(),
+      ...(options.timeEnd ? { timeEnd: options.timeEnd } : {}),
     },
     maxViaStops: options.maxViaStops ?? 5,
     maxEntriesPerTransportType: options.maxEntriesPerTransportType ?? 25,
