@@ -172,6 +172,10 @@ export default function Header() {
 
             <div className="appHeaderDropdownDivider" />
 
+            <a href="/app/meine-schraenken" className="appHeaderManageLink" onClick={() => setOpen(false)}>Schranken verwalten →</a>
+
+            <div className="appHeaderDropdownDivider" />
+
             <button
               type="button"
               className="appHeaderDropdownLogout"
