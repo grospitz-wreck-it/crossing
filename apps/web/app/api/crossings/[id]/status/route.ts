@@ -101,8 +101,7 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id }=await params; const cacheKey=`status:${id}`; const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
-  if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
+  const { id }=await params;
   let crossing = await loadCrossing(id);
   if (!crossing) {
     // Legacy app selections can still carry the old static id (e.g. "kirchlengern").
@@ -112,7 +111,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     if (legacyCrossing?.eva) {
       try {
         const matches = await db.execute({
-          sql: "SELECT id FROM crossings WHERE eva = ? AND status = 'active' LIMIT 2",
+          sql: "SELECT id FROM crossings WHERE eva = ? LIMIT 2",
           args: [String(legacyCrossing.eva)],
         });
         if (matches.rows.length === 1) {
@@ -125,6 +124,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     crossing = crossing || legacyCrossing || null;
   }
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
+  // Cache by the resolved database crossing ID, not by a legacy client alias.
+  // Otherwise an old static response under "kirchlengern" can mask the live DB crossing.
+  const cacheKey=`status:${crossing.id}`;
+  const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
+  if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   const lineHints=lineHintsForCrossing(crossing);
   // PRIMARY is explicitly declared by reference_stations. Never treat automatically
   // discovered observation_evas as primary; those remain legacy/context data.
