@@ -62,11 +62,13 @@ export function getOpenBoardsForecastTrains(
 ): any[] {
   const now = Date.now();
   const primaryEvas = new Set<string>((crossing.referenceStations || []).map(String));
-  const routeAnchorEvas = new Set<string>(
-    (crossing.observationEvas || [])
-      .map((value: unknown) => String(value).trim())
-      .filter((value: string) => Boolean(value) && !primaryEvas.has(value)),
-  );
+  const orderedObservationEvas = Array.from(new Set<string>(
+    (crossing.observationEvas || []).map((value: unknown) => String(value).trim()).filter(Boolean),
+  ));
+  const routeAnchorEvas = new Set<string>(orderedObservationEvas.slice(1));
+  const candidatePrimaryEvas = routeAnchorEvas.size
+    ? new Set<string>(orderedObservationEvas.slice(0, 1))
+    : primaryEvas;
   const rules = Array.isArray(crossing.throughRules) ? crossing.throughRules : [];
   const candidates: any[] = [];
 
@@ -81,7 +83,7 @@ export function getOpenBoardsForecastTrains(
     const eventAt = Date.parse(observation.eventTime);
     if (!Number.isFinite(eventAt) || eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) continue;
 
-    if (primaryEvas.has(observation.evaNumber)) {
+    if (candidatePrimaryEvas.has(observation.evaNumber)) {
       // If several crossings share this primary station, the partial route
       // must identify the approach station configured for this crossing.
       // Without that evidence, do not fan the same station event out to
