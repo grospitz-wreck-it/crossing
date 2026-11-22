@@ -129,7 +129,7 @@ function matchOpenBoardsReal(
 function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   const now=Date.now(); trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
   const closures:any[]=[];
-  for(const train of trains.filter(t=>Date.parse(t.crossingTime)>now)) { const t=Date.parse(train.crossingTime); const start=new Date(t-crossing.closeOffsetSeconds*1000),end=new Date(t+crossing.openOffsetSeconds*1000); const last=closures[closures.length-1]; if(!last||start.getTime()>last.end.getTime()+30000)closures.push({start,end,trains:[train]});else{if(end>last.end)last.end=end;last.trains.push(train);} }
+  for(const train of trains.filter(t=>Date.parse(t.crossingTime) + crossing.openOffsetSeconds * 1000 > now)) { const t=Date.parse(train.crossingTime); const start=new Date(t-crossing.closeOffsetSeconds*1000),end=new Date(t+crossing.openOffsetSeconds*1000); const last=closures[closures.length-1]; if(!last||start.getTime()>last.end.getTime()+30000)closures.push({start,end,trains:[train]});else{if(end>last.end)last.end=end;last.trains.push(train);} }
   // The snapshot source covers up to three hours ahead. Return that same horizon
   // to the UI; otherwise valid trains disappear between the hero and the later list.
   const forecastHorizonMs = 3 * 60 * 60 * 1000;
