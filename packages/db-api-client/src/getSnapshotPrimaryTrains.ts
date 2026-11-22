@@ -59,6 +59,16 @@ export async function getSnapshotPrimaryTrains(
   ));
   if (!primaryEvas.length) return [];
 
+  // When a crossing shares its primary station with a nearby crossing,
+  // require the train's actual call sequence to include this crossing's
+  // own configured approach station. A shared station call alone is not
+  // sufficient evidence that the train passes this specific crossing.
+  const routeAnchorEvas: string[] = Array.from(new Set<string>(
+    (crossing.observationEvas || [])
+      .map((eva: unknown) => String(eva).trim())
+      .filter((eva: string) => Boolean(eva) && !primaryEvas.includes(String(eva).trim())),
+  ));
+
   const stationResult = await db.execute({
     sql: "SELECT eva,name FROM railway_station_catalog WHERE eva IN (" +
       primaryEvas.map(() => "?").join(",") + ")",
@@ -101,6 +111,19 @@ export async function getSnapshotPrimaryTrains(
         (stationNames.has(eva) && stationMatches(String(item?.name || ""), stationName)),
       );
       if (!call) continue;
+
+      // For shared-station crossings, accept the primary call only if the
+      // same journey also contains this crossing's distinct approach station.
+      // This prevents a train at Bünde from being assigned to both Parkstraße
+      // crossings merely because both observe the Bünde station board.
+      if (routeAnchorEvas.length) {
+        const followsThisCrossing = calls.some((item: any) =>
+          routeAnchorEvas.some((anchorEva) =>
+            refMatches(item?.stopPointRef, anchorEva) || refMatches(item?.stopPlaceRef, anchorEva),
+          ),
+        );
+        if (!followsThisCrossing) continue;
+      }
 
       // A primary candidate must have an explicit call at the declared
       // reference station. Prefer the Mobilithek EVA/reference match; station-name
