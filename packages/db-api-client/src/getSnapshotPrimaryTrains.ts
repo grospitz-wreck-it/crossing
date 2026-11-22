@@ -12,6 +12,7 @@ export type SnapshotPrimaryTrain = {
   crossingTime: string;
   arrival: string;
   scheduledTime: string;
+  route: string[];
 };
 
 function parseJson(value: unknown, fallback: any) {
@@ -137,6 +138,10 @@ export async function getSnapshotPrimaryTrains(
         crossingTime: crossingTime.toISOString(),
         arrival: parsedTime.toISOString(),
         scheduledTime: String(call?.plannedDeparture || call?.plannedArrival || call?.planned || stationTime),
+        // Mobilithek calls preserve the ordered journey path needed by OSM matching.
+        route: (Array.isArray(calls) ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean) : []).length >= 2
+          ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean)
+          : parseJson(row.route_json, []).map(String).filter(Boolean),
       });
       break;
     }
