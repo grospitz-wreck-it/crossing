@@ -4,7 +4,7 @@ import { crossings as staticCrossings } from "../../../../../packages/crossing-m
 export async function GET() {
   try {
     const result = await db.execute(`
-      SELECT id, name, eva
+      SELECT id, name, eva, lat, lon
       FROM crossings
       WHERE status = 'active'
       ORDER BY name ASC
@@ -14,6 +14,8 @@ export async function GET() {
       id: String(row.id),
       name: String(row.name),
       eva: String(row.eva || ""),
+      lat: row.lat == null ? null : Number(row.lat),
+      lon: row.lon == null ? null : Number(row.lon),
     }));
 
     const databaseEvas = new Set(dbList.map((crossing) => crossing.eva).filter(Boolean));
