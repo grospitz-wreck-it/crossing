@@ -124,6 +124,7 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
               availableList,
             );
             setSaved(nextSaved);
+            setFavoriteId(apiFavoriteId);
 
             const activeExists = nextSaved.some((crossing) => crossing.id === rawActive);
             if (activeExists && rawActive) {
@@ -166,8 +167,11 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ crossingId: crossing.id }),
       });
-      if (response.status === 401) return;
-      if (!response.ok) throw new Error(`Failed to add crossing (${response.status})`);
+      if (response.status === 401) throw new Error("Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.");
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error(result?.error || `Schranke konnte nicht gespeichert werden (${response.status}).`);
+      }
       setSaved((prev) => {
         if (prev.some((item) => item.id === crossing.id)) {
           return prev;
@@ -189,6 +193,7 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
       setFavoriteId((current) => current ?? crossing.id);
     } catch (error) {
       console.error("Failed to add crossing:", error);
+      throw error;
     }
   }
 
@@ -207,17 +212,17 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         }),
       });
 
-      if (response.status === 401) return;
+      if (response.status === 401) throw new Error("Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.");
 
       if (!response.ok) {
-        throw new Error(
-          `Failed to set favorite (${response.status})`,
-        );
+        const result = await response.json().catch(() => null);
+        throw new Error(result?.error || `Favorit konnte nicht gespeichert werden (${response.status}).`);
       }
 
       setFavoriteId(id);
     } catch (error) {
       console.error("Failed to set favorite crossing:", error);
+      throw error;
     }
   }
 
