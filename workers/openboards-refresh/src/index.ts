@@ -148,6 +148,7 @@ async function loadDemand(
     // Admin saves selected DB observation stations in observation_evas.
     // Keep reference_stations as a backwards-compatible legacy source.
     for (const value of [
+      row.eva,
       ...parseArray(row.observation_evas),
       ...parseArray(row.reference_stations),
     ]) {
