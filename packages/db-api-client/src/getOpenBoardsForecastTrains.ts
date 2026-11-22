@@ -128,6 +128,7 @@ export function getOpenBoardsForecastTrains(
         ...lineHints,
       ])) continue;
       if (!routeHasStation(observation, eva, String(rule.observationStation || ""))) continue;
+      if (routeAnchorEvas.size && !observation.routeEvas.some((routeEva) => routeAnchorEvas.has(routeEva))) continue;
       if (!hasOrderedRouteAnchors(observation, crossing.requiredRouteStops || [])) continue;
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
