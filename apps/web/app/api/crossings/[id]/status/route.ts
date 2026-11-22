@@ -88,6 +88,97 @@ function matchOpenBoardsReal(
   return best?.timeType === "REAL" ? best : null;
 }
 
+function normalizeStationKey(value: unknown): string {
+  return String(value || "").toLowerCase().normalize("NFKD")
+    .replace(/[\\u0300-\\u036f]/g, "")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\\.?|westfalen/gi, " ")
+    .replace(/[^a-z0-9]+/g, "").trim();
+}
+
+function openBoardsRouteMatches(crossing: any, observation: any, rule: any): boolean {
+  const route = Array.isArray(observation.routeNames) ? observation.routeNames.map(normalizeStationKey).filter(Boolean) : [];
+  const station = normalizeStationKey(rule.observationStation || observation.evaNumber);
+  if (!route.length || !route.includes(station)) return false;
+
+  const anchors = (crossing.requiredRouteStops || [])
+    .map(normalizeStationKey)
+    .filter((value: string) => value && !/^\\d+$/.test(value));
+  if (anchors.length < 2) return true;
+
+  let previousIndex = -1;
+  let matched = 0;
+  for (const anchor of anchors) {
+    const index = route.findIndex((value: string, i: number) => i > previousIndex && (value === anchor || value.includes(anchor) || anchor.includes(value)));
+    if (index >= 0) {
+      matched += 1;
+      previousIndex = index;
+    }
+  }
+  // OpenBoards returns a bounded via-list, not a complete route. Two ordered
+  // anchors are enough to corroborate a through-run without requiring every stop.
+  return matched >= 2;
+}
+
+function appendOpenBoardsCandidates(
+  crossing: any,
+  observations: any[],
+  primaryEvas: string[],
+  lineHints: string[],
+  trains: any[],
+): void {
+  const now = Date.now();
+  const primary = new Set(primaryEvas.map(String));
+  const rules = crossing.throughRules || [];
+  for (const observation of observations) {
+    if (observation.cancelled) continue;
+    const eventAt = Date.parse(String(observation.eventTime || ""));
+    if (!Number.isFinite(eventAt)) continue;
+    if (eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) continue;
+    if (!lineMatches(observation, lineHints)) continue;
+
+    const eva = String(observation.evaNumber || "");
+    const primaryMatch = primary.has(eva) || (crossing.eva && String(crossing.eva) === eva);
+    const rule = rules.find((item: any) => String(item.observationEva || "") === eva);
+    if (!primaryMatch && (!rule || !openBoardsRouteMatches(crossing, observation, rule))) continue;
+
+    const offsetSeconds = primaryMatch
+      ? (String(crossing.eva || "") === eva ? 0 : Math.max(30, Number(rule?.fallbackOffsetSeconds || 300)))
+      : Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
+    const crossingAt = eventAt + offsetSeconds * 1000;
+    if (crossingAt < now - 60_000 || crossingAt > now + 3 * 60 * 60_000) continue;
+    const scheduledAt = Date.parse(String(observation.scheduledTime || ""));
+    const delayMinutes = Number.isFinite(scheduledAt)
+      ? Math.round((eventAt - scheduledAt) / 60_000)
+      : 0;
+    const direction = primaryMatch
+      ? (observation.direction === "arrivals" ? "eastbound" : "westbound")
+      : (rule.direction || "unknown");
+
+    trains.push({
+      id: `openboards-${observation.journeyId}-${eva}`,
+      source: primaryMatch ? "openboards-primary" : "openboards-through",
+      line: observation.line,
+      category: observation.category,
+      journeyNumber: observation.journeyNumber,
+      journeyRef: observation.journeyId,
+      origin: observation.originEva,
+      destination: observation.destinationEva,
+      platform: observation.platform,
+      isStoppingTrain: primaryMatch,
+      direction,
+      directionLabel: primaryMatch
+        ? (observation.destinationEva ? `Richtung ${observation.destinationEva}` : null)
+        : (direction === "unknown" ? "Durchfahrt" : `Richtung ${direction}`),
+      delayMinutes,
+      realtimeSource: "DB OpenBoards",
+      realtimeTimeType: observation.timeType || null,
+      crossingTime: new Date(crossingAt).toISOString(),
+      arrival: observation.eventTime,
+      etaSeconds: Math.floor((crossingAt - now) / 1000),
+    });
+  }
+}
+
 function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   const now=Date.now(); trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
   const closures:any[]=[];
@@ -148,6 +239,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const throughSnapshot=await getSnapshotThroughTrains(db,crossing);
     const realtimeEvas = Array.from(new Set([
       ...primaryEvas,
+      String(crossing.eva || "").trim(),
       ...(crossing.throughRules || []).map((rule: any) => String(rule.observationEva || "").trim()),
     ].filter(Boolean)));
     const realtimeObservations = await getOpenBoardsObservations(db, realtimeEvas, {
@@ -228,8 +320,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)
       });
     }
+    // OpenBoards is an independent source of train candidates, not merely a
+    // realtime overlay on Mobilithek. This keeps the forecast alive when the
+    // Mobilithek snapshot is delayed or unavailable.
+    appendOpenBoardsCandidates(crossing, realtimeObservations, primaryEvas, lineHints, trains);
     const unique=Array.from(new Map(trains.map(t=>[
-      t.journeyRef || `${t.line}-${t.category}-${t.journeyNumber}-${t.origin || ""}-${t.destination || ""}`,
+      `${t.line}-${t.category}-${t.journeyNumber}-${t.origin || ""}-${t.destination || ""}`,
       t,
     ])).values()); const payload=toPayload(crossing,unique,lineHints); await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
