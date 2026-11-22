@@ -709,6 +709,18 @@ const closureDuration =
 
 const train =
   data.phase.trains[0];
+
+// Der Status muss lokal am exakten Phasenwechsel umspringen.
+// Die API-Antwort kann noch OPEN enthalten, wenn der Countdown gerade 0 erreicht.
+const phaseStartMs = new Date(data.phase.start).getTime();
+const phaseEndMs = new Date(data.phase.end).getTime();
+const displayState =
+  now >= phaseStartMs && now < phaseEndMs
+    ? "CLOSED"
+    : now < phaseStartMs
+      ? "OPEN"
+      : data.state;
+
   const countdown =
   data?.phase
     ? Math.max(
@@ -738,7 +750,7 @@ if (!train) {
 const ad =
   ads[currentAdIndex];
 const heroImage =
-  data.state === "OPEN"
+  displayState === "OPEN"
     ? "/images/barrier-open.webp"
     : "/images/barrier-closed.webp";
 
@@ -753,7 +765,7 @@ return (
 
   <div
   className={`heroCard ${
-    data.state === "OPEN"
+    displayState === "OPEN"
       ? "heroCardOpen"
       : "heroCardClosed"
   }`}
@@ -764,7 +776,7 @@ return (
   <img
     src={heroImage}
     alt={
-      data.state === "OPEN"
+      displayState === "OPEN"
         ? "Bahnübergang offen"
         : "Bahnübergang geschlossen"
     }
@@ -777,13 +789,13 @@ return (
 
   <div
     className={`statusBadge ${
-      data.state === "OPEN"
+      displayState === "OPEN"
         ? "badgeOpen"
         : "badgeClosed"
     }`}
   >
     ●{" "}
-    {data.state === "OPEN"
+    {displayState === "OPEN"
       ? "OFFEN"
       : "GESCHLOSSEN"}
   </div>
@@ -795,7 +807,7 @@ return (
   </div>
 
   <div className="heroSubtitle">
-    {data.state === "OPEN"
+    {displayState === "OPEN"
       ? "bis Schranke schließt"
       : "bis Schranke öffnet"}
   </div>
@@ -851,7 +863,7 @@ return (
 
 
 </div>
-{data.state === "CLOSED" &&
+{displayState === "CLOSED" &&
   ad && (
     <a
       href={ad.targetUrl}
