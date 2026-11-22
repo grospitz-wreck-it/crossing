@@ -317,6 +317,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       [
         ...(primarySnapshot || []),
         ...(throughSnapshot || []),
+        ...(openBoardsTrains || []),
       ]
         .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
         .map((train: any) => [train.journeyRef || `${train.line}-${train.journeyNumber}-${train.route.join("|")}`, train]),
