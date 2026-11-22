@@ -174,127 +174,65 @@ const [data, setData] =
       null
     );
 
-const loadInFlightRef =
-  useRef<Promise<void> | null>(null);
+const activeIdRef = useRef<string | null>(activeId);
+activeIdRef.current = activeId;
 
-const loadRequestIdRef =
-  useRef(0);
+const statusCacheRef = useRef<Map<string, any>>(new Map());
+const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
+const adCacheRef = useRef<Map<string, any[]>>(new Map());
 
-  async function load() {
-  if (!activeId) {
+async function load(crossingId: string | null = activeIdRef.current, force = false) {
+  if (!crossingId) return;
+
+  const cached = statusCacheRef.current.get(crossingId);
+  if (cached && !force) {
+    if (activeIdRef.current === crossingId) {
+      setData(cached);
+      setAds(adCacheRef.current.get(crossingId) || []);
+    }
     return;
   }
 
-  // Nie mehrere Status-Requests gleichzeitig laufen lassen.
-  if (loadInFlightRef.current) {
-    return loadInFlightRef.current;
-  }
+  const existing = statusInFlightRef.current.get(crossingId);
+  if (existing) return existing;
 
-  const requestId =
-    ++loadRequestIdRef.current;
+  const request = (async () => {
+    try {
+      const [statusRes, adRes] = await Promise.all([
+        fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }),
+        fetch(`/api/ads/${crossingId}`, { cache: "no-store" }),
+      ]);
+      if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
 
-  const request =
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/crossings/${activeId}/status`,
-          {
-            cache: "no-store",
-          }
-        );
+      const json = await statusRes.json();
+      statusCacheRef.current.set(crossingId, json);
 
-        if (!res.ok) {
-          throw new Error(
-            `Status API returned ${res.status}`
-          );
-        }
-
-        const json =
-          await res.json();
-
-        // Eine inzwischen überholte Antwort darf
-        // niemals den aktuelleren Zustand überschreiben.
-        if (
-          requestId !==
-          loadRequestIdRef.current
-        ) {
-          return;
-        }
-
-        setData(json);
-
-        // Werbung unabhängig vom Status laden.
-        try {
-          const adRes =
-            await fetch(
-              `/api/ads/${activeId}`,
-              {
-                cache: "no-store",
-              }
-            );
-
-          if (!adRes.ok) {
-            setAds([]);
-            return;
-          }
-
-          const list =
-            await adRes.json();
-
-          if (
-            requestId !==
-            loadRequestIdRef.current
-          ) {
-            return;
-          }
-
-          setAds(
-            Array.isArray(list)
-              ? list
-              : []
-          );
-
-          setCurrentAdIndex(0);
-        } catch (error) {
-          console.error(
-            "Failed to load ad:",
-            error
-          );
-
-          setAds([]);
-        }
-      } catch (error) {
-        console.error(
-          "Failed to load status:",
-          error
-        );
-
-        if (
-          requestId !==
-          loadRequestIdRef.current
-        ) {
-          return;
-        }
-
-        setData({
-          error: true,
-          state: "UNKNOWN",
-          phase: null,
-          closures: [],
-          trains: [],
-          trainCount: 0,
-        });
-
-        setAds([]);
-      } finally {
-        loadInFlightRef.current =
-          null;
+      let adList: any[] = [];
+      if (adRes.ok) {
+        const list = await adRes.json();
+        adList = Array.isArray(list) ? list : [];
       }
-    })();
+      adCacheRef.current.set(crossingId, adList);
 
-  loadInFlightRef.current =
-    request;
+      if (activeIdRef.current === crossingId) {
+        setData(json);
+        setAds(adList);
+        setCurrentAdIndex(0);
+      }
+    } catch (error) {
+      console.error(`Failed to load crossing ${crossingId}:`, error);
+      if (activeIdRef.current === crossingId) {
+        setData({ error: true, state: "UNKNOWN", phase: null, closures: [], trains: [], trainCount: 0 });
+        setAds([]);
+      }
+    } finally {
+      if (statusInFlightRef.current.get(crossingId) === request) {
+        statusInFlightRef.current.delete(crossingId);
+      }
+    }
+  })();
 
+  statusInFlightRef.current.set(crossingId, request);
   return request;
 }
 
@@ -480,29 +418,23 @@ const wakeLockRef =
   }
 
   useEffect(() => {
-  // Invalidate any in-flight response from the previously selected crossing.
-  // Otherwise load() can reuse that old promise and leave the new crossing
-  // showing stale data (or no fresh data at all).
-  loadRequestIdRef.current += 1;
-  loadInFlightRef.current = null;
-  setData(null);
-  setAds([]);
-  setCurrentAdIndex(0);
-
   if (!activeId) {
+    setData(null);
+    setAds([]);
+    setCurrentAdIndex(0);
     return;
   }
 
-  void load();
+  const cached = statusCacheRef.current.get(activeId);
+  setData(cached || null);
+  setAds(adCacheRef.current.get(activeId) || []);
+  setCurrentAdIndex(0);
+  setShowMoreTrains(false);
+  setPendingEvent(null);
 
-  const apiRefresh = setInterval(() => {
-    void load();
-  }, 120000);
-
-  return () => {
-    loadRequestIdRef.current += 1;
-    clearInterval(apiRefresh);
-  };
+  void load(activeId, !cached);
+  const apiRefresh = setInterval(() => void load(activeId, true), 120000);
+  return () => clearInterval(apiRefresh);
 }, [activeId]);
 
 useEffect(() => {
@@ -592,50 +524,22 @@ useEffect(() => {
 }, [firstClickAt]);
 useEffect(() => {
   function refresh() {
-    load();
+    const crossingId = activeIdRef.current;
+    if (crossingId) void load(crossingId, true);
   }
-
   function handleVisibility() {
-    if (
-      document.visibilityState ===
-      "visible"
-    ) {
-      refresh();
-    }
+    if (document.visibilityState === "visible") refresh();
   }
-  document.addEventListener(
-    "visibilitychange",
-    handleVisibility
-  );
-  window.addEventListener(
-    "focus",
-    refresh
-  );
-
-  window.addEventListener(
-    "pageshow",
-    refresh
-  );
-
+  document.addEventListener("visibilitychange", handleVisibility);
+  window.addEventListener("focus", refresh);
+  window.addEventListener("pageshow", refresh);
   return () => {
-    document.removeEventListener(
-      "visibilitychange",
-      handleVisibility
-    );
-
-    window.removeEventListener(
-      "focus",
-      refresh
-    );
-
-    window.removeEventListener(
-      "pageshow",
-      refresh
-    );
+    document.removeEventListener("visibilitychange", handleVisibility);
+    window.removeEventListener("focus", refresh);
+    window.removeEventListener("pageshow", refresh);
   };
-}, [activeId]);
+}, []);
 
-  
 useEffect(() => {
   const timer =
     setInterval(() => {
@@ -656,12 +560,15 @@ useEffect(() => {
     );
   }
 
-  const target =
-    new Date(
-      data.state === "OPEN"
-        ? data.phase.start
-        : data.phase.end
-    ).getTime();
+  const crossingId = activeId;
+  const phaseStartMs = new Date(data.phase.start).getTime();
+  const phaseEndMs = new Date(data.phase.end).getTime();
+  const phaseState =
+    now >= phaseStartMs && now < phaseEndMs ? "CLOSED" :
+    now < phaseStartMs ? "OPEN" : data.state;
+  const target = new Date(
+    phaseState === "OPEN" ? data.phase.start : data.phase.end
+  ).getTime();
 
   const delay =
     Math.max(
@@ -671,7 +578,7 @@ useEffect(() => {
 
   refreshTimeout.current =
     setTimeout(() => {
-      load();
+      if (crossingId) void load(crossingId, true);
     }, delay);
 
   return () => {
@@ -683,7 +590,7 @@ useEffect(() => {
       );
     }
   };
-}, [data]);
+}, [data, activeId, now]);
 
 if (!data) {
   return <LoadingScreen />;
@@ -733,8 +640,7 @@ const displayState =
         Math.floor(
           (
             new Date(
-              data.state ===
-                "OPEN"
+              displayState === "OPEN"
                 ? data.phase.start
                 : data.phase.end
             ).getTime() -
