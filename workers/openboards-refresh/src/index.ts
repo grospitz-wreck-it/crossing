@@ -143,14 +143,14 @@ async function loadDemand(
     }
   }
 
-  const catalogResult = configuredEvas.size
-    ? await db.execute({
-        sql: `SELECT eva, name FROM railway_station_catalog
-              WHERE eva IN (${[...configuredEvas].map(() => "?").join(",")})`,
-        args: [...configuredEvas],
-      })
-    : stationNames.size
-      ? await db.execute("SELECT eva, name FROM railway_station_catalog")
+  const catalogResult = stationNames.size
+    ? await db.execute("SELECT eva, name FROM railway_station_catalog")
+    : configuredEvas.size
+      ? await db.execute({
+          sql: `SELECT eva, name FROM railway_station_catalog
+                WHERE eva IN (${[...configuredEvas].map(() => "?").join(",")})`,
+          args: [...configuredEvas],
+        })
       : { rows: [] as Array<Record<string, unknown>> };
 
   const stationByName = new Map<string, { eva: string; name: string }>();
