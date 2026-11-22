@@ -2,6 +2,7 @@ import { db } from "../../../../lib/db";
 import { getSnapshotPrimaryTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotPrimaryTrains";
 import { getSnapshotThroughTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotThroughTrains";
 import { getOpenBoardsObservations } from "../../../../../../../packages/db-api-client/src/openBoardsObservations";
+import { getOpenBoardsForecastTrains } from "../../../../../../../packages/db-api-client/src/getOpenBoardsForecastTrains";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
@@ -100,18 +101,24 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id }=await params; const cacheKey=`status:${id}`; const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
-  if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
+  const { id }=await params;
   let crossing = await loadCrossing(id);
   if (!crossing) {
-    // Legacy app selections can still carry the old static id (e.g. "kirchlengern").
-    // Resolve that alias to the active database crossing with the same EVA so the
-    // frontend uses its configured reference stations and live snapshot data.
+    // Explicit aliases for legacy IDs still stored by older app clients.
+    // Do not infer these from EVA: multiple database crossings can share one station.
+    const legacyAliases: Record<string, string> = {
+      kirchlengern: "kirchlengern-bahnhof-lubbecker-str-b8095d49",
+    };
     const legacyCrossing = staticCrossings.find((item) => item.id === id);
-    if (legacyCrossing?.eva) {
+    const canonicalId = legacyAliases[id];
+    if (canonicalId) {
+      crossing = await loadCrossing(canonicalId);
+    }
+    // Keep the unique-EVA fallback for other legacy crossings without an explicit map.
+    if (!crossing && legacyCrossing?.eva) {
       try {
         const matches = await db.execute({
-          sql: "SELECT id FROM crossings WHERE eva = ? AND status = 'active' LIMIT 2",
+          sql: "SELECT id FROM crossings WHERE eva = ? LIMIT 2",
           args: [String(legacyCrossing.eva)],
         });
         if (matches.rows.length === 1) {
@@ -124,6 +131,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     crossing = crossing || legacyCrossing || null;
   }
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
+  // Cache by the resolved database crossing ID, not by a legacy client alias.
+  // Otherwise an old static response under "kirchlengern" can mask the live DB crossing.
+  const cacheKey=`status:${crossing.id}`;
+  const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
+  if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   const lineHints=lineHintsForCrossing(crossing);
   // PRIMARY is explicitly declared by reference_stations. Never treat automatically
   // discovered observation_evas as primary; those remain legacy/context data.
@@ -228,9 +240,36 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)
       });
     }
-    const unique=Array.from(new Map(trains.map(t=>[
+    // OpenBoards is now a first-class fallback/source, not only a realtime
+    // enrichment layer. It can supply explicit primary-stop rows even when the
+    // Mobilithek snapshot is empty. Through-runs require route anchors.
+    const openBoardsTrains = getOpenBoardsForecastTrains(crossing, realtimeObservations, lineHints);
+    const combined = [...trains];
+    for (const candidate of openBoardsTrains) {
+      const duplicateIndex = combined.findIndex((existing) =>
+        Number(existing.journeyNumber) === Number(candidate.journeyNumber) &&
+        normalizeTrainKey(existing.line) === normalizeTrainKey(candidate.line) &&
+        Math.abs(Date.parse(existing.crossingTime) - Date.parse(candidate.crossingTime)) <= 180_000
+      );
+      if (duplicateIndex >= 0) {
+        // Keep the existing route-rich Mobilithek candidate, but attach the
+        // better OpenBoards live timestamp/source metadata.
+        combined[duplicateIndex] = {
+          ...combined[duplicateIndex],
+          crossingTime: candidate.crossingTime,
+          realtimeSource: candidate.realtimeSource,
+          realtimeTimeType: candidate.realtimeTimeType,
+        };
+      } else {
+        combined.push(candidate);
+      }
+    }
+    const unique=Array.from(new Map(combined.map(t=>[
       t.journeyRef || `${t.line}-${t.category}-${t.journeyNumber}-${t.origin || ""}-${t.destination || ""}`,
       t,
-    ])).values()); const payload=toPayload(crossing,unique,lineHints); await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"mobilithek-snapshot"}});
+    ])).values());
+    const payload=toPayload(crossing,unique,lineHints);
+    await writeCrossingForecastCache(cacheKey,payload);
+    return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
 }
