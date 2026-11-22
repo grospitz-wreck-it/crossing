@@ -88,6 +88,8 @@ export function getOpenBoardsForecastTrains(
         category: observation.category,
         journeyNumber: observation.journeyNumber,
         journeyRef: observation.journeyId,
+        // Via context is useful for shadow matching, but is not treated as a complete route.
+        route: observation.routeNames,
         origin: stationNameForEva(observation.originEva),
         destination: stationNameForEva(observation.destinationEva),
         platform: observation.platform,
@@ -125,6 +127,8 @@ export function getOpenBoardsForecastTrains(
         category: observation.category,
         journeyNumber: observation.journeyNumber,
         journeyRef: observation.journeyId,
+        // Via context is useful for shadow matching, but is not treated as a complete route.
+        route: observation.routeNames,
         origin: observation.originEva,
         destination: observation.destinationEva,
         platform: observation.platform,
