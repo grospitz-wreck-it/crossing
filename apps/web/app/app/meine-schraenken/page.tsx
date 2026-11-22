@@ -197,7 +197,7 @@ export default function MeineSchrankenPage() {
     <main className={styles.page}>
       <div className={styles.content}>
         <div className={styles.heading}>
-          <img className={styles.logo} src="/images/meineschranke_logo.webp" alt="meineschranke" />
+          <p className={styles.eyebrow}>VERWALTUNG</p>
           <h1>Meine Schranken</h1>
           <p>Behalte die Bahnübergänge im Blick, die für deinen Alltag wichtig sind.</p>
         </div>
