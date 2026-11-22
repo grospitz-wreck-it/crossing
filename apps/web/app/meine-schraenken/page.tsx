@@ -229,7 +229,7 @@ export default function MeineSchrankenPage() {
         <label className={styles.search}>
           <span>⌕</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ort, Straße oder Bahnübergang suchen" />
-          {query && <button onClick={() => setQuery("")} aria-label="Suche löschen"}>×</button>}
+          {query && <button onClick={() => setQuery("")} aria-label="Suche löschen">×</button>}
         </label>
 
         <div className={styles.columns}>
