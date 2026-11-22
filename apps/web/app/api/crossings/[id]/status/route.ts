@@ -151,7 +151,7 @@ function appendOpenBoardsCandidates(
       ? Math.round((eventAt - scheduledAt) / 60_000)
       : 0;
     const direction = primaryMatch
-      ? (observation.direction === "arrivals" ? "eastbound" : "westbound")
+      ? getCrossingDirection([])
       : (rule.direction || "unknown");
 
     trains.push({
