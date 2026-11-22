@@ -66,6 +66,12 @@ export function getOpenBoardsForecastTrains(
   const candidates: any[] = [];
 
   for (const observation of observations) {
+    const stationNameForEva = (eva?: string) => {
+      if (!eva) return undefined;
+      const index = observation.routeEvas.indexOf(eva);
+      const name = index >= 0 ? observation.routeNames[index] : undefined;
+      return name && !/^\\d{6,7}$/.test(name) ? name : eva;
+    };
     if (observation.cancelled || !lineMatches(observation.line, observation.category, lineHints)) continue;
     const eventAt = Date.parse(observation.eventTime);
     if (!Number.isFinite(eventAt) || eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) continue;
@@ -82,12 +88,12 @@ export function getOpenBoardsForecastTrains(
         category: observation.category,
         journeyNumber: observation.journeyNumber,
         journeyRef: observation.journeyId,
-        origin: observation.originEva,
-        destination: observation.destinationEva,
+        origin: stationNameForEva(observation.originEva),
+        destination: stationNameForEva(observation.destinationEva),
         platform: observation.platform,
         isStoppingTrain: true,
         direction: "unknown",
-        directionLabel: observation.destinationEva ? `Richtung ${observation.destinationEva}` : null,
+        directionLabel: stationNameForEva(observation.destinationEva) ? `Richtung ${stationNameForEva(observation.destinationEva)}` : null,
         delayMinutes: observation.timeType === "REAL" && observation.scheduledTime
           ? Math.max(0, Math.round((eventAt - Date.parse(observation.scheduledTime)) / 60_000))
           : 0,
