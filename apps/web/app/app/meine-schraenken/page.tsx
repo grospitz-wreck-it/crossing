@@ -1,282 +1,206 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useCrossings } from "../../context/CrossingsContext";
+import { MAX_FREE_CROSSINGS } from "../../context/CrossingsContext";
 import styles from "./page.module.css";
 
-type Crossing = {
-  id: string;
-  name: string;
-  lat?: number | null;
-  lon?: number | null;
-};
-
-type SavedCrossing = Crossing & { distance?: number };
-
-const STORAGE_KEY = "meineschranke:crossings:v1";
-const ACTIVE_KEY = "meineschranke:active-crossing:v1";
-const MAX_CROSSINGS = 5;
-
-function distanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const toRad = (value: number) => (value * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
+  const rad = (n: number) => (n * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLon = rad(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-function formatDistance(value?: number) {
-  if (value == null || !Number.isFinite(value)) return "";
-  return value < 10 ? value.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " km" : Math.round(value) + " km";
+function distanceLabel(km?: number) {
+  if (km == null || !Number.isFinite(km)) return "Bahnübergang";
+  return km < 10 ? km.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " km entfernt" : Math.round(km) + " km entfernt";
 }
 
 export default function MeineSchrankenPage() {
-  const [catalog, setCatalog] = useState<Crossing[]>([]);
-  const [saved, setSaved] = useState<SavedCrossing[]>([]);
-  const [activeId, setActiveId] = useState("");
+  const { saved, available, activeId, favoriteId, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "loading" | "ready" | "denied" | "error">("idle");
-  const [isSignedIn, setIsSignedIn] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    async function init() {
-      try {
-        const [catalogRes, sessionRes] = await Promise.all([
-          fetch("/api/crossings", { cache: "no-store" }),
-          fetch("/api/auth/session", { cache: "no-store" }),
-        ]);
-        const list = catalogRes.ok ? await catalogRes.json() : [];
-        const session = sessionRes.ok ? await sessionRes.json() : null;
-        const signedIn = Boolean(session?.user?.id);
-        let initialSaved: SavedCrossing[] = [];
-        if (signedIn) {
-          const userRes = await fetch("/api/user/crossings", { cache: "no-store" });
-          if (userRes.ok) {
-            const data = await userRes.json();
-            initialSaved = (data.crossings ?? []).map((item: any) => ({
-              id: String(item.crossing_id ?? item.id),
-              name: String(item.name ?? ""),
-              lat: item.lat == null ? null : Number(item.lat),
-              lon: item.lon == null ? null : Number(item.lon),
-            }));
-          }
-        } else {
-          try {
-            initialSaved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-          } catch { initialSaved = []; }
-        }
-        if (cancelled) return;
-        const normalized = (Array.isArray(list) ? list : []).map((item: any) => ({
-          id: String(item.id), name: String(item.name),
-          lat: item.lat == null ? null : Number(item.lat),
-          lon: item.lon == null ? null : Number(item.lon),
-        }));
-        setCatalog(normalized);
-        setIsSignedIn(signedIn);
-        setSaved(initialSaved.filter((item) => item?.id && item?.name).slice(0, MAX_CROSSINGS));
-        setActiveId(localStorage.getItem(ACTIVE_KEY) || initialSaved[0]?.id || "");
-      } catch {
-        if (!cancelled) setNotice("Die Schranken konnten gerade nicht geladen werden.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    init();
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
-    if (!isSignedIn) localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
-  }, [saved, isSignedIn]);
-
-  useEffect(() => {
-    if (activeId) localStorage.setItem(ACTIVE_KEY, activeId);
-  }, [activeId]);
-
-  const enrichedCatalog = useMemo(() => catalog.map((crossing) => ({
-    ...crossing,
-    distance: position && crossing.lat != null && crossing.lon != null
-      ? distanceKm(position.lat, position.lon, crossing.lat, crossing.lon)
-      : undefined,
-  })), [catalog, position]);
+  const [busyId, setBusyId] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const savedIds = useMemo(() => new Set(saved.map((item) => item.id)), [saved]);
-  const filtered = useMemo(() => {
+  const results = useMemo(() => {
     const q = query.trim().toLocaleLowerCase("de-DE");
-    const list = enrichedCatalog.filter((item) =>
-      !q || item.name.toLocaleLowerCase("de-DE").includes(q)
-    );
-    return position && !q
-      ? list.filter((item) => item.distance != null).sort((a, b) => (a.distance ?? 99999) - (b.distance ?? 99999)).slice(0, 30)
-      : list.slice(0, 50);
-  }, [enrichedCatalog, query, position]);
+    return available
+      .filter((item) => !savedIds.has(item.id) && (!q || item.name.toLocaleLowerCase("de-DE").includes(q)))
+      .map((item) => ({
+        ...item,
+        distance: position && item.lat != null && item.lon != null
+          ? distanceKm(position, { lat: item.lat, lon: item.lon })
+          : undefined,
+      }))
+      .sort((a, b) => {
+        if (position && a.distance != null && b.distance != null) return a.distance - b.distance;
+        return a.name.localeCompare(b.name, "de");
+      })
+      .slice(0, query || position ? 60 : 24);
+  }, [available, position, query, savedIds]);
 
-  function requestLocation() {
+  function locate() {
     if (!navigator.geolocation) {
       setLocationState("error");
-      setNotice("Dein Browser unterstützt leider keine Standortfreigabe.");
+      setNotice("Standortfreigabe wird von diesem Browser nicht unterstützt.");
       return;
     }
     setLocationState("loading");
     setNotice("");
     navigator.geolocation.getCurrentPosition(
-      (result) => {
-        setPosition({ lat: result.coords.latitude, lon: result.coords.longitude });
+      ({ coords }) => {
+        setPosition({ lat: coords.latitude, lon: coords.longitude });
         setLocationState("ready");
       },
       (error) => {
         setLocationState(error.code === error.PERMISSION_DENIED ? "denied" : "error");
         setNotice(error.code === error.PERMISSION_DENIED
-          ? "Standortzugriff nicht erlaubt. Du kannst weiterhin manuell suchen."
-          : "Dein Standort konnte nicht ermittelt werden. Bitte versuche es erneut oder suche manuell.");
+          ? "Kein Zugriff auf deinen Standort. Du kannst weiterhin manuell suchen."
+          : "Dein Standort konnte nicht ermittelt werden. Bitte versuche es erneut.");
       },
       { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
     );
   }
 
-  async function toggleCrossing(crossing: Crossing & { distance?: number }) {
+  async function add(id: string) {
+    if (saved.length >= MAX_FREE_CROSSINGS) {
+      setNotice(`Du kannst maximal ${MAX_FREE_CROSSINGS} Schranken speichern.`);
+      return;
+    }
+    setBusyId(id);
     setNotice("");
-    if (savedIds.has(crossing.id)) {
-      if (saved.length === 1) {
-        setNotice("Mindestens eine Schranke muss gespeichert bleiben.");
-        return;
-      }
-      if (isSignedIn) {
-        const response = await fetch("/api/user/crossings", {
-          method: "DELETE", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ crossingId: crossing.id }),
-        });
-        if (!response.ok) { setNotice("Die Schranke konnte nicht entfernt werden."); return; }
-      }
-      const next = saved.filter((item) => item.id !== crossing.id);
-      setSaved(next);
-      if (activeId === crossing.id) setActiveId(next[0]?.id ?? "");
-      return;
-    }
-    if (saved.length >= MAX_CROSSINGS) {
-      setNotice(`Du kannst maximal ${MAX_CROSSINGS} Schranken speichern.`);
-      return;
-    }
-    if (isSignedIn) {
-      const response = await fetch("/api/user/crossings", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ crossingId: crossing.id }),
-      });
-      if (!response.ok) { setNotice(response.status === 409 ? "Du hast bereits die maximale Anzahl gespeichert." : "Die Schranke konnte nicht hinzugefügt werden."); return; }
-    }
-    const next = [...saved, crossing];
-    setSaved(next);
-    if (!activeId) setActiveId(crossing.id);
+    const crossing = available.find((item) => item.id === id);
+    if (crossing) await addCrossing(crossing);
+    setBusyId("");
   }
 
-  async function saveSelection() {
+  async function remove(id: string) {
+    if (saved.length <= 1) {
+      setNotice("Mindestens eine Schranke muss gespeichert bleiben.");
+      return;
+    }
+    setBusyId(id);
+    setNotice("");
+    await removeCrossing(id);
+    setBusyId("");
+  }
+
+  async function save() {
+    if (!activeId) return;
     setSaving(true);
     setNotice("");
-    try {
-      if (isSignedIn && activeId) {
-        await fetch("/api/user/crossings", {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ crossingId: activeId, action: "favorite" }),
-        });
-        window.location.href = "/app";
-      } else {
-        setNotice("Deine Auswahl ist in diesem Vorschau-Modus auf diesem Gerät gespeichert.");
-      }
-    } finally {
-      setSaving(false);
-    }
+    await setFavorite(activeId);
+    setSaving(false);
+    window.location.href = "/app";
   }
 
   return (
     <main className={styles.page}>
-      <div className={styles.content}>
-        <div className={styles.heading}>
-          <p className={styles.eyebrow}>VERWALTUNG</p>
-          <h1>Meine Schranken</h1>
-          <p>Behalte die Bahnübergänge im Blick, die für deinen Alltag wichtig sind.</p>
-        </div>
-
-        <section className={styles.locationCard}>
-          <div className={styles.pin}>⌖</div>
-          <div className={styles.locationCopy}>
-            <h2>Schranken in deiner Nähe finden</h2>
-            <p>Erlaube meineschranke den Zugriff auf deinen Standort, damit wir passende Bahnübergänge in deiner Umgebung anzeigen können.</p>
-            <div className={styles.locationActions}>
-              <button className={styles.primary} onClick={requestLocation} disabled={locationState === "loading"}>
-                {locationState === "loading" ? "Standort wird ermittelt …" : "⌖ Standort freigeben"}
-              </button>
-              <button className={styles.textButton} onClick={() => { setPosition(null); setLocationState("idle"); }}>
-                Manuell suchen
-              </button>
-            </div>
-            <div className={styles.privacy}><span>♢</span> Dein Standort wird nur auf deinem Gerät für die Umkreissuche verwendet. Wir übertragen und speichern keine GPS-Koordinaten.</div>
-            {locationState === "ready" && <div className={styles.success}>✓ Standort lokal ermittelt – Schranken nach Entfernung sortiert.</div>}
+      <div className={styles.wrap}>
+        <section className={styles.intro}>
+          <div>
+            <div className={styles.kicker}><span /> DEIN ÜBERBLICK</div>
+            <h1>Meine Schranken</h1>
+            <p>Verwalte deine Bahnübergänge und lege fest, welche Schranke beim Öffnen der App zuerst angezeigt wird.</p>
+          </div>
+          <div className={styles.countCard}>
+            <strong>{saved.length}<span>/{MAX_FREE_CROSSINGS}</span></strong>
+            <small>gespeichert</small>
           </div>
         </section>
 
-        <label className={styles.search}>
-          <span>⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ort, Straße oder Bahnübergang suchen" />
-          {query && <button onClick={() => setQuery("")} aria-label="Suche löschen">×</button>}
-        </label>
-
-        <div className={styles.columns}>
-          <section className={styles.listSection}>
-            <div className={styles.sectionHeading}>
-              <div><h2>Deine Schranken</h2><p>Deine gespeicherten Bahnübergänge</p></div>
-              <span className={styles.counter}>{saved.length} / {MAX_CROSSINGS}</span>
+        <section className={styles.savedPanel}>
+          <div className={styles.panelHead}>
+            <div>
+              <span className={styles.overline}>DEINE AUSWAHL</span>
+              <h2>Gespeicherte Schranken</h2>
             </div>
-            {loading ? <div className={styles.empty}>Lade deine Schranken …</div> : saved.length === 0 ? (
-              <div className={styles.empty}>Du hast noch keine Schranke gespeichert. Suche einen Bahnübergang oder nutze die Standortfreigabe.</div>
-            ) : (
-              <div className={styles.list}>
-                {saved.map((crossing) => (
-                  <article className={styles.item} key={crossing.id}>
-                    <span className={styles.crossingIcon}>⚒</span>
-                    <button className={styles.itemMain} onClick={() => setActiveId(crossing.id)}>
-                      <strong>{crossing.name}</strong>
-                      <small>{activeId === crossing.id ? "● Aktive Schranke" : "Als aktive Schranke auswählen"}</small>
+            <span className={styles.pill}>{saved.length} von {MAX_FREE_CROSSINGS}</span>
+          </div>
+          {saved.length === 0 ? (
+            <div className={styles.emptySaved}>
+              <span className={styles.emptyIcon}>⌁</span>
+              <strong>Noch keine Schranke gespeichert</strong>
+              <p>Suche unten nach einem Bahnübergang und füge ihn deiner Liste hinzu.</p>
+            </div>
+          ) : (
+            <div className={styles.savedList}>
+              {saved.map((crossing, index) => {
+                const active = crossing.id === activeId;
+                const favorite = crossing.id === favoriteId;
+                return (
+                  <article className={`${styles.savedItem} ${active ? styles.activeItem : ""}`} key={crossing.id}>
+                    <button className={styles.selectItem} onClick={() => setActiveId(crossing.id)} aria-pressed={active}>
+                      <span className={styles.number}>{String(index + 1).padStart(2, "0")}</span>
+                      <span className={styles.crossingGlyph} aria-hidden="true"><i /><i /></span>
+                      <span className={styles.crossingName}>
+                        <strong>{crossing.name}</strong>
+                        <small>{active ? "Wird aktuell in der App angezeigt" : "Antippen, um diese Schranke auszuwählen"}</small>
+                      </span>
+                      <span className={styles.radioMark}>{active ? "✓" : ""}</span>
                     </button>
-                    <button className={styles.remove} onClick={() => toggleCrossing(crossing)} aria-label={crossing.name + " entfernen"}>×</button>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className={styles.listSection}>
-            <div className={styles.sectionHeading}>
-              <div><h2>{position && !query ? "In deiner Nähe" : "Bahnübergänge finden"}</h2><p>{position && !query ? "Nach Entfernung sortiert" : "Suche und füge weitere Schranken hinzu"}</p></div>
-              {position && <span className={styles.nearbyBadge}>GPS aktiv</span>}
-            </div>
-            {filtered.length === 0 ? <div className={styles.empty}>{query ? "Keine passenden Bahnübergänge gefunden." : "Keine Standortdaten verfügbar. Suche bitte manuell."}</div> : (
-              <div className={styles.list}>
-                {filtered.filter((item) => !savedIds.has(item.id)).map((crossing) => (
-                  <article className={styles.item} key={crossing.id}>
-                    <span className={styles.crossingIcon}>⚒</span>
-                    <div className={styles.itemMain}>
-                      <strong>{crossing.name}</strong>
-                      <small>{formatDistance(crossing.distance) || "Bahnübergang"}</small>
+                    <div className={styles.itemActions}>
+                      <button className={favorite ? styles.favoriteActive : styles.favorite} onClick={() => setFavorite(crossing.id)} aria-label="Als Favorit festlegen" title="Favorit">★</button>
+                      <button className={styles.remove} onClick={() => remove(crossing.id)} disabled={busyId === crossing.id || saved.length <= 1} aria-label="Schranke entfernen">×</button>
                     </div>
-                    <button className={styles.add} onClick={() => toggleCrossing(crossing)} aria-label={crossing.name + " hinzufügen"}>+</button>
                   </article>
-                ))}
-              </div>
-            )}
-          </section>
-        </div>
+                );
+              })}
+            </div>
+          )}
+          <div className={styles.helper}><span>ⓘ</span> Die aktive Schranke erscheint direkt in deiner App. Mit ★ legst du deinen Favoriten fest.</div>
+        </section>
 
-        {notice && <div className={styles.notice}>{notice}</div>}
-        <div className={styles.footer}>
-          <div><strong>{saved.length} Schranken ausgewählt</strong><small>Du kannst deine Auswahl jederzeit ändern.</small></div>
-          <button className={styles.primary} onClick={saveSelection} disabled={saving || saved.length === 0}>{saving ? "Speichere …" : "Auswahl speichern →"}</button>
+        <section className={styles.findSection}>
+          <div className={styles.findIntro}>
+            <div>
+              <span className={styles.overline}>ERWEITERN</span>
+              <h2>Weitere Schranken hinzufügen</h2>
+              <p>Finde Bahnübergänge über den Namen oder deinen aktuellen Standort.</p>
+            </div>
+            <button className={styles.locationButton} onClick={locate} disabled={locationState === "loading"}>
+              <span>⌖</span>{locationState === "loading" ? "Suche läuft …" : locationState === "ready" ? "Standort aktualisieren" : "In meiner Nähe"}
+            </button>
+          </div>
+
+          <label className={styles.search}>
+            <span>⌕</span>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ort oder Bahnübergang suchen …" />
+            {query && <button type="button" onClick={() => setQuery("")} aria-label="Suche leeren">×</button>}
+          </label>
+
+          {locationState === "ready" && <div className={styles.locationNote}>Standort gefunden – Ergebnisse sind nach Entfernung sortiert. Deine GPS-Daten bleiben auf deinem Gerät.</div>}
+          {results.length === 0 ? (
+            <div className={styles.noResults}>{available.length === 0 ? "Die Schrankenliste wird geladen …" : "Keine weiteren passenden Bahnübergänge gefunden."}</div>
+          ) : (
+            <div className={styles.results}>
+              {results.map((crossing) => (
+                <article className={styles.resultItem} key={crossing.id}>
+                  <span className={styles.resultGlyph}><i /><i /></span>
+                  <span className={styles.resultName}><strong>{crossing.name}</strong><small>{distanceLabel(crossing.distance)}</small></span>
+                  <button className={styles.addButton} onClick={() => add(crossing.id)} disabled={busyId === crossing.id || saved.length >= MAX_FREE_CROSSINGS} aria-label={`${crossing.name} hinzufügen`}>
+                    {busyId === crossing.id ? "…" : "+"}
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
+          {saved.length >= MAX_FREE_CROSSINGS && <p className={styles.limitNote}>Du hast das Limit von {MAX_FREE_CROSSINGS} Schranken erreicht. Entferne eine Schranke, um eine andere hinzuzufügen.</p>}
+        </section>
+
+        {notice && <div className={styles.notice} role="status">{notice}</div>}
+        <div className={styles.bottomBar}>
+          <div><strong>{saved.length} Schranken in deiner Liste</strong><small>Deine Auswahl wird mit deinem Konto synchronisiert.</small></div>
+          <button onClick={save} disabled={saving || !activeId}>{saving ? "Speichert …" : "Fertig"} <span>→</span></button>
         </div>
+        <Link className={styles.backLink} href="/app">← Zurück zur Schranken-Übersicht</Link>
       </div>
     </main>
   );
