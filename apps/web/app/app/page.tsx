@@ -561,13 +561,8 @@ useEffect(() => {
   }
 
   const crossingId = activeId;
-  const phaseStartMs = new Date(data.phase.start).getTime();
-  const phaseEndMs = new Date(data.phase.end).getTime();
-  const phaseState =
-    now >= phaseStartMs && now < phaseEndMs ? "CLOSED" :
-    now < phaseStartMs ? "OPEN" : data.state;
   const target = new Date(
-    phaseState === "OPEN" ? data.phase.start : data.phase.end
+    data.state === "OPEN" ? data.phase.start : data.phase.end
   ).getTime();
 
   const delay =
@@ -590,7 +585,7 @@ useEffect(() => {
       );
     }
   };
-}, [data, activeId, now]);
+}, [data, activeId]);
 
 if (!data) {
   return <LoadingScreen />;
