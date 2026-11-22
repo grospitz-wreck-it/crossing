@@ -6,6 +6,7 @@ import { getOpenBoardsForecastTrains } from "../../../../../../../packages/db-ap
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
+import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
@@ -307,7 +308,34 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       t,
     ])).values());
     const enrichedTrains = await addStationNames(db, unique);
+
+    // OSM shadow evaluation: compare the actual Mobilithek journey route with
+    // the prepared OSM corridor without changing the live forecast yet.
+    // Keep this deliberately bounded; missing profiles and ambiguous geometry
+    // remain "unknown" and never suppress an existing candidate.
+    const osmShadowCandidates = Array.from(new Map(
+      (throughSnapshot || [])
+        .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
+        .map((train: any) => [train.journeyRef || `${train.line}-${train.journeyNumber}-${train.route.join("|")}`, train]),
+    ).values()).slice(0, 40);
+    const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => ({
+      journeyRef: train.journeyRef || null,
+      line: train.line,
+      journeyNumber: train.journeyNumber,
+      route: train.route,
+      result: await filterTrainByCrossingOsm(crossing.id, train.route),
+    })));
+    const osmShadow = {
+      mode: "shadow",
+      evaluated: osmShadowResults.length,
+      matched: osmShadowResults.filter((item) => item.result.status === "matched").length,
+      rejected: osmShadowResults.filter((item) => item.result.status === "rejected").length,
+      unknown: osmShadowResults.filter((item) => item.result.status === "unknown").length,
+      results: osmShadowResults,
+    };
+
     const payload=toPayload(crossing,enrichedTrains,lineHints);
+    (payload as any).osmShadow = osmShadow;
     await writeCrossingForecastCache(cacheKey,payload);
     return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
