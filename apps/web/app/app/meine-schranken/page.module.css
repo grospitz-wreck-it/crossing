@@ -76,3 +76,9 @@
 .backLink:hover{color:#c71935}
 @media(max-width:680px){.page{padding:23px 14px calc(100px + env(safe-area-inset-bottom))}.intro{align-items:flex-start;margin-bottom:20px}.intro h1{font-size:32px}.intro p{font-size:12px;max-width:390px}.countCard{min-width:78px;padding:11px 10px}.countCard strong{font-size:23px}.panelHead{padding:17px 16px 13px}.panelHead h2,.findIntro h2{font-size:16px}.savedList{padding:0 9px 9px}.selectItem{gap:9px}.crossingName strong{font-size:12px}.helper{padding:11px 15px;font-size:9px}.findSection{margin-top:25px}.findIntro{align-items:flex-start;flex-direction:column;gap:12px}.locationButton{width:100%;justify-content:center}.results{grid-template-columns:1fr}.resultItem{padding:9px 10px}.bottomBar{position:fixed;left:10px;right:10px;bottom:calc(9px + env(safe-area-inset-bottom));margin:0;padding:10px;border-radius:14px}.bottomBar div{display:none}.bottomBar>button{width:100%;justify-content:center;min-height:44px}.backLink{margin-top:12px}}
 @media(prefers-reduced-motion:reduce){.savedItem{transition:none}}
+
+.profilePanel{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:22px;padding:20px 22px;border:1px solid #e4eaf0;border-radius:17px;background:#fff;box-shadow:0 8px 24px rgba(24,50,74,.04)}
+.profilePanel h2{margin:5px 0;color:#17334d;font-size:18px;font-weight:800}
+.profilePanel p{margin:0;color:#8493a2;font-size:12px;line-height:1.5}
+.logoutButton{flex:0 0 auto;padding:11px 16px;border:1px solid #f0d4d9;border-radius:10px;background:#fff7f8;color:#b91d35;font-size:12px;font-weight:800;cursor:pointer}
+@media(max-width:680px){.profilePanel{align-items:flex-start;flex-direction:column;padding:17px}.logoutButton{width:100%}}
