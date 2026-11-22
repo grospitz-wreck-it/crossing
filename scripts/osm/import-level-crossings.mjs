@@ -379,10 +379,33 @@ async function importSingleCrossing(crossingId) {
 
   osmCrossings.sort((a, b) => Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(a.lat), Number(a.lon))) - Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(b.lat), Number(b.lon))));
   const osmCrossing = osmCrossings[0];
+  const distanceMeters = Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(osmCrossing.lat), Number(osmCrossing.lon)));
+  const MAX_LINK_DISTANCE_METERS = 35;
+  if (distanceMeters > MAX_LINK_DISTANCE_METERS) {
+    throw new Error(`Nearest OSM crossing for ${crossing.name} is too far away: ${distanceMeters.toFixed(1)}m (max ${MAX_LINK_DISTANCE_METERS}m)`);
+  }
+
   const ways = (detail.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
   await linkCrossingWays(osmCrossing, ways);
+
+  // Persist the crossing-to-OSM relation as well as the corridor. Without this
+  // link, runtime matching cannot load the imported crossing node or its
+  // railway ways, even though the OSM node and corridor are present.
+  const confidence = distanceMeters <= 10 ? 0.99 : 0.95;
+  await db.execute({
+    sql: `INSERT INTO crossing_osm_links
+      (crossing_id, osm_crossing_id, match_method, confidence, updated_at)
+      VALUES (?, ?, 'nearest_local_import', ?, datetime('now'))
+      ON CONFLICT(crossing_id) DO UPDATE SET
+        osm_crossing_id=excluded.osm_crossing_id,
+        match_method=excluded.match_method,
+        confidence=excluded.confidence,
+        updated_at=excluded.updated_at`,
+    args: [crossingId, Number(osmCrossing.id), confidence],
+  });
+
   await saveCrossingCorridor(crossingId, osmCrossing.id, ways);
-  console.log(`OSM candidate for ${crossing.name}: ${osmCrossing.id}`);
+  console.log(`OSM candidate for ${crossing.name}: ${osmCrossing.id} distance=${distanceMeters.toFixed(1)}m confidence=${confidence}`);
 }
 
 async function main() {
