@@ -12,8 +12,11 @@ export default function Header() {
 
   return (
     <header className="appHeader">
-      <div className="appHeaderTitle">
-        {inManager ? "Mein Bereich" : activeCrossing?.name ?? "Bahnübergang"}
+      <div className="appHeaderBrand">
+        <span className="appHeaderEyebrow">MEINESCHRANKE</span>
+        <div className="appHeaderTitle">
+          {inManager ? "Mein Bereich" : activeCrossing?.name ?? "Bahnübergang"}
+        </div>
       </div>
       <Link
         className="appHeaderMenuButton"
@@ -21,7 +24,11 @@ export default function Header() {
         aria-label={inManager ? "Zur BÜ-Übersicht" : "Schranken und Profil öffnen"}
         title={inManager ? "Zur BÜ-Übersicht" : "Schranken und Profil"}
       >
-        {inManager ? "←" : "☰"}
+        {inManager ? (
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m7 7-7-7 7-7" /></svg>
+        ) : (
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+        )}
       </Link>
     </header>
   );
