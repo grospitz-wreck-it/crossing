@@ -329,10 +329,15 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
       const waitMs = Math.max(0, reservedAt - Date.now());
       if (waitMs > 0) await sleep(waitMs);
 
+      const boardNow = Date.now();
       const batches = await fetchOpenBoardsForStations(job.direction, job.evaNumbers, {
         batchSize: 20,
+        timeStart: new Date(boardNow - 5 * 60_000).toISOString(),
+        timeEnd: new Date(boardNow + 3 * 60 * 60_000).toISOString(),
         maxViaStops: 10,
-        maxEntriesPerTransportType: 40,
+        // The status API exposes a three-hour forecast. The old request omitted
+        // timeEnd, so OpenBoards silently returned its default 30-minute board.
+        maxEntriesPerTransportType: 100,
         credentials: {
           clientId: env.DB_OPENBOARDS_CLIENT_ID,
           apiKey: env.DB_OPENBOARDS_API_KEY,
