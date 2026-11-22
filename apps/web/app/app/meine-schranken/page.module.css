@@ -20,9 +20,9 @@
 .selectItem{display:flex;align-items:center;gap:12px;flex:1;min-width:0;padding:9px 5px;border:0;background:transparent;text-align:left;cursor:pointer}
 .number{width:22px;color:#a6b2bf;font-size:10px;font-weight:800;font-variant-numeric:tabular-nums}
 .crossingGlyph,.resultGlyph{position:relative;display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:11px;background:#f1f5f8}
-.crossingGlyph:before,.resultGlyph:before{content:"";position:absolute;width:18px;height:18px;border:2px solid #c71935;border-radius:3px;transform:rotate(45deg)}
-.crossingGlyph i,.resultGlyph i{z-index:1;width:22px;height:3px;border-radius:4px;background:#173d62;transform:rotate(-35deg)}
-.crossingGlyph i+i,.resultGlyph i+i{position:absolute;transform:rotate(35deg)}
+.crossingGlyph:before,.resultGlyph:before{content:"";position:absolute;left:9px;top:6px;width:4px;height:27px;border-radius:2px;background:#173d62;box-shadow:2px 0 0 rgba(23,61,98,.12)}
+.crossingGlyph:after,.resultGlyph:after{content:"";position:absolute;left:8px;top:15px;width:24px;height:5px;border:1px solid #b71932;border-radius:2px;background:repeating-linear-gradient(135deg,#fff 0 4px,#cf1834 4px 8px);transform:rotate(-28deg);transform-origin:left center;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.crossingGlyph i,.resultGlyph i{display:none}
 .crossingName,.resultName{display:flex;flex-direction:column;gap:4px;min-width:0}
 .crossingName strong,.resultName strong{overflow:hidden;color:#1b3852;font-size:13px;font-weight:750;text-overflow:ellipsis;white-space:nowrap}
 .crossingName small,.resultName small{color:#8a9aaa;font-size:10px}
