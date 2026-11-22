@@ -78,8 +78,14 @@ export default function MeineSchrankenPage() {
     setBusyId(id);
     setNotice("");
     const crossing = available.find((item) => item.id === id);
-    if (crossing) await addCrossing(crossing);
-    setBusyId("");
+    try {
+      if (!crossing) throw new Error("Dieser Bahnübergang ist nicht mehr verfügbar. Bitte lade die Seite neu.");
+      await addCrossing(crossing);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Die Schranke konnte nicht hinzugefügt werden.");
+    } finally {
+      setBusyId("");
+    }
   }
 
   async function remove(id: string) {
@@ -138,7 +144,7 @@ export default function MeineSchrankenPage() {
                 const favorite = crossing.id === favoriteId;
                 return (
                   <article className={`${styles.savedItem} ${active ? styles.activeItem : ""}`} key={crossing.id}>
-                    <button className={styles.selectItem} onClick={() => setActiveId(crossing.id)} aria-pressed={active}>
+                    <button className={styles.selectItem} onClick={() => { setActiveId(crossing.id); setNotice(""); }} aria-pressed={active}>
                       <span className={styles.number}>{String(index + 1).padStart(2, "0")}</span>
                       <span className={styles.crossingGlyph} aria-hidden="true"><i /><i /></span>
                       <span className={styles.crossingName}>
@@ -148,7 +154,7 @@ export default function MeineSchrankenPage() {
                       <span className={styles.radioMark}>{active ? "✓" : ""}</span>
                     </button>
                     <div className={styles.itemActions}>
-                      <button className={favorite ? styles.favoriteActive : styles.favorite} onClick={() => setFavorite(crossing.id)} aria-label="Als Favorit festlegen" title="Favorit">★</button>
+                      <button className={favorite ? styles.favoriteActive : styles.favorite} onClick={async () => { try { await setFavorite(crossing.id); setNotice(""); } catch (error) { setNotice(error instanceof Error ? error.message : "Favorit konnte nicht gespeichert werden."); } }} aria-label="Als Favorit festlegen" title="Favorit">★</button>
                       <button className={styles.remove} onClick={() => remove(crossing.id)} disabled={busyId === crossing.id || saved.length <= 1} aria-label="Schranke entfernen">×</button>
                     </div>
                   </article>
