@@ -2,6 +2,7 @@ import { db } from "../../../../lib/db";
 import { getSnapshotPrimaryTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotPrimaryTrains";
 import { getSnapshotThroughTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotThroughTrains";
 import { getOpenBoardsObservations } from "../../../../../../../packages/db-api-client/src/openBoardsObservations";
+import { getOpenBoardsForecastTrains } from "../../../../../../../packages/db-api-client/src/getOpenBoardsForecastTrains";
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
@@ -228,9 +229,36 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)
       });
     }
-    const unique=Array.from(new Map(trains.map(t=>[
+    // OpenBoards is now a first-class fallback/source, not only a realtime
+    // enrichment layer. It can supply explicit primary-stop rows even when the
+    // Mobilithek snapshot is empty. Through-runs require route anchors.
+    const openBoardsTrains = getOpenBoardsForecastTrains(crossing, realtimeObservations, lineHints);
+    const combined = [...trains];
+    for (const candidate of openBoardsTrains) {
+      const duplicateIndex = combined.findIndex((existing) =>
+        Number(existing.journeyNumber) === Number(candidate.journeyNumber) &&
+        normalizeTrainKey(existing.line) === normalizeTrainKey(candidate.line) &&
+        Math.abs(Date.parse(existing.crossingTime) - Date.parse(candidate.crossingTime)) <= 180_000
+      );
+      if (duplicateIndex >= 0) {
+        // Keep the existing route-rich Mobilithek candidate, but attach the
+        // better OpenBoards live timestamp/source metadata.
+        combined[duplicateIndex] = {
+          ...combined[duplicateIndex],
+          crossingTime: candidate.crossingTime,
+          realtimeSource: candidate.realtimeSource,
+          realtimeTimeType: candidate.realtimeTimeType,
+        };
+      } else {
+        combined.push(candidate);
+      }
+    }
+    const unique=Array.from(new Map(combined.map(t=>[
       t.journeyRef || `${t.line}-${t.category}-${t.journeyNumber}-${t.origin || ""}-${t.destination || ""}`,
       t,
-    ])).values()); const payload=toPayload(crossing,unique,lineHints); await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"mobilithek-snapshot"}});
+    ])).values());
+    const payload=toPayload(crossing,unique,lineHints);
+    await writeCrossingForecastCache(cacheKey,payload);
+    return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
 }
