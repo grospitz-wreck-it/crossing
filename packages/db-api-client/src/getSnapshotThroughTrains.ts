@@ -185,6 +185,9 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
     const lineHints = lineHintsForCrossing(crossing);
     const rules = (crossing.throughRules || []) as any[];
     if (!rules.length) return null;
+    const approachEvas = Array.from(new Set<string>(
+      (crossing.observationEvas || []).map((value: unknown) => String(value).trim()).filter(Boolean),
+    )).slice(1);
 
     const now = Date.now();
     const from = new Date(now - 24 * 60 * 60_000).toISOString();
@@ -227,6 +230,24 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): 
         const observationEva = String(rule.observationEva || "");
         const observationStation = stationNames.get(normalizeEva(observationEva)) || String(rule.observationStation || "");
         if (!matchesRoute(route, calls, observationStation, crossing.requiredRouteStops || [])) continue;
+
+        // Nearby crossings can share the same context stations and train line.
+        // Require this crossing's own configured approach station in the same
+        // journey before accepting a through-train candidate.
+        if (approachEvas.length) {
+          const hasApproach = approachEvas.some((anchorEva) => {
+            const anchorName = stationNames.get(normalizeEva(anchorEva));
+            return calls.some((call) =>
+              normalizeEva(call?.stopPointRef) === normalizeEva(anchorEva) ||
+              normalizeEva(call?.stopPlaceRef) === normalizeEva(anchorEva) ||
+              (anchorName && normalizeStationName(String(call?.name || "")) === normalizeStationName(anchorName))
+            ) || route.some((stop) =>
+              normalizeEva(stop) === normalizeEva(anchorEva) ||
+              Boolean(anchorName && normalizeStationName(stop) === normalizeStationName(anchorName))
+            );
+          });
+          if (!hasApproach) continue;
+        }
 
         const observationCall = snapshotCallsContain(calls, observationStation, observationEva);
         const observationTime = observationCall?.actual || observationCall?.planned || row.actual_time;
