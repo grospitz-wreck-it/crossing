@@ -88,7 +88,9 @@ export function getOpenBoardsForecastTrains(
         isStoppingTrain: true,
         direction: "unknown",
         directionLabel: observation.destinationEva ? `Richtung ${observation.destinationEva}` : null,
-        delayMinutes: 0,
+        delayMinutes: observation.timeType === "REAL" && observation.scheduledTime
+          ? Math.max(0, Math.round((eventAt - Date.parse(observation.scheduledTime)) / 60_000))
+          : 0,
         realtimeSource: "DB OpenBoards",
         realtimeTimeType: observation.timeType,
         crossingTime: crossingTime.toISOString(),
@@ -123,7 +125,9 @@ export function getOpenBoardsForecastTrains(
         isStoppingTrain: false,
         direction: rule.direction || "unknown",
         directionLabel: "Durchfahrt",
-        delayMinutes: 0,
+        delayMinutes: observation.timeType === "REAL" && observation.scheduledTime
+          ? Math.max(0, Math.round((eventAt - Date.parse(observation.scheduledTime)) / 60_000))
+          : 0,
         realtimeSource: "DB OpenBoards",
         realtimeTimeType: observation.timeType,
         crossingTime: crossingTime.toISOString(),
