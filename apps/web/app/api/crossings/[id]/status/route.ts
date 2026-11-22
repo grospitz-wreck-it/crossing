@@ -122,7 +122,7 @@ function openBoardsRouteMatches(crossing: any, observation: any, rule: any): boo
 function appendOpenBoardsCandidates(
   crossing: any,
   observations: any[],
-  primaryEvas: string[],
+  primaryEvas: unknown[],
   lineHints: string[],
   trains: any[],
 ): void {
