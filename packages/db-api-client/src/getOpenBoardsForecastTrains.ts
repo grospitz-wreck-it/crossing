@@ -6,7 +6,7 @@ function normalize(value: unknown): string {
     .normalize("NFKD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\([^)]*\)/g, " ")
-    .replace(/hauptbahnhof|hbf|bahnhof|westf\\.?|westfalen/gi, " ")
+    .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
 }
