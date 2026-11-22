@@ -480,24 +480,29 @@ const wakeLockRef =
   }
 
   useEffect(() => {
+  // Invalidate any in-flight response from the previously selected crossing.
+  // Otherwise load() can reuse that old promise and leave the new crossing
+  // showing stale data (or no fresh data at all).
+  loadRequestIdRef.current += 1;
+  loadInFlightRef.current = null;
+  setData(null);
+  setAds([]);
+  setCurrentAdIndex(0);
+
   if (!activeId) {
     return;
   }
 
-  setData(null);
+  void load();
 
-  load();
+  const apiRefresh = setInterval(() => {
+    void load();
+  }, 120000);
 
-  const apiRefresh =
-    setInterval(
-      load,
-      120000
-    );
-
-  return () =>
-    clearInterval(
-      apiRefresh
-    );
+  return () => {
+    loadRequestIdRef.current += 1;
+    clearInterval(apiRefresh);
+  };
 }, [activeId]);
 
 useEffect(() => {
