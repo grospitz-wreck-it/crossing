@@ -62,13 +62,6 @@ export function getOpenBoardsForecastTrains(
 ): any[] {
   const now = Date.now();
   const primaryEvas = new Set<string>((crossing.referenceStations || []).map(String));
-  const orderedObservationEvas = Array.from(new Set<string>(
-    (crossing.observationEvas || []).map((value: unknown) => String(value).trim()).filter(Boolean),
-  ));
-  const routeAnchorEvas = new Set<string>(orderedObservationEvas.slice(1));
-  const candidatePrimaryEvas = routeAnchorEvas.size
-    ? new Set<string>(orderedObservationEvas.slice(0, 1))
-    : primaryEvas;
   const rules = Array.isArray(crossing.throughRules) ? crossing.throughRules : [];
   const candidates: any[] = [];
 
@@ -83,14 +76,7 @@ export function getOpenBoardsForecastTrains(
     const eventAt = Date.parse(observation.eventTime);
     if (!Number.isFinite(eventAt) || eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) continue;
 
-    if (candidatePrimaryEvas.has(observation.evaNumber)) {
-      // If several crossings share this primary station, the partial route
-      // must identify the approach station configured for this crossing.
-      // Without that evidence, do not fan the same station event out to
-      // neighbouring crossings.
-      if (routeAnchorEvas.size && !observation.routeEvas.some((eva) => routeAnchorEvas.has(eva))) {
-        continue;
-      }
+    if (primaryEvas.has(observation.evaNumber)) {
       const offsetSeconds = observation.evaNumber === String(crossing.eva || "")
         ? 0
         : Math.max(30, Number(rules.find((rule: any) => String(rule.observationEva || "") === observation.evaNumber)?.fallbackOffsetSeconds || 300));
@@ -128,7 +114,6 @@ export function getOpenBoardsForecastTrains(
         ...lineHints,
       ])) continue;
       if (!routeHasStation(observation, eva, String(rule.observationStation || ""))) continue;
-      if (routeAnchorEvas.size && !observation.routeEvas.some((routeEva) => routeAnchorEvas.has(routeEva))) continue;
       if (!hasOrderedRouteAnchors(observation, crossing.requiredRouteStops || [])) continue;
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
