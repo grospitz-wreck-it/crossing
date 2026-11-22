@@ -112,18 +112,46 @@ async function loadDemand(
     return cachedDemand.map((item) => ({ ...item, evaNumbers: [...item.evaNumbers] }));
   }
 
-  const [crossingsResult, catalogResult] = await Promise.all([
-    db.execute(`
-      SELECT c.id, c.name, c.observation_evas, c.reference_stations, c.through_rules
-      FROM crossings c
-      WHERE c.status = 'active'
-        AND (
-          EXISTS (SELECT 1 FROM user_crossings uc WHERE uc.crossing_id = c.id)
-          OR EXISTS (SELECT 1 FROM user_settings us WHERE us.default_crossing_id = c.id)
-        )
-    `),
-    db.execute("SELECT eva, name FROM railway_station_catalog"),
-  ]);
+  const crossingsResult = await db.execute(`
+    SELECT c.id, c.name, c.observation_evas, c.reference_stations, c.through_rules
+    FROM crossings c
+    WHERE c.status = 'active'
+      AND (
+        EXISTS (SELECT 1 FROM user_crossings uc WHERE uc.crossing_id = c.id)
+        OR EXISTS (SELECT 1 FROM user_settings us WHERE us.default_crossing_id = c.id)
+      )
+  `);
+
+  // Resolve the catalogue only when a legacy through-rule actually contains
+  // station names. Most active crossings already persist observation EVAs,
+  // so loading all 7k catalogue rows on every cold isolate is unnecessary.
+  const configuredEvas = new Set<string>();
+  const stationNames = new Set<string>();
+  for (const row of crossingsResult.rows as Array<Record<string, unknown>>) {
+    for (const value of [
+      ...parseArray(row.observation_evas),
+      ...parseArray(row.reference_stations),
+    ]) {
+      const eva = String(value || "").trim();
+      if (eva) configuredEvas.add(eva);
+    }
+
+    for (const rule of parseArray(row.through_rules)) {
+      if (!rule || typeof rule !== "object") continue;
+      const name = String((rule as Record<string, unknown>).observationStation || "").trim();
+      if (name) stationNames.add(name);
+    }
+  }
+
+  const catalogResult = configuredEvas.size
+    ? await db.execute({
+        sql: `SELECT eva, name FROM railway_station_catalog
+              WHERE eva IN (${[...configuredEvas].map(() => "?").join(",")})`,
+        args: [...configuredEvas],
+      })
+    : stationNames.size
+      ? await db.execute("SELECT eva, name FROM railway_station_catalog")
+      : { rows: [] as Array<Record<string, unknown>> };
 
   const stationByName = new Map<string, { eva: string; name: string }>();
   const stationByEva = new Map<string, { eva: string; name: string }>();
