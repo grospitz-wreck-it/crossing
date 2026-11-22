@@ -139,6 +139,7 @@ async function uploadFile() {
 }
 function resetForm() {
   setEditingCampaign(null);
+  setCrossings([]);
 
   setCustomerId("");
 
@@ -208,6 +209,8 @@ async function createCampaign() {
           startDate,
 
           endDate,
+
+          crossings,
         }),
       }
     );
@@ -477,7 +480,7 @@ async function createCustomer() {
 
         <StatCard
           title="Crossings"
-          value="1"
+          value={availableCrossings.length}
         />
       </div>
 
@@ -521,6 +524,8 @@ async function createCustomer() {
     setEditingCampaign(
       campaign
     );
+
+    setCrossings(Array.isArray(campaign.crossings) ? campaign.crossings : []);
 
     setCustomerId(
       campaign.customer_id ?? ""
