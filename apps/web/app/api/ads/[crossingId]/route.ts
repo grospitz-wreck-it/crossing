@@ -18,7 +18,9 @@ export async function GET(
   const legacyAliases: Record<string, string> = {
     kirchlengern: "kirchlengern-bahnhof-lubbecker-str-b8095d49",
   };
-  const crossingId = legacyAliases[requestedCrossingId] || requestedCrossingId;
+  const canonicalCrossingId = legacyAliases[requestedCrossingId] || requestedCrossingId;
+  const legacyCrossingId = Object.entries(legacyAliases).find(([, canonical]) => canonical === canonicalCrossingId)?.[0];
+  const crossingIds = Array.from(new Set([canonicalCrossingId, requestedCrossingId, legacyCrossingId].filter(Boolean)));
 
   const result =
     await db.execute({
@@ -43,7 +45,7 @@ export async function GET(
              campaigns.id
 
         WHERE
-          campaign_crossings.crossing_id = ?
+          campaign_crossings.crossing_id IN (${crossingIds.map(() => "?").join(",")})
 
           AND campaigns.active = 1
 
@@ -59,9 +61,7 @@ export async function GET(
           campaigns.priority DESC,
           creatives.created_at DESC
       `,
-      args: [
-        crossingId,
-      ],
+      args: crossingIds,
     });
 
   const ads = result.rows.map(
