@@ -129,7 +129,7 @@ body {
   background:
     rgba(31,157,79,.12);
 
-  color: #1f9d4f;
+  color: #c8102e;
 }
 
 .badgeClosed {
@@ -1501,7 +1501,7 @@ margin-top: 24px;
 }
 
 .appHeaderDropdownItemActive {
-  background: rgba(31, 157, 79, 0.1);
+  background: rgba(200, 16, 46, 0.08);
   color: #1f9d4f;
 }
 
@@ -2203,3 +2203,5 @@ margin-top: 24px;
   flex: 1;
   min-width: 0;
 }
+
+.appHeaderManageLink{display:block;padding:10px 12px;border-radius:10px;color:#c8102e;text-decoration:none;font-size:13px;font-weight:800}.appHeaderManageLink:hover{background:#f8eaec}
