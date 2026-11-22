@@ -63,11 +63,16 @@ export async function getSnapshotPrimaryTrains(
   // require the train's actual call sequence to include this crossing's
   // own configured approach station. A shared station call alone is not
   // sufficient evidence that the train passes this specific crossing.
-  const routeAnchorEvas: string[] = Array.from(new Set<string>(
-    (crossing.observationEvas || [])
-      .map((eva: unknown) => String(eva).trim())
-      .filter((eva: string) => Boolean(eva) && !primaryEvas.includes(String(eva).trim())),
+  const orderedObservationEvas: string[] = Array.from(new Set<string>(
+    (crossing.observationEvas || []).map((eva: unknown) => String(eva).trim()).filter(Boolean),
   ));
+  // In legacy admin records, all station links may be stored with role
+  // "observation". Their configured order is meaningful: first is the shared
+  // primary board, following EVAs are crossing-specific approach anchors.
+  const routeAnchorEvas = orderedObservationEvas.slice(1);
+  const candidatePrimaryEvas = routeAnchorEvas.length
+    ? orderedObservationEvas.slice(0, 1)
+    : primaryEvas;
 
   const stationResult = await db.execute({
     sql: "SELECT eva,name FROM railway_station_catalog WHERE eva IN (" +
@@ -102,7 +107,7 @@ export async function getSnapshotPrimaryTrains(
     const calls = parseJson(row.calls_json, []);
     if (!Array.isArray(calls) || !calls.length) continue;
 
-    for (const eva of primaryEvas) {
+    for (const eva of candidatePrimaryEvas) {
       const stationName = stationNames.get(eva) || eva;
 
       const call = calls.find((item: any) =>
