@@ -147,7 +147,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const crossing = await authDb.get<Crossing>(sql`
+  const crossingRows = await authDb.all<Crossing>(sql`
     SELECT
       id,
       name
@@ -155,6 +155,8 @@ export async function POST(request: Request) {
     WHERE id = ${crossingId}
     LIMIT 1
   `);
+
+  const crossing = crossingRows[0];
 
   if (!crossing) {
     return Response.json(
@@ -168,7 +170,7 @@ export async function POST(request: Request) {
    * Deshalb zuerst prüfen, ob der User diesen BÜ
    * bereits gespeichert hat.
    */
-  const existing = await authDb.get<{ id: string }>(sql`
+  const existingRows = await authDb.all<{ id: string }>(sql`
     SELECT id
     FROM user_crossings
     WHERE user_id = ${userId}
@@ -176,7 +178,7 @@ export async function POST(request: Request) {
     LIMIT 1
   `);
 
-  if (existing) {
+  if (existingRows.length > 0) {
     const favoriteId = await getFavoriteId(userId);
 
     return Response.json({
@@ -191,13 +193,13 @@ export async function POST(request: Request) {
     });
   }
 
-  const countResult = await authDb.get<{ count: number }>(sql`
+  const countRows = await authDb.all<{ count: number }>(sql`
     SELECT COUNT(*) AS count
     FROM user_crossings
     WHERE user_id = ${userId}
   `);
 
-  const count = Number(countResult?.count ?? 0);
+  const count = Number(countRows[0]?.count ?? 0);
 
   if (count >= MAX_FREE_CROSSINGS) {
     return Response.json(
@@ -290,7 +292,7 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const saved = await authDb.get<{ id: string }>(sql`
+  const savedRows = await authDb.all<{ id: string }>(sql`
     SELECT id
     FROM user_crossings
     WHERE user_id = ${userId}
@@ -298,7 +300,7 @@ export async function PATCH(request: Request) {
     LIMIT 1
   `);
 
-  if (!saved) {
+  if (savedRows.length === 0) {
     return Response.json(
       { error: "Bahnübergang ist nicht gespeichert" },
       { status: 404 },
@@ -358,7 +360,7 @@ export async function DELETE(request: Request) {
    * den nächsten gespeicherten BÜ.
    */
   if (favoriteId === crossingId) {
-    const replacement = await authDb.get<{ crossing_id: string }>(sql`
+    const replacementRows = await authDb.all<{ crossing_id: string }>(sql`
       SELECT crossing_id
       FROM user_crossings
       WHERE user_id = ${userId}
@@ -366,6 +368,7 @@ export async function DELETE(request: Request) {
       LIMIT 1
     `);
 
+    const replacement = replacementRows[0];
     await setFavorite(
       userId,
       replacement?.crossing_id ?? null,
