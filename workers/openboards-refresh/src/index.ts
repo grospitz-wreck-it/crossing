@@ -22,6 +22,7 @@ export interface Env {
   OPENBOARDS_RUN_TOKEN?: string;
   OPENBOARDS_BATCH_SIZE?: string;
   OPENBOARDS_MAX_JOBS_PER_RUN?: string;
+  OPENBOARDS_MAX_ENTRIES_PER_TRANSPORT_TYPE?: string;
   OPENBOARDS_CORE_INTERVAL_MS?: string;
   OPENBOARDS_EXPLORATORY_INTERVAL_MS?: string;
 }
@@ -331,6 +332,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
       if (waitMs > 0) await sleep(waitMs);
 
       const boardNow = Date.now();
+      const maxEntries = Math.max(25, Math.min(100, Number(env.OPENBOARDS_MAX_ENTRIES_PER_TRANSPORT_TYPE || 100)));
       const batches = await fetchOpenBoardsForStations(job.direction, job.evaNumbers, {
         batchSize: 20,
         timeStart: new Date(boardNow - 5 * 60_000).toISOString(),
@@ -338,7 +340,7 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
         maxViaStops: 10,
         // The status API exposes a three-hour forecast. The old request omitted
         // timeEnd, so OpenBoards silently returned its default 30-minute board.
-        maxEntriesPerTransportType: 100,
+        maxEntriesPerTransportType: maxEntries,
         credentials: {
           clientId: env.DB_OPENBOARDS_CLIENT_ID,
           apiKey: env.DB_OPENBOARDS_API_KEY,
