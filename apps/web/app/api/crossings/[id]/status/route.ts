@@ -64,7 +64,7 @@ async function addStationNames(db: any, trains: any[]) {
   const evas = Array.from(new Set(
     trains.flatMap((train) => [train.destination, train.origin])
       .map((value) => String(value || "").trim())
-      .filter((value) => /^\\d{7}$/.test(value)),
+      .filter((value) => /^\d{7}$/.test(value)),
   ));
   if (!evas.length) return trains;
 
@@ -86,7 +86,7 @@ async function addStationNames(db: any, trains: any[]) {
         ...train,
         destination: destinationName || train.destination,
         origin: originName || train.origin,
-        directionLabel: destinationName && /^\\d{7}$/.test(destination)
+        directionLabel: destinationName && /^\d{7}$/.test(destination)
           ? `Richtung ${destinationName}`
           : train.directionLabel,
       };
