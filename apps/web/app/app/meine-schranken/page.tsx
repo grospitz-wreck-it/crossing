@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { signOut } from "next-auth/react";
 import { useCrossings } from "../../context/CrossingsContext";
 import { MAX_FREE_CROSSINGS } from "../../context/CrossingsContext";
 import styles from "./page.module.css";
@@ -196,11 +197,19 @@ export default function MeineSchrankenPage() {
         </section>
 
         {notice && <div className={styles.notice} role="status">{notice}</div>}
+        <section className={styles.profilePanel}>
+          <div>
+            <span className={styles.overline}>KONTO</span>
+            <h2>Mein Profil</h2>
+            <p>Verwalte hier deine Schranken. Dein Konto ist mit deiner Anmeldung verknüpft.</p>
+          </div>
+          <button className={styles.logoutButton} onClick={() => signOut({ callbackUrl: "/" })}>Abmelden</button>
+        </section>
         <div className={styles.bottomBar}>
           <div><strong>{saved.length} Schranken in deiner Liste</strong><small>Deine Auswahl wird mit deinem Konto synchronisiert.</small></div>
           <button onClick={save} disabled={saving || !activeId}>{saving ? "Speichert …" : "Fertig"} <span>→</span></button>
         </div>
-        <Link className={styles.backLink} href="/app">← Zurück zur Schranken-Übersicht</Link>
+        <Link className={styles.backLink} href="/app">← Zurück zur BÜ-Übersicht</Link>
       </div>
     </main>
   );
