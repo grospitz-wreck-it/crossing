@@ -22,6 +22,7 @@ export interface Env {
   OPENBOARDS_RUN_TOKEN?: string;
   OPENBOARDS_BATCH_SIZE?: string;
   OPENBOARDS_MAX_JOBS_PER_RUN?: string;
+  OPENBOARDS_MAX_ENTRIES_PER_TRANSPORT_TYPE?: string;
   OPENBOARDS_CORE_INTERVAL_MS?: string;
   OPENBOARDS_EXPLORATORY_INTERVAL_MS?: string;
 }
@@ -148,6 +149,7 @@ async function loadDemand(
     // Admin saves selected DB observation stations in observation_evas.
     // Keep reference_stations as a backwards-compatible legacy source.
     for (const value of [
+      row.eva,
       ...parseArray(row.observation_evas),
       ...parseArray(row.reference_stations),
     ]) {
@@ -329,10 +331,16 @@ async function runRefresh(env: Env): Promise<Record<string, unknown>> {
       const waitMs = Math.max(0, reservedAt - Date.now());
       if (waitMs > 0) await sleep(waitMs);
 
+      const boardNow = Date.now();
+      const maxEntries = Math.max(25, Math.min(100, Number(env.OPENBOARDS_MAX_ENTRIES_PER_TRANSPORT_TYPE || 100)));
       const batches = await fetchOpenBoardsForStations(job.direction, job.evaNumbers, {
         batchSize: 20,
+        timeStart: new Date(boardNow - 5 * 60_000).toISOString(),
+        timeEnd: new Date(boardNow + 3 * 60 * 60_000).toISOString(),
         maxViaStops: 10,
-        maxEntriesPerTransportType: 40,
+        // The status API exposes a three-hour forecast. The old request omitted
+        // timeEnd, so OpenBoards silently returned its default 30-minute board.
+        maxEntriesPerTransportType: maxEntries,
         credentials: {
           clientId: env.DB_OPENBOARDS_CLIENT_ID,
           apiKey: env.DB_OPENBOARDS_API_KEY,
