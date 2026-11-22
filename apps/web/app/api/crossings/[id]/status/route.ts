@@ -314,7 +314,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // Keep this deliberately bounded; missing profiles and ambiguous geometry
     // remain "unknown" and never suppress an existing candidate.
     const osmShadowCandidates = Array.from(new Map(
-      (throughSnapshot || [])
+      [
+        ...(primarySnapshot || []),
+        ...(throughSnapshot || []),
+      ]
         .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
         .map((train: any) => [train.journeyRef || `${train.line}-${train.journeyNumber}-${train.route.join("|")}`, train]),
     ).values()).slice(0, 40);
