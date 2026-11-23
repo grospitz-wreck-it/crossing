@@ -24,6 +24,7 @@ function parseArgs() {
     const arg = args[i];
     if (arg === "--bbox") result.bbox = args[++i];
     if (arg === "--crossing") result.crossingId = args[++i];
+    if (arg === "--all") result.all = true;
   }
   return result;
 }
@@ -378,17 +379,64 @@ async function importSingleCrossing(crossingId) {
   if (!osmCrossings.length) throw new Error(`No OSM level crossing found near ${crossing.name}`);
 
   osmCrossings.sort((a, b) => Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(a.lat), Number(a.lon))) - Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(b.lat), Number(b.lon))));
+  osmCrossings.sort((a, b) => Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(a.lat), Number(a.lon))) - Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(b.lat), Number(b.lon))));
   const osmCrossing = osmCrossings[0];
+  const distanceMeters = Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(osmCrossing.lat), Number(osmCrossing.lon)));
+  const secondDistance = osmCrossings[1]
+    ? Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(osmCrossings[1].lat), Number(osmCrossings[1].lon)))
+    : Infinity;
+  if (distanceMeters > 80 || secondDistance - distanceMeters < 10) {
+    throw new Error(`Ambiguous OSM crossing for ${crossing.name}: nearest=${distanceMeters.toFixed(1)}m, second=${Number.isFinite(secondDistance) ? secondDistance.toFixed(1) + "m" : "none"}; manual review required`);
+  }
+
+  const occupied = await db.execute({
+    sql: `SELECT crossing_id FROM crossing_osm_links WHERE osm_crossing_id = ? AND crossing_id <> ? LIMIT 1`,
+    args: [Number(osmCrossing.id), crossingId],
+  });
+  if (occupied.rows.length) {
+    throw new Error(`OSM crossing ${osmCrossing.id} is already linked to another crossing; refusing duplicate assignment`);
+  }
+
+  const confidence = distanceMeters <= 20 ? 0.99 : 0.9;
+  await db.execute({
+    sql: `INSERT INTO crossing_osm_links (crossing_id, osm_crossing_id, match_method, confidence, updated_at)
+      VALUES (?, ?, 'nearest_unique_local', ?, datetime('now'))
+      ON CONFLICT(crossing_id) DO UPDATE SET osm_crossing_id=excluded.osm_crossing_id,
+      match_method=excluded.match_method, confidence=excluded.confidence, updated_at=excluded.updated_at`,
+    args: [crossingId, Number(osmCrossing.id), confidence],
+  });
+
   const ways = (detail.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
   await linkCrossingWays(osmCrossing, ways);
   await saveCrossingCorridor(crossingId, osmCrossing.id, ways);
-  console.log(`OSM candidate for ${crossing.name}: ${osmCrossing.id}`);
+  console.log(`OSM LINK ${crossing.name} -> ${osmCrossing.id} distance=${distanceMeters.toFixed(1)}m confidence=${confidence}`);
+}
+
+async function importAllCrossings() {
+  const result = await db.execute({
+    sql: `SELECT id, name FROM crossings WHERE status = 'active' ORDER BY name`,
+    args: [],
+  });
+  let imported = 0;
+  let failed = 0;
+  for (const row of result.rows) {
+    try {
+      await importSingleCrossing(String(row.id));
+      imported += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`REVIEW ${row.name} (${row.id}):`, error instanceof Error ? error.message : error);
+    }
+  }
+  console.log(`OSM BULK COMPLETE: imported=${imported} failed_or_review=${failed} total=${result.rows.length}`);
 }
 
 async function main() {
-  const { bbox, crossingId } = parseArgs();
+  const { bbox, crossingId, all } = parseArgs();
   await ensureSchema();
-  if (crossingId) {
+  if (all) {
+    await importAllCrossings();
+  } else if (crossingId) {
     await importSingleCrossing(crossingId);
   } else {
     const stats = await importByBbox(parseBbox(bbox));
