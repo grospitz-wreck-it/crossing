@@ -32,6 +32,7 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
     requiredRouteStops: jsonArray(row.required_route_stops).map(String).filter(Boolean),
     lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20),
     rules: jsonValue(row.rules, {}),
+    configUpdatedAt: String(row.updated_at || ""),
     throughRules: sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva),
     diversionRules: jsonArray(row.diversion_rules), rerouteWatchRules: jsonArray(row.reroute_watch_rules), confidence: Number(row.confidence || 0.5)
   };
@@ -39,7 +40,7 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
 async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
-      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,observation_evas,reference_stations,context_evas,required_route_stops,rules,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
+      db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,updated_at,observation_evas,reference_stations,context_evas,required_route_stops,rules,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
       db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] })
     ]);
     const row: any = result.rows[0]; return row ? buildCrossingFromDb(row, stations.rows as any[]) : null;
@@ -181,9 +182,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     crossing = crossing || legacyCrossing || null;
   }
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
-  // Cache by the resolved database crossing ID, not by a legacy client alias.
-  // Otherwise an old static response under "kirchlengern" can mask the live DB crossing.
-  const cacheKey=`status:${crossing.id}`;
+  // Version the forecast cache with the persisted crossing configuration. A saved
+  // OSM track/rule edit must never keep serving a forecast computed from old rules.
+  // Keep the resolved DB ID so legacy aliases share the canonical crossing record.
+  const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}`;
   const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   const lineHints=lineHintsForCrossing(crossing);
