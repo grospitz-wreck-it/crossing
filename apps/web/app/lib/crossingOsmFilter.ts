@@ -87,27 +87,78 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
 }
 
 async function loadMapping(crossingId: string): Promise<Mapping | null> {
-  const linkResult = await db.execute({ sql: `SELECT crossing_id, osm_crossing_id, confidence FROM crossing_osm_links WHERE crossing_id = ? AND confidence >= 0.8 LIMIT 1`, args: [crossingId] });
+  const linkResult = await db.execute({
+    sql: `SELECT crossing_id, osm_crossing_id, confidence
+      FROM crossing_osm_links
+      WHERE crossing_id = ? AND confidence >= 0.8 LIMIT 1`,
+    args: [crossingId],
+  });
   const link: any = linkResult.rows[0];
   if (!link) return null;
+
   const osmCrossingId = Number(link.osm_crossing_id);
-  const crossingResult = await db.execute({ sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`, args: [osmCrossingId] });
+  if (!Number.isSafeInteger(osmCrossingId) || osmCrossingId <= 0) return null;
+
+  const [crossingResult, corridorResult] = await Promise.all([
+    db.execute({
+      sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
+      args: [osmCrossingId],
+    }),
+    db.execute({
+      sql: `SELECT railway_way_ids_json
+        FROM crossing_osm_corridors WHERE crossing_id = ? LIMIT 1`,
+      args: [crossingId],
+    }),
+  ]);
   const crossingRow: any = crossingResult.rows[0];
   if (!crossingRow) return null;
-  const tracksResult = await db.execute({ sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`, args: [osmCrossingId] });
-  const tracks = tracksResult.rows as any[];
-  console.log(`[OSM MAPPING DEBUG] crossing=${crossingId} osmCrossing=${osmCrossingId} tracks=${tracks.length} trackData=${JSON.stringify(tracks.map((track) => ({ railwayWayId: String(track.railway_way_id), crossingNodeIndex: Number(track.crossing_node_index) })))}`);
-  const railwayWayIds = tracks.map((row) => String(row.railway_way_id)).filter(Boolean);
-  if (!railwayWayIds.length) return null;
-  const crossingNodeIds = new Set<string>();
-  const nodeQueries = tracks.map((track) => ({ wayId: String(track.railway_way_id), index: Number(track.crossing_node_index) })).filter((track) => Number.isInteger(track.index) && track.index >= 0);
-  for (const track of nodeQueries) {
-    const nodeResult = await db.execute({ sql: `SELECT node_id FROM osm_rail_way_nodes WHERE railway_way_id = ? AND node_index = ? LIMIT 1`, args: [track.wayId, track.index] });
-    const node = nodeResult.rows[0] as any;
-    if (node?.node_id != null) crossingNodeIds.add(String(node.node_id));
+
+  // The linked OSM crossing ID is itself the OSM node ID. Do not reconstruct
+  // it through osm_crossing_rail_ways/osm_rail_way_nodes: that legacy lookup
+  // can be absent or stale for locally resolved and grouped multi-track links.
+  const crossingNodeIds = new Set<string>([String(osmCrossingId)]);
+
+  // The corridor is the authoritative selected physical-track set. In
+  // particular, it may contain multiple adjacent ways for one multi-track BÜ.
+  let railwayWayIds: string[] = [];
+  const corridorRow: any = corridorResult.rows[0];
+  if (corridorRow?.railway_way_ids_json) {
+    try {
+      const parsed = JSON.parse(String(corridorRow.railway_way_ids_json));
+      if (Array.isArray(parsed)) {
+        railwayWayIds = [...new Set(parsed.map((value: unknown) => String(value).trim()).filter(Boolean))];
+      }
+    } catch (error) {
+      console.warn(`[OSM MAPPING] invalid corridor way list for crossing=${crossingId}:`, error);
+    }
   }
-  console.log(`[OSM MAPPING DEBUG] crossing=${crossingId} crossingNodes=${[...crossingNodeIds].join(",")} nodeCount=${crossingNodeIds.size}`);
-  return { crossingId: String(link.crossing_id), osmCrossingId, confidence: Number(link.confidence ?? 0), crossingLat: Number(crossingRow.lat), crossingLon: Number(crossingRow.lon), crossingNodeIds, railwayWayIds };
+
+  // Backward compatibility for older links that predate corridor rows.
+  if (!railwayWayIds.length) {
+    const tracksResult = await db.execute({
+      sql: `SELECT railway_way_id FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
+      args: [osmCrossingId],
+    });
+    railwayWayIds = [...new Set((tracksResult.rows as any[])
+      .map((row) => String(row.railway_way_id || "").trim())
+      .filter(Boolean))];
+  }
+
+  console.log(
+    `[OSM MAPPING DEBUG] crossing=${crossingId} osmCrossing=${osmCrossingId} ` +
+    `crossingNodes=[${[...crossingNodeIds].join(",")}] ways=[${railwayWayIds.join(",")}]`,
+  );
+
+  if (!railwayWayIds.length) return null;
+  return {
+    crossingId: String(link.crossing_id),
+    osmCrossingId,
+    confidence: Number(link.confidence ?? 0),
+    crossingLat: Number(crossingRow.lat),
+    crossingLon: Number(crossingRow.lon),
+    crossingNodeIds,
+    railwayWayIds,
+  };
 }
 
 async function loadMappingCached(crossingId: string) {
