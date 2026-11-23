@@ -7,6 +7,7 @@ import { getCrossingDirection } from "../../../../../../../packages/prediction-e
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
 import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
+import { assignTrainToOsmTrack } from "../../../../../../../packages/crossing-model/src/osmLineMatching";
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { const parsed = value ? JSON.parse(String(value)) : []; return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
 function jsonValue(value: unknown, fallback: any = {}) { if (value && typeof value === "object") return value; try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; } }
@@ -50,6 +51,11 @@ function explicitLineHintsForCrossing(crossing: any): string[] {
     ? rules.flatMap((rule: any) => Array.isArray(rule?.lineHints) ? rule.lineHints : [])
     : Array.isArray(rules?.lineHints) ? rules.lineHints : [];
   return Array.from(new Set<string>(values.map((value: unknown) => String(value || "").trim()))).filter(Boolean);
+}
+function selectedOsmTracksForCrossing(crossing: any): any[] {
+  const tracks = crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.selectedOsmTracks)
+    ? crossing.rules.selectedOsmTracks : [];
+  return tracks.filter((track: any) => track && track.wayId != null);
 }
 function selectedOsmWayIdsForCrossing(crossing: any): string[] {
   const tracks = crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.selectedOsmTracks)
@@ -327,11 +333,21 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         .map((train: any) => [train.journeyRef || `${train.line}-${train.journeyNumber}-${train.route.join("|")}`, train]),
     ).values()).slice(0, 40);
     const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
+    const selectedOsmTracks = selectedOsmTracksForCrossing(crossing);
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => ({
       journeyRef: train.journeyRef || null,
       line: train.line,
+      category: train.category,
       journeyNumber: train.journeyNumber,
       route: train.route,
+      // Independent, conservative line-plan assignment. This is diagnostic only
+      // until real-world examples prove that OSM relation membership is unique.
+      lineAssignment: assignTrainToOsmTrack({
+        line: train.line,
+        category: train.category,
+        route: train.route,
+        selectedTracks: selectedOsmTracks,
+      }),
       result: await filterTrainByCrossingOsm(crossing.id, train.route, selectedOsmWayIds.length ? selectedOsmWayIds : undefined),
     })));
     const rejectedJourneyRefs = new Set(osmShadowResults.filter((item) => item.result.status === "rejected" && item.journeyRef).map((item) => String(item.journeyRef)));
@@ -345,6 +361,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       matched: osmShadowResults.filter((item) => item.result.status === "matched").length,
       rejected: osmShadowResults.filter((item) => item.result.status === "rejected").length,
       unknown: osmShadowResults.filter((item) => item.result.status === "unknown").length,
+      lineAssignmentSummary: {
+        matched: osmShadowResults.filter((item) => item.lineAssignment.status === "matched").length,
+        ambiguous: osmShadowResults.filter((item) => item.lineAssignment.status === "ambiguous").length,
+        unknown: osmShadowResults.filter((item) => item.lineAssignment.status === "unknown").length,
+      },
       results: osmShadowResults,
     };
 
