@@ -131,18 +131,34 @@ export function assignTrainToOsmTrack(input: {
     return { status: "unknown", reason: "route-does-not-contain-relation-endpoints", candidates: [] };
   }
 
-  // Relation direction is not a separate physical track. Count all
-  // endpoint matches, but require them to identify exactly one selected way.
+  // First prefer relations whose OSM from/to order agrees with the train's
+  // ordered route. At a station, opposite-direction services can be mapped to
+  // different physical tracks; treating every endpoint match equally makes
+  // both tracks look valid for the same train.
+  //
+  // This is only a directional discriminator when several physical ways
+  // match. A single physical way remains valid in either travel direction.
   const uniqueWays = [...new Set(matches.map((match) => match.wayId))];
-  if (uniqueWays.length !== 1) {
-    return {
-      status: "ambiguous",
-      reason: "line-relation-matches-multiple-selected-tracks",
-      candidates: matches,
-    };
+  let assignedWayId: string;
+  if (uniqueWays.length === 1) {
+    assignedWayId = uniqueWays[0];
+  } else {
+    const forwardWays = [...new Set(
+      matches.filter((match) => match.direction === "from-to").map((match) => match.wayId)
+    )];
+    if (forwardWays.length !== 1) {
+      return {
+        status: "ambiguous",
+        reason: forwardWays.length > 1
+          ? "multiple-tracks-match-train-direction"
+          : "no-unique-track-matches-train-direction",
+        candidates: matches,
+      };
+    }
+    assignedWayId = forwardWays[0];
   }
 
-  const selectedWayMatches = matches.filter((match) => match.wayId === uniqueWays[0]);
+  const selectedWayMatches = matches.filter((match) => match.wayId === assignedWayId);
   const directions = [...new Set(selectedWayMatches.map((match) => match.direction))];
   const direction = directions.length === 1 ? directions[0] : undefined;
   const uniqueRelations = [...new Set(selectedWayMatches
@@ -152,7 +168,7 @@ export function assignTrainToOsmTrack(input: {
 
   return {
     status: "matched",
-    wayId: uniqueWays[0],
+    wayId: assignedWayId,
     relationId: uniqueRelations.length === 1 ? uniqueRelations[0] : undefined,
     lineRef: uniqueLineRefs.length === 1 ? uniqueLineRefs[0] : undefined,
     direction,
