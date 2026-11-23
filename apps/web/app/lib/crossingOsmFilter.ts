@@ -14,6 +14,7 @@ export type CrossingOsmFilterResult = {
   score?: number;
   railwayWayId?: string;
   ref?: string;
+  reason?: string;
 };
 
 type Mapping = {
@@ -319,7 +320,7 @@ function findCrossingOnPath(graph: CorridorGraph["graph"], pathNodes: string[], 
 }
 
 export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined, selectedWayIds?: string[]): Promise<CrossingOsmFilterResult> {
-  if (!route?.length) return { status: "unknown" };
+  if (!route?.length) return { status: "unknown", reason: "route-missing" };
   const selectedWays = selectedWayIds?.map(String).filter(Boolean) ?? [];
   const selectedWaySet = selectedWays.length ? new Set(selectedWays) : null;
   const resultKey = `${crossingId}|${selectedWays.slice().sort().join(",")}|${route.join("|")}`;
@@ -327,7 +328,8 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
   if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
   try {
     const [mapping, coordinateRoute] = await Promise.all([loadMappingCached(crossingId), routeToCoordinates(route)]);
-    if (!mapping || mapping.crossingNodeIds.size === 0) return { status: "unknown" };
+    if (!mapping) return { status: "unknown", reason: "crossing-osm-mapping-missing" };
+    if (mapping.crossingNodeIds.size === 0) return { status: "unknown", reason: "crossing-osm-node-missing" };
     if (!isTrainRouteNearCrossing({ lat: mapping.crossingLat, lon: mapping.crossingLon }, coordinateRoute)) {
       const result: CrossingOsmFilterResult = { status: "rejected" };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
@@ -335,9 +337,9 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       return result;
     }
     const corridor = await loadCorridorGraph(crossingId);
-    if (!corridor) return { status: "unknown" };
+    if (!corridor) return { status: "unknown", reason: "corridor-profile-unavailable" };
     const stations = coordinateRoute.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
-    if (stations.length < 2) return { status: "unknown" };
+    if (stations.length < 2) return { status: "unknown", reason: `route-stations-unresolved:${stations.length}/${coordinateRoute.length}` };
     const graph = corridor.graph;
     let best: { fromIndex: number; toIndex: number; pathDistance: number; crossingDistance: number; wayId?: string; ref?: string } | undefined;
     // A prepared corridor is local to the crossing. OpenBoards via lists can
@@ -374,7 +376,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     if (!best) {
       // With explicit user-selected tracks, an incomplete route/network match
       // is not evidence that the train uses another track.
-      if (selectedWaySet) return { status: "unknown" };
+      if (selectedWaySet) return { status: "unknown", reason: "no-network-path-through-crossing" };
       const result: CrossingOsmFilterResult = { status: "rejected" };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
       console.log(`[OSM MATCH] crossing=${crossingId} route=${route.join(" -> ")} result=REJECTED reason=no-network-path`);
@@ -388,7 +390,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     }
     const MAX_CROSSING_NODE_DISTANCE = 50;
     if (best.crossingDistance > MAX_CROSSING_NODE_DISTANCE) {
-      const result: CrossingOsmFilterResult = { status: "unknown", railwayWayId: best.wayId };
+      const result: CrossingOsmFilterResult = { status: "unknown", railwayWayId: best.wayId, reason: `crossing-node-too-far:${best.crossingDistance.toFixed(1)}m` };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
       console.log(`[OSM MATCH] crossing=${crossingId} result=UNKNOWN crossingDistance=${best.crossingDistance.toFixed(1)}m`);
       return result;
@@ -408,6 +410,6 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     return result;
   } catch (error) {
     console.error(`[OSM MATCH] crossing=${crossingId} failed:`, error);
-    return { status: "unknown" };
+    return { status: "unknown", reason: "osm-filter-exception" };
   }
 }
