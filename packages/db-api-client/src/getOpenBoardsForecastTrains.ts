@@ -137,7 +137,12 @@ export function getOpenBoardsForecastTrains(
         ...lineHints,
       ])) continue;
       if (!routeHasStation(observation, eva, String(rule.observationStation || ""))) continue;
-      const configuredAnchors = Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : [];\n      const routeAnchors = configuredAnchors.length >= 2 ? configuredAnchors : lineRouteAnchors(crossing, observation.line);\n      if (!hasOrderedRouteAnchors(observation, routeAnchors)) continue;
+      const configuredAnchors = Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : [];
+      const relationPairs = lineRouteAnchorPairs(crossing, observation.line);
+      const hasRouteEvidence = configuredAnchors.length >= 2
+        ? hasOrderedRouteAnchors(observation, configuredAnchors)
+        : relationPairs.some((pair) => hasOrderedRouteAnchors(observation, pair));
+      if (!hasRouteEvidence) continue;
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
       const crossingTime = new Date(eventAt + offset * 1000);
