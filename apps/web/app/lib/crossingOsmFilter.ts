@@ -318,9 +318,11 @@ function findCrossingOnPath(graph: CorridorGraph["graph"], pathNodes: string[], 
   return null;
 }
 
-export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined): Promise<CrossingOsmFilterResult> {
+export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined, selectedWayIds?: string[]): Promise<CrossingOsmFilterResult> {
   if (!route?.length) return { status: "unknown" };
-  const resultKey = `${crossingId}|${route.join("|")}`;
+  const selectedWays = selectedWayIds?.map(String).filter(Boolean) ?? [];
+  const selectedWaySet = selectedWays.length ? new Set(selectedWays) : null;
+  const resultKey = `${crossingId}|${selectedWays.slice().sort().join(",")}|${route.join("|")}`;
   const cachedResult = resultCache.get(resultKey);
   if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
   try {
@@ -359,7 +361,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
         if (path.nodes[i] !== crossingHit.nodeId) continue;
         const previousNode = path.nodes[i - 1];
         const edges = graph.adjacency.get(previousNode) ?? [];
-        const edge = edges.find((candidate) => candidate.to === crossingHit.nodeId && mapping.railwayWayIds.includes(candidate.wayId));
+        const edge = edges.find((candidate) => candidate.to === crossingHit.nodeId && mapping.railwayWayIds.includes(candidate.wayId) && (!selectedWaySet || selectedWaySet.has(String(candidate.wayId))));
         if (edge) { railwayWayId = edge.wayId; break; }
       }
       if (!railwayWayId) continue;
