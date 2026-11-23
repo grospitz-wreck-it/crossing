@@ -212,11 +212,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const trains:any[]=[];
 
-    // PRIMARY: only the explicitly declared reference station(s), read from the
-    // worker-fed Mobilithek snapshot. Automatically discovered observation EVAs
-    // are deliberately excluded.
-    const primarySnapshot=await getSnapshotPrimaryTrains(db,crossing);
-    const throughSnapshot=await getSnapshotThroughTrains(db,crossing);
+    // One bounded Mobilithek read feeds both primary-stop and through-route
+    // detection. The time index supports newest-first retrieval without sorting
+    // the full snapshot table; all candidate matching then happens in memory.
+    const snapshotFrom = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const snapshotTo = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
+    const snapshotResult = await db.execute({
+      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
+             FROM mobilithek_train_snapshot
+             WHERE actual_time >= ? AND actual_time <= ?
+             ORDER BY actual_time DESC
+             LIMIT 1500`,
+      args: [snapshotFrom, snapshotTo],
+    });
+    const snapshotRows = snapshotResult.rows as any[];
+
+    // PRIMARY: only explicitly declared reference stations.
+    const primarySnapshot=await getSnapshotPrimaryTrains(db,crossing,snapshotRows);
+    // SECONDARY: through candidates are derived from the exact same snapshot rows.
+    const throughSnapshot=await getSnapshotThroughTrains(db,crossing,snapshotRows);
     const realtimeEvas = Array.from(new Set([
       ...primaryEvas,
       ...(crossing.throughRules || []).map((rule: any) => String(rule.observationEva || "").trim()),
