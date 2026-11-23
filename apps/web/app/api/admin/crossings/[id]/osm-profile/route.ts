@@ -39,7 +39,7 @@ export async function POST(
 
     const result = await prepareCrossingOsmProfile(crossingId);
     if (!result.ok) {
-      const status = result.reason === "corridor-unavailable" ? 422 : 409;
+      const status = result.reason === "corridor-row-missing" ? 409 : 422;
       const messages: Record<string, string> = {
         "mapping-missing": "OSM-Zuordnung oder ausgewählte Gleise fehlen.",
         "no-ways-loaded": "Für die ausgewählten Gleise wurden keine gültigen OSM-Bahnwege im Datenbestand gefunden.",
