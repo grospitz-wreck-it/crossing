@@ -1,0 +1,54 @@
+name: OSM crossings import
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type RUN OSM IMPORT to import missing OSM links for active crossings'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osm-crossings-import
+  cancel-in-progress: false
+
+jobs:
+  import:
+    name: Import missing crossing infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require explicit confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          if [ "$CONFIRMATION" != "RUN OSM IMPORT" ]; then
+            echo "::error::Confirmation did not match. No database changes were made."
+            exit 1
+          fi
+
+      - name: Check out selected GitHub commit
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Import missing OSM links and corridors
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          if [ -z "$TURSO_DATABASE_URL" ] || [ -z "$TURSO_AUTH_TOKEN" ]; then
+            echo "::error::GitHub repository secrets TURSO_DATABASE_URL and/or TURSO_AUTH_TOKEN are missing."
+            exit 1
+          fi
+          node scripts/osm/import-level-crossings.mjs --all
