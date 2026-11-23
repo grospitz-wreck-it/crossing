@@ -411,6 +411,30 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       }),
       result: await filterTrainByCrossingOsm(crossing.id, train.route, selectedOsmWayIds.length ? selectedOsmWayIds : undefined),
     })));
+    const osmReasonCounts = osmShadowResults.reduce((counts: Record<string, number>, item: any) => {
+      const key = item.result.reason || item.result.status;
+      counts[key] = (counts[key] || 0) + 1;
+      return counts;
+    }, {});
+    console.log("[OSM DIAGNOSTIC]", {
+      crossingId: crossing.id,
+      selectedWayIds: selectedOsmWayIds,
+      snapshotRows: snapshotRows.length,
+      primaryCandidates: primarySnapshot.length,
+      throughCandidates: throughSnapshot.length,
+      openBoardsCandidates: openBoardsTrains.length,
+      evaluated: osmShadowResults.length,
+      reasonCounts: osmReasonCounts,
+      matchedExamples: osmShadowResults
+        .filter((item: any) => item.result.status === "matched")
+        .slice(0, 5)
+        .map((item: any) => ({ line: item.line, category: item.category, journeyNumber: item.journeyNumber, wayId: item.result.railwayWayId })),
+      unknownExamples: osmShadowResults
+        .filter((item: any) => item.result.status === "unknown")
+        .slice(0, 5)
+        .map((item: any) => ({ line: item.line, category: item.category, journeyNumber: item.journeyNumber, reason: item.result.reason })),
+    });
+
     // A selected OSM track is a hard physical assignment boundary.
     // Only a positive route through the selected crossing node on the selected
     // physical way may release a train into the forecast. OSM line relations are
