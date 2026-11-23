@@ -95,11 +95,11 @@ function directionForRoute(route: string[], observationStation: string, required
 }
 
 function lineHintsForCrossing(crossing: Crossing): string[] {
-  return Array.from(new Set(
-    (crossing.rules || []).flatMap((rule: any) =>
-      Array.isArray(rule?.lineHints) ? rule.lineHints.map(String) : []
-    )
-  )).filter(Boolean);
+  const rules: any = crossing.rules;
+  const hints = Array.isArray(rules)
+    ? rules.flatMap((rule: any) => Array.isArray(rule?.lineHints) ? rule.lineHints : [])
+    : Array.isArray(rules?.lineHints) ? rules.lineHints : [];
+  return Array.from(new Set(hints.map((value: unknown) => String(value || "").trim()))).filter(Boolean);
 }
 
 function ruleAllowsTrain(rule: any, train: { category?: string; line?: string }, lineHints: string[]) {
