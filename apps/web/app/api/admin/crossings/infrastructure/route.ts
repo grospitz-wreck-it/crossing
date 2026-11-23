@@ -30,28 +30,20 @@ async function queryOverpass(endpoint:string,query:string,timeoutMs:number) {
 async function fetchWays(lat:number,lon:number) {
   // First request only the physical track geometries. Route-relation lookups are
   // deliberately separate and optional: a slow relation endpoint must not hide the tracks.
-  const query=`[out:json][timeout:20];way(around:250,${lat},${lon})[railway~"^(rail|tram|light_rail)$"];out tags geom;`;
-  const errors:string[]=[];
-  for(const endpoint of ENDPOINTS) {
-    try {
-      const data=await queryOverpass(endpoint,query,22000);
-      return {elements:Array.isArray(data?.elements)?data.elements:[],errors};
-    } catch(error) { errors.push(`${new URL(endpoint).hostname}: ${error instanceof Error?error.message:String(error)}`); }
-  }
-  throw new Error(errors.join("; ") || "Keine Overpass-Antwort");
+  const query=`[out:json][timeout:14];way(around:250,${lat},${lon})[railway~"^(rail|tram|light_rail)$"];out tags geom;`;
+  const results=await Promise.allSettled(ENDPOINTS.map(endpoint=>queryOverpass(endpoint,query,16000)));
+  const success=results.find((result):result is PromiseFulfilledResult<any>=>result.status==="fulfilled");
+  if(success) return {elements:Array.isArray(success.value?.elements)?success.value.elements:[],errors:results.filter((r):r is PromiseRejectedResult=>r.status==="rejected").map(r=>String(r.reason?.message||r.reason))};
+  throw new Error(results.map(r=>r.status==="rejected"?String(r.reason?.message||r.reason):"").filter(Boolean).join("; ") || "Keine Overpass-Antwort");
 }
 async function fetchRelations(wayIds:number[]) {
   if(!wayIds.length) return {relations:[] as any[],errors:[] as string[]};
   const ids=wayIds.slice(0,80).join(",");
-  const query=`[out:json][timeout:8];way(id:${ids})->.localWays;rel(bw.localWays)[type=route][route~"^(train|tram|light_rail|railway|tracks)$"];out body;`;
-  const errors:string[]=[];
-  for(const endpoint of ENDPOINTS) {
-    try {
-      const data=await queryOverpass(endpoint,query,10000);
-      return {relations:(data?.elements||[]).filter((e:any)=>e?.type==="relation"),errors};
-    } catch(error) { errors.push(`${new URL(endpoint).hostname}: ${error instanceof Error?error.message:String(error)}`); }
-  }
-  return {relations:[] as any[],errors};
+  const query=`[out:json][timeout:5];way(id:${ids})->.localWays;rel(bw.localWays)[type=route][route~"^(train|tram|light_rail|railway|tracks)$"];out body;`;
+  const results=await Promise.allSettled(ENDPOINTS.map(endpoint=>queryOverpass(endpoint,query,6500)));
+  const success=results.find((result):result is PromiseFulfilledResult<any>=>result.status==="fulfilled");
+  if(success) return {relations:(success.value?.elements||[]).filter((e:any)=>e?.type==="relation"),errors:results.filter((r):r is PromiseRejectedResult=>r.status==="rejected").map(r=>String(r.reason?.message||r.reason))};
+  return {relations:[] as any[],errors:results.map(r=>r.status==="rejected"?String(r.reason?.message||r.reason):"").filter(Boolean)};
 }
 export async function GET(request:Request) {
   const params=new URL(request.url).searchParams,lat=Number(params.get("lat")),lon=Number(params.get("lon"));
