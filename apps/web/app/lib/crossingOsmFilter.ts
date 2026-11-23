@@ -361,7 +361,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
         if (path.nodes[i] !== crossingHit.nodeId) continue;
         const previousNode = path.nodes[i - 1];
         const edges = graph.adjacency.get(previousNode) ?? [];
-        const edge = edges.find((candidate) => candidate.to === crossingHit.nodeId && mapping.railwayWayIds.includes(candidate.wayId) && (!selectedWaySet || selectedWaySet.has(String(candidate.wayId))));
+        const edge = edges.find((candidate) => candidate.to === crossingHit.nodeId && mapping.railwayWayIds.includes(candidate.wayId));
         if (edge) { railwayWayId = edge.wayId; break; }
       }
       if (!railwayWayId) continue;
@@ -372,9 +372,18 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       }
     }
     if (!best) {
+      // With explicit user-selected tracks, an incomplete route/network match
+      // is not evidence that the train uses another track.
+      if (selectedWaySet) return { status: "unknown" };
       const result: CrossingOsmFilterResult = { status: "rejected" };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
       console.log(`[OSM MATCH] crossing=${crossingId} route=${route.join(" -> ")} result=REJECTED reason=no-network-path`);
+      return result;
+    }
+    if (selectedWaySet && best.wayId && !selectedWaySet.has(String(best.wayId))) {
+      const result: CrossingOsmFilterResult = { status: "rejected", railwayWayId: best.wayId, ref: best.ref };
+      resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
+      console.log(`[OSM MATCH] crossing=${crossingId} selected-track-mismatch matchedWay=${best.wayId} selected=${selectedWays.join(",")} result=REJECTED`);
       return result;
     }
     const MAX_CROSSING_NODE_DISTANCE = 50;
