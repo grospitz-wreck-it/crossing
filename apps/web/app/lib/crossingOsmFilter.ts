@@ -15,6 +15,10 @@ export type CrossingOsmFilterResult = {
   railwayWayId?: string;
   ref?: string;
   reason?: string;
+  diagnostics?: {
+    routeStations?: Array<{ name: string; nodeId: string | null; snapDistanceMeters: number | null }>;
+    crossingNodes?: Array<{ nodeId: string; presentInGraph: boolean; degree: number; selectedWayEdges: string[] }>;
+  };
 };
 
 type Mapping = {
@@ -458,8 +462,32 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     }
     if (!best) {
       // With explicit user-selected tracks, an incomplete route/network match
-      // is not evidence that the train uses another track.
-      if (selectedWaySet) return { status: "unknown", reason: "no-network-path-through-crossing" };
+      // is not evidence that the train uses another track. Include compact
+      // topology diagnostics so missing station snaps or disconnected crossing
+      // nodes can be distinguished without expanding the graph on a live request.
+      if (selectedWaySet) {
+        const routeStations = stations.map((station) => {
+          const snap = nearestNode(graph, { lat: station.lat, lon: station.lon }, 10_000);
+          return {
+            name: station.name,
+            nodeId: snap?.nodeId ?? null,
+            snapDistanceMeters: snap ? Math.round(snap.distance) : null,
+          };
+        });
+        const crossingNodes = [...mapping.crossingNodeIds].map((nodeId) => ({
+          nodeId,
+          presentInGraph: graph.nodePoints.has(nodeId),
+          degree: graph.adjacency.get(nodeId)?.length ?? 0,
+          selectedWayEdges: (graph.adjacency.get(nodeId) ?? [])
+            .filter((edge) => mapping.railwayWayIds.includes(edge.wayId))
+            .map((edge) => edge.wayId),
+        }));
+        return {
+          status: "unknown",
+          reason: "no-network-path-through-crossing",
+          diagnostics: { routeStations, crossingNodes },
+        };
+      }
       const result: CrossingOsmFilterResult = { status: "rejected" };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
       console.log(`[OSM MATCH] crossing=${crossingId} route=${route.join(" -> ")} result=REJECTED reason=no-network-path`);
