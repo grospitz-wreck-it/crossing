@@ -49,7 +49,7 @@ function explicitLineHintsForCrossing(crossing: any): string[] {
   const values = Array.isArray(rules)
     ? rules.flatMap((rule: any) => Array.isArray(rule?.lineHints) ? rule.lineHints : [])
     : Array.isArray(rules?.lineHints) ? rules.lineHints : [];
-  return Array.from(new Set(values.map((value: any) => String(value || "").trim()))).filter(Boolean);
+  return Array.from(new Set<string>(values.map((value: unknown) => String(value || "").trim()))).filter(Boolean);
 }
 function selectedOsmWayIdsForCrossing(crossing: any): string[] {
   const tracks = crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.selectedOsmTracks)
