@@ -99,7 +99,7 @@ function lineHintsForCrossing(crossing: Crossing): string[] {
   const hints = Array.isArray(rules)
     ? rules.flatMap((rule: any) => Array.isArray(rule?.lineHints) ? rule.lineHints : [])
     : Array.isArray(rules?.lineHints) ? rules.lineHints : [];
-  return Array.from(new Set(hints.map((value: unknown) => String(value || "").trim()))).filter(Boolean);
+  return Array.from(new Set<string>(hints.map((value: unknown) => String(value || "").trim()))).filter(Boolean);
 }
 
 function ruleAllowsTrain(rule: any, train: { category?: string; line?: string }, lineHints: string[]) {
