@@ -260,8 +260,23 @@ async function loadPreparedCorridorGraph(crossingId: string): Promise<CorridorGr
       args: [crossingId],
     });
     const row: any = result.rows[0];
-    if (!row || Number(row.profile_version) !== CORRIDOR_PROFILE_VERSION || !row.profile_json) return null;
-    return deserializeCorridorProfile(row.profile_json);
+    if (!row) {
+      console.warn(`[OSM PROFILE] crossing=${crossingId} missing corridor row`);
+      return null;
+    }
+    const storedVersion = Number(row.profile_version || 0);
+    if (storedVersion !== CORRIDOR_PROFILE_VERSION || !row.profile_json) {
+      console.warn(`[OSM PROFILE] crossing=${crossingId} unavailable storedVersion=${storedVersion} expectedVersion=${CORRIDOR_PROFILE_VERSION} hasJson=${Boolean(row.profile_json)}`);
+      return null;
+    }
+    const profile = deserializeCorridorProfile(row.profile_json);
+    if (!profile) {
+      const rawBytes = typeof row.profile_json === "string" ? new TextEncoder().encode(row.profile_json).length : 0;
+      console.warn(`[OSM PROFILE] crossing=${crossingId} invalid version=${storedVersion} bytes=${rawBytes}`);
+      return null;
+    }
+    console.log(`[OSM PROFILE] crossing=${crossingId} loaded version=${storedVersion} ways=${profile.wayIds.size} nodes=${profile.graph.nodePoints.size} edges=${[...profile.graph.adjacency.values()].reduce((sum, edges) => sum + edges.length, 0)}`);
+    return profile;
   } catch (error) {
     // Older databases may not have received the profile migration yet.
     console.warn(`[OSM PROFILE] crossing=${crossingId} prepared profile unavailable:`, error);
