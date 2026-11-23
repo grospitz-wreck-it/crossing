@@ -45,34 +45,40 @@ while (true) {
   const rows = result.rows;
   if (!rows.length) break;
 
-  const statements = [];
-  let batchWays = 0;
+  let pendingStatements = [];
+  let pendingWays = 0;
+
+  const flush = async () => {
+    if (!pendingStatements.length) return;
+    await db.batch(pendingStatements);
+    totalNodes += pendingStatements.length;
+    totalWays += pendingWays;
+    pendingStatements = [];
+    pendingWays = 0;
+  };
 
   for (const row of rows) {
     let nodes;
     try {
       nodes = JSON.parse(String(row.node_ids_json || "[]"));
     } catch {
-      console.warn("Skipping invalid node_ids_json for way:", row.osm_id);
-      continue;
+      throw new Error(`Invalid node_ids_json for way ${row.osm_id}; refusing to skip it.`);
     }
 
-    if (!Array.isArray(nodes) || nodes.length < 2) continue;
+    if (!Array.isArray(nodes) || nodes.length < 2) {
+      throw new Error(`Way ${row.osm_id} no longer has a valid node list; refusing to skip it.`);
+    }
 
     const wayId = Number(row.osm_id);
     if (!Number.isSafeInteger(wayId)) {
-      console.warn("Skipping invalid OSM way id:", row.osm_id);
-      continue;
+      throw new Error(`Invalid OSM way id: ${row.osm_id}`);
     }
 
-    let validWay = true;
     const wayStatements = [];
-
     for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
       const nodeId = Number(nodes[nodeIndex]);
       if (!Number.isSafeInteger(nodeId)) {
-        validWay = false;
-        break;
+        throw new Error(`Invalid node id in OSM way ${wayId} at index ${nodeIndex}`);
       }
 
       wayStatements.push({
@@ -87,33 +93,25 @@ while (true) {
       });
     }
 
-    if (!validWay) {
-      console.warn("Skipping way with invalid node id:", wayId);
-      continue;
+    // Never split a single Way across write batches. If a process stops,
+    // the next run can safely retry every Way that has no index rows.
+    if (
+      pendingStatements.length > 0 &&
+      pendingStatements.length + wayStatements.length > INSERT_BATCH_SIZE
+    ) {
+      await flush();
     }
 
-    statements.push(...wayStatements);
-    batchWays += 1;
+    pendingStatements.push(...wayStatements);
+    pendingWays += 1;
   }
 
-  for (let i = 0; i < statements.length; i += INSERT_BATCH_SIZE) {
-    const batch = statements.slice(i, i + INSERT_BATCH_SIZE);
-    await db.batch(batch);
-    totalNodes += batch.length;
-  }
-
-  if (batchWays === 0) {
-    throw new Error(
-      "No valid ways could be indexed in this batch; stopping to avoid an endless retry loop.",
-    );
-  }
-
-  totalWays += batchWays;
+  await flush();
 
   const elapsed = (Date.now() - startedAt) / 1000;
   console.log(
     `processed_ways=${totalWays} ` +
-    `batch_ways=${batchWays} ` +
+    `batch_rows=${rows.length} ` +
     `node_mappings_written=${totalNodes} ` +
     `elapsed=${elapsed.toFixed(1)}s`,
   );
