@@ -3,7 +3,20 @@ import { getStationTimetable } from "../../../../../../../../packages/db-api-cli
 import { getMobilithekTrainRegistry, type MobilithekTrainEvent } from "../../../../../../../../packages/db-api-client/src/mobilithekTimetable";
 import { loadCrossingOsmRoute, readCrossingForecastCache, writeCrossingForecastCache } from "../../../../../lib/crossingForecastCache";
 import { resolveClosureMergeGapSeconds, shouldMergeClosures } from "../../../../../lib/closureMerge";
-function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
+function parseJsonValue(value: unknown): any {
+  if (value == null || value === "") return null;
+  if (typeof value === "object") return value;
+  try { return JSON.parse(String(value)); } catch { return null; }
+}
+function jsonArray(value: unknown): any[] {
+  const parsed = parseJsonValue(value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+function jsonArrayOrSingleObject(value: unknown): any[] {
+  const parsed = parseJsonValue(value);
+  if (Array.isArray(parsed)) return parsed;
+  return parsed && typeof parsed === "object" ? [parsed] : [];
+}
 const MAX_DIRECT_OBSERVATION_STATIONS = 6;
 const MAX_RULE_STATIONS = 8;
 const FORECAST_TIMETABLE_HOURS = 1;
@@ -30,7 +43,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const osmRefs = Array.isArray(osmRoute?.railwayRefs) ? osmRoute.railwayRefs.map(String) : [];
   const infrastructureRefs = Array.from(new Set([...storedRouteStops.filter((value) => /^\d{2,6}$/.test(value)), ...osmRefs.filter((value) => /^\d{2,6}$/.test(value))]));
   const storedThroughRules = jsonArray(crossing.through_rules).slice(0, MAX_RULE_STATIONS);
-  const storedRules = jsonArray(crossing.rules);
+  // Historical crossing records may store a single rule object instead of
+  // the current array format. Normalize it before flatMap so one legacy row
+  // cannot crash the entire admin forecast endpoint.
+  const storedRules = jsonArrayOrSingleObject(crossing.rules);
+  if (crossing.rules && storedRules.length === 0) {
+    console.warn(`[ADMIN FORECAST] crossing=${id} has an invalid rules payload; ignoring it safely`);
+  }
   const explicitLineHints = Array.from(new Set(
     storedRules.flatMap((rule: any) =>
       Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
