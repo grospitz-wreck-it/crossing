@@ -8,7 +8,8 @@ import { crossings as staticCrossings } from "../../../../../../../packages/cros
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
 import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 
-function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
+function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { const parsed = value ? JSON.parse(String(value)) : []; return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
+function jsonValue(value: unknown, fallback: any = {}) { if (value && typeof value === "object") return value; try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; } }
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const linkedObservationEvas = stationRows.filter(s => !s.role || s.role === "observation" || s.role === "automatic" || s.role === "primary").map(s => String(s.eva || "").trim()).filter(Boolean);
   const observationEvas = linkedObservationEvas.length ? Array.from(new Set(linkedObservationEvas)) : jsonArray(row.observation_evas).map(String).filter(Boolean);
@@ -29,7 +30,7 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
     contextEvas: linkedContextEvas.length ? Array.from(new Set(linkedContextEvas)) : jsonArray(row.context_evas).map(String).filter(Boolean),
     requiredRouteStops: jsonArray(row.required_route_stops).map(String).filter(Boolean),
     lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20),
-    rules: jsonArray(row.rules),
+    rules: jsonValue(row.rules, {}),
     throughRules: sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva),
     diversionRules: jsonArray(row.diversion_rules), rerouteWatchRules: jsonArray(row.reroute_watch_rules), confidence: Number(row.confidence || 0.5)
   };
@@ -44,11 +45,16 @@ async function loadCrossing(id: string): Promise<any | null> {
   } catch (error) { console.error("[STATUS] loadCrossing failed:", error); return null; }
 }
 function explicitLineHintsForCrossing(crossing: any): string[] {
-  return Array.from(new Set(
-    jsonArray(crossing.rules).flatMap((rule: any) =>
-      Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
-    )
-  )).filter(Boolean);
+  const rules = crossing.rules;
+  const values = Array.isArray(rules)
+    ? rules.flatMap((rule: any) => Array.isArray(rule?.lineHints) ? rule.lineHints : [])
+    : Array.isArray(rules?.lineHints) ? rules.lineHints : [];
+  return Array.from(new Set(values.map((value: any) => String(value || "").trim()))).filter(Boolean);
+}
+function selectedOsmWayIdsForCrossing(crossing: any): string[] {
+  const tracks = crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.selectedOsmTracks)
+    ? crossing.rules.selectedOsmTracks : [];
+  return Array.from(new Set(tracks.map((track: any) => String(track?.wayId ?? "").trim()).filter(Boolean)));
 }
 function lineHintsForCrossing(crossing: any): string[] {
   const explicit = explicitLineHintsForCrossing(crossing);
@@ -309,10 +315,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     ])).values());
     const enrichedTrains = await addStationNames(db, unique);
 
-    // OSM shadow evaluation: compare the actual Mobilithek journey route with
-    // the prepared OSM corridor without changing the live forecast yet.
-    // Keep this deliberately bounded; missing profiles and ambiguous geometry
-    // remain "unknown" and never suppress an existing candidate.
+    // Evaluate each journey against this crossing's explicitly selected OSM ways.
+    // Unknown/ambiguous matches remain visible; only a confident mismatch is excluded.
     const osmShadowCandidates = Array.from(new Map(
       [
         ...(primarySnapshot || []),
@@ -322,15 +326,21 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
         .map((train: any) => [train.journeyRef || `${train.line}-${train.journeyNumber}-${train.route.join("|")}`, train]),
     ).values()).slice(0, 40);
+    const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => ({
       journeyRef: train.journeyRef || null,
       line: train.line,
       journeyNumber: train.journeyNumber,
       route: train.route,
-      result: await filterTrainByCrossingOsm(crossing.id, train.route),
+      result: await filterTrainByCrossingOsm(crossing.id, train.route, selectedOsmWayIds.length ? selectedOsmWayIds : undefined),
     })));
+    const rejectedJourneyRefs = new Set(osmShadowResults.filter((item) => item.result.status === "rejected" && item.journeyRef).map((item) => String(item.journeyRef)));
+    const osmFilteredTrains = selectedOsmWayIds.length
+      ? enrichedTrains.filter((train: any) => !train.journeyRef || !rejectedJourneyRefs.has(String(train.journeyRef)))
+      : enrichedTrains;
     const osmShadow = {
-      mode: "shadow",
+      mode: selectedOsmWayIds.length ? "selected-track-filter" : "corridor-diagnostic",
+      selectedWayIds: selectedOsmWayIds,
       evaluated: osmShadowResults.length,
       matched: osmShadowResults.filter((item) => item.result.status === "matched").length,
       rejected: osmShadowResults.filter((item) => item.result.status === "rejected").length,
@@ -338,7 +348,8 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       results: osmShadowResults,
     };
 
-    const payload=toPayload(crossing,enrichedTrains,lineHints);
+    const payload=toPayload(crossing,osmFilteredTrains,lineHints);
+    (payload as any).osmTrackFilter = { selectedWayIds: selectedOsmWayIds, evaluated: osmShadowResults.length, matched: osmShadow.matched, rejected: osmShadow.rejected, unknown: osmShadow.unknown, removedTrainCount: enrichedTrains.length - osmFilteredTrains.length };
     (payload as any).osmShadow = osmShadow;
     await writeCrossingForecastCache(cacheKey,payload);
     return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
