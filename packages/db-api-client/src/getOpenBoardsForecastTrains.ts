@@ -31,6 +31,25 @@ function routeHasStation(observation: OpenBoardsStationObservation, eva: string,
   }));
 }
 
+
+function lineRouteAnchors(crossing: any, line: string): string[] {
+  const key = (value: unknown) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const wanted = key(line);
+  if (!wanted) return [];
+  const tracks = Array.isArray(crossing.rules?.selectedOsmTracks)
+    ? crossing.rules.selectedOsmTracks
+    : [];
+  const anchors = tracks.flatMap((track: any) =>
+    (Array.isArray(track?.lineRelations) ? track.lineRelations : [])
+      .filter((relation: any) =>
+        String(relation?.routeType || "").toLowerCase() === "train" &&
+        key(relation?.ref) === wanted
+      )
+      .flatMap((relation: any) => [String(relation?.from || "").trim(), String(relation?.to || "").trim()])
+  ).filter(Boolean);
+  return [...new Set(anchors)];
+}
+
 function hasOrderedRouteAnchors(observation: OpenBoardsStationObservation, requiredStops: string[]): boolean {
   const anchors = requiredStops
     .filter((value) => !/^\d{2,7}$/.test(String(value).trim()))
@@ -116,7 +135,7 @@ export function getOpenBoardsForecastTrains(
         ...lineHints,
       ])) continue;
       if (!routeHasStation(observation, eva, String(rule.observationStation || ""))) continue;
-      if (!hasOrderedRouteAnchors(observation, crossing.requiredRouteStops || [])) continue;
+      const configuredAnchors = Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : [];\n      const routeAnchors = configuredAnchors.length >= 2 ? configuredAnchors : lineRouteAnchors(crossing, observation.line);\n      if (!hasOrderedRouteAnchors(observation, routeAnchors)) continue;
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
       const crossingTime = new Date(eventAt + offset * 1000);
