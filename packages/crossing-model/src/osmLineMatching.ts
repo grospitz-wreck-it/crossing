@@ -172,7 +172,9 @@ export function assignTrainToOsmTrack(input: {
     relationId: uniqueRelations.length === 1 ? uniqueRelations[0] : undefined,
     lineRef: uniqueLineRefs.length === 1 ? uniqueLineRefs[0] : undefined,
     direction,
-    reason: "unique-physical-way-line-relation-match",
+    reason: uniqueWays.length === 1
+      ? "unique-physical-way-line-relation-match"
+      : "unique-forward-physical-way-line-relation-match",
     candidates: matches,
   };
 }
