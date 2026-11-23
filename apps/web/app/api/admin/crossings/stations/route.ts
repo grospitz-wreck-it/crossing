@@ -44,23 +44,22 @@ function routeBBox(segments:Point[][],lat:number,lon:number,radiusKm:number){
   };
 }
 
-async function loadRoute(relationId:number,wayId:number){
-  const query=relationId>0?`[out:json][timeout:12];rel(${Math.trunc(relationId)});way(r);out geom;`:`[out:json][timeout:8];way(${Math.trunc(wayId)});out geom;`;
-  for(const endpoint of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
+async function loadRoute(wayIds:number[]){
+  const ids=wayIds.filter((id)=>Number.isFinite(id)&&id>0).slice(0,80);
+  if(!ids.length) return [];
+  const query=`[out:json][timeout:10];way(id:${ids.map((id)=>Math.trunc(id)).join(",")});out geom;`;
+  for(const endpoint of ["https://overpass.private.coffee/api/interpreter","https://ovp.dresel.systems/api/interpreter"]){
     try{
       const controller=new AbortController();
-      const timeout=setTimeout(()=>controller.abort(),13000);
+      const timeout=setTimeout(()=>controller.abort(),12000);
       try{
-        const response=await fetch(`${endpoint}?${new URLSearchParams({data:query})}`,{
-          cache:"no-store",signal:controller.signal,
-          headers:{accept:"application/json","user-agent":"Crossings/1.0 (meineschranke.com)"}
-        });
+        const response=await fetch(endpoint,{method:"POST",cache:"no-store",signal:controller.signal,headers:{accept:"application/json","content-type":"application/x-www-form-urlencoded;charset=UTF-8","user-agent":"Crossings/1.0 (meineschranke.com)"},body:new URLSearchParams({data:query}).toString()});
         if(!response.ok) continue;
         const data=await response.json();
         const segments=(data?.elements||[])
           .filter((e:any)=>e?.type==="way"&&Array.isArray(e?.geometry))
           .map((e:any)=>e.geometry.map((p:any)=>({lat:Number(p.lat),lon:Number(p.lon)})).filter((p:Point)=>Number.isFinite(p.lat)&&Number.isFinite(p.lon)))
-          .filter((s:Point[])=>s.length>=2);
+          .filter((segment:Point[])=>segment.length>=2);
         if(segments.length) return segments;
       }finally{clearTimeout(timeout);}
     }catch{}
@@ -70,11 +69,11 @@ async function loadRoute(relationId:number,wayId:number){
 
 export async function GET(request:Request){
   const {searchParams}=new URL(request.url);
-  const lat=Number(searchParams.get("lat")),lon=Number(searchParams.get("lon")),relationId=Number(searchParams.get("relationId")||0),wayId=Number(searchParams.get("wayId")||0);
-  if(!Number.isFinite(lat)||!Number.isFinite(lon)||!((Number.isFinite(relationId)&&relationId>0)||(Number.isFinite(wayId)&&wayId>0))){
+  const lat=Number(searchParams.get("lat")),lon=Number(searchParams.get("lon")),wayIds=(searchParams.get("wayIds")||String(searchParams.get("wayId")||"")).split(",").map((value)=>Number(value)).filter((value)=>Number.isFinite(value)&&value>0);
+  if(!Number.isFinite(lat)||!Number.isFinite(lon)||!wayIds.length){
     return NextResponse.json({status:"INVALID_REQUEST",stations:[]},{status:400});
   }
-  const segments=await loadRoute(relationId,wayId);
+  const segments=await loadRoute(wayIds);
   if(!segments.length) return NextResponse.json({status:"ROUTE_UNAVAILABLE",stations:[]},{status:502});
   const bbox=routeBBox(segments,lat,lon,80);
   try{
