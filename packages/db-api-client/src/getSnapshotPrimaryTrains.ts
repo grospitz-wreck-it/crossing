@@ -52,6 +52,7 @@ function refMatches(value: unknown, eva: string) {
 export async function getSnapshotPrimaryTrains(
   db: any,
   crossing: any,
+  snapshotRows?: any[],
 ): Promise<SnapshotPrimaryTrain[]> {
   const primaryEvas: string[] = Array.from(new Set<string>(
     (crossing.referenceStations || [])
@@ -73,23 +74,27 @@ export async function getSnapshotPrimaryTrains(
   );
 
   const now = Date.now();
-  // Snapshot actual_time is often the journey's first call, not the
-  // timestamp at the crossing. Long-distance services can start hours earlier
-  // and reach the reference station within the prediction window.
-  const from = new Date(now - 6 * 60 * 60_000).toISOString();
-  const to = new Date(now + 3 * 60 * 60_000).toISOString();
-
-  const result = await db.execute({
-    sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
-           FROM mobilithek_train_snapshot
-           WHERE actual_time >= ? AND actual_time <= ?
-           LIMIT 1500`,
-    args: [from, to],
-  });
+  // The status route may pass a shared, bounded snapshot read so primary and
+  // through candidates are derived from exactly the same set of journeys.
+  let rows = snapshotRows;
+  if (!rows) {
+    // Keep standalone callers compatible. The shared status path loads a wider
+    // 24h window once, because actual_time can describe the journey's first call.
+    const from = new Date(now - 6 * 60 * 60_000).toISOString();
+    const to = new Date(now + 3 * 60 * 60_000).toISOString();
+    const result = await db.execute({
+      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
+             FROM mobilithek_train_snapshot
+             WHERE actual_time >= ? AND actual_time <= ?
+             LIMIT 1500`,
+      args: [from, to],
+    });
+    rows = result.rows as any[];
+  }
 
   const candidates: SnapshotPrimaryTrain[] = [];
 
-  for (const row of result.rows as any[]) {
+  for (const row of rows || []) {
     const calls = parseJson(row.calls_json, []);
     if (!Array.isArray(calls) || !calls.length) continue;
 

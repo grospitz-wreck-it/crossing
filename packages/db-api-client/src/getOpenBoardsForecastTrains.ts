@@ -31,6 +31,27 @@ function routeHasStation(observation: OpenBoardsStationObservation, eva: string,
   }));
 }
 
+
+function lineRouteAnchorPairs(crossing: any, line: string): string[][] {
+  const key = (value: unknown) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const wanted = key(line);
+  if (!wanted) return [];
+  const tracks = Array.isArray(crossing.rules?.selectedOsmTracks)
+    ? crossing.rules.selectedOsmTracks
+    : [];
+  return tracks.flatMap((track: any) =>
+    (Array.isArray(track?.lineRelations) ? track.lineRelations : [])
+      .filter((relation: any) =>
+        String(relation?.routeType || "").toLowerCase() === "train" &&
+        key(relation?.ref) === wanted
+      )
+      .map((relation: any) => [
+        String(relation?.from || "").trim(),
+        String(relation?.to || "").trim(),
+      ])
+      .filter((pair: string[]) => pair[0] && pair[1] && normalize(pair[0]) !== normalize(pair[1]))
+  );
+}
 function hasOrderedRouteAnchors(observation: OpenBoardsStationObservation, requiredStops: string[]): boolean {
   const anchors = requiredStops
     .filter((value) => !/^\d{2,7}$/.test(String(value).trim()))
@@ -116,7 +137,12 @@ export function getOpenBoardsForecastTrains(
         ...lineHints,
       ])) continue;
       if (!routeHasStation(observation, eva, String(rule.observationStation || ""))) continue;
-      if (!hasOrderedRouteAnchors(observation, crossing.requiredRouteStops || [])) continue;
+      const configuredAnchors = Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : [];
+      const relationPairs = lineRouteAnchorPairs(crossing, observation.line);
+      const hasRouteEvidence = configuredAnchors.length >= 2
+        ? hasOrderedRouteAnchors(observation, configuredAnchors)
+        : relationPairs.some((pair) => hasOrderedRouteAnchors(observation, pair));
+      if (!hasRouteEvidence) continue;
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
       const crossingTime = new Date(eventAt + offset * 1000);

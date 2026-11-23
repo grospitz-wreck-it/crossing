@@ -18,11 +18,11 @@ function routeIndex(route: string[], station: string) { const target = normalize
 function isLocalTransitTrain(train: { line?: string; category?: string }) { const line = String(train.line || "").trim().toUpperCase(); const category = String(train.category || "").trim().toUpperCase(); return /^U\s*\d/.test(line) || /^(TRAM|STADTBAHN|LIGHT_RAIL|LIGHT RAIL|METRO|SUBWAY|STRAB|STB)/.test(category); }
 function infrastructureRouteRefs(crossing: Crossing): string[] { return (crossing.requiredRouteStops || []).map(String).map((value) => value.trim()).filter((value) => /^\d{2,6}$/.test(value)); }
 function lineHintsForCrossing(crossing: Crossing): string[] {
-  const explicit = Array.from(new Set(
-    (crossing.rules || []).flatMap((rule: any) =>
-      Array.isArray(rule?.lineHints) ? rule.lineHints.map(String) : []
-    )
-  )).filter(Boolean);
+  const rules: any = crossing.rules;
+  const values = Array.isArray(rules)
+    ? rules.flatMap((rule: any) => Array.isArray(rule?.lineHints) ? rule.lineHints : [])
+    : Array.isArray(rules?.lineHints) ? rules.lineHints : [];
+  const explicit = Array.from(new Set<string>(values.map((value: unknown) => String(value || "").trim()))).filter(Boolean);
   if (explicit.length) return explicit;
   const refs = infrastructureRouteRefs(crossing);
   if (refs.includes("2530") || /strecke\s*2530/i.test(String(crossing.name || ""))) return ["S28"];

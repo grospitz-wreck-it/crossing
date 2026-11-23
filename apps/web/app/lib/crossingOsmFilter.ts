@@ -14,6 +14,11 @@ export type CrossingOsmFilterResult = {
   score?: number;
   railwayWayId?: string;
   ref?: string;
+  reason?: string;
+  diagnostics?: {
+    routeStations?: Array<{ name: string; nodeId: string | null; snapDistanceMeters: number | null }>;
+    crossingNodes?: Array<{ nodeId: string; presentInGraph: boolean; degree: number; selectedWayEdges: string[] }>;
+  };
 };
 
 type Mapping = {
@@ -29,6 +34,7 @@ type Mapping = {
 type CorridorGraph = {
   graph: ReturnType<typeof buildRailGraph>;
   wayIds: Set<string>;
+  complete: true;
 };
 
 const CACHE_TTL_MS = 300_000;
@@ -86,27 +92,110 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
 }
 
 async function loadMapping(crossingId: string): Promise<Mapping | null> {
-  const linkResult = await db.execute({ sql: `SELECT crossing_id, osm_crossing_id, confidence FROM crossing_osm_links WHERE crossing_id = ? AND confidence >= 0.8 LIMIT 1`, args: [crossingId] });
+  const linkResult = await db.execute({
+    sql: `SELECT crossing_id, osm_crossing_id, confidence
+      FROM crossing_osm_links
+      WHERE crossing_id = ? AND confidence >= 0.8 LIMIT 1`,
+    args: [crossingId],
+  });
   const link: any = linkResult.rows[0];
   if (!link) return null;
+
   const osmCrossingId = Number(link.osm_crossing_id);
-  const crossingResult = await db.execute({ sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`, args: [osmCrossingId] });
+  if (!Number.isSafeInteger(osmCrossingId) || osmCrossingId <= 0) return null;
+
+  const [crossingResult, corridorResult] = await Promise.all([
+    db.execute({
+      sql: `SELECT lat, lon FROM osm_crossings WHERE osm_id = ? LIMIT 1`,
+      args: [osmCrossingId],
+    }),
+    db.execute({
+      sql: `SELECT railway_way_ids_json
+        FROM crossing_osm_corridors WHERE crossing_id = ? LIMIT 1`,
+      args: [crossingId],
+    }),
+  ]);
   const crossingRow: any = crossingResult.rows[0];
   if (!crossingRow) return null;
-  const tracksResult = await db.execute({ sql: `SELECT railway_way_id, crossing_node_index FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`, args: [osmCrossingId] });
-  const tracks = tracksResult.rows as any[];
-  console.log(`[OSM MAPPING DEBUG] crossing=${crossingId} osmCrossing=${osmCrossingId} tracks=${tracks.length} trackData=${JSON.stringify(tracks.map((track) => ({ railwayWayId: String(track.railway_way_id), crossingNodeIndex: Number(track.crossing_node_index) })))}`);
-  const railwayWayIds = tracks.map((row) => String(row.railway_way_id)).filter(Boolean);
-  if (!railwayWayIds.length) return null;
-  const crossingNodeIds = new Set<string>();
-  const nodeQueries = tracks.map((track) => ({ wayId: String(track.railway_way_id), index: Number(track.crossing_node_index) })).filter((track) => Number.isInteger(track.index) && track.index >= 0);
-  for (const track of nodeQueries) {
-    const nodeResult = await db.execute({ sql: `SELECT node_id FROM osm_rail_way_nodes WHERE railway_way_id = ? AND node_index = ? LIMIT 1`, args: [track.wayId, track.index] });
-    const node = nodeResult.rows[0] as any;
-    if (node?.node_id != null) crossingNodeIds.add(String(node.node_id));
+
+  // The linked OSM crossing ID is itself the OSM node ID.
+  const crossingNodeIds = new Set<string>([String(osmCrossingId)]);
+
+  // The corridor is the authoritative selected physical-track set. In
+  // particular, it may contain multiple adjacent ways for one multi-track BÜ.
+  let railwayWayIds: string[] = [];
+  const corridorRow: any = corridorResult.rows[0];
+  if (corridorRow?.railway_way_ids_json) {
+    try {
+      const parsed = JSON.parse(String(corridorRow.railway_way_ids_json));
+      if (Array.isArray(parsed)) {
+        railwayWayIds = [...new Set(parsed.map((value: unknown) => String(value).trim()).filter(Boolean))];
+      }
+    } catch (error) {
+      console.warn(`[OSM MAPPING] invalid corridor way list for crossing=${crossingId}:`, error);
+    }
   }
-  console.log(`[OSM MAPPING DEBUG] crossing=${crossingId} crossingNodes=${[...crossingNodeIds].join(",")} nodeCount=${crossingNodeIds.size}`);
-  return { crossingId: String(link.crossing_id), osmCrossingId, confidence: Number(link.confidence ?? 0), crossingLat: Number(crossingRow.lat), crossingLon: Number(crossingRow.lon), crossingNodeIds, railwayWayIds };
+
+  // A grouped multi-track corridor can contain one OSM crossing node per
+  // physical track. Recover those sibling nodes from the existing crossing
+  // index, constrained to the selected ways and the resolver's 12m grouping
+  // radius (+3m tolerance). This preserves both Nord/Süd node identities.
+  if (railwayWayIds.length) {
+    const latDelta = 15 / 110_000;
+    const lonDelta = 15 / (111_320 * Math.max(0.2, Math.cos(Number(crossingRow.lat) * Math.PI / 180)));
+    const placeholders = railwayWayIds.map(() => "?").join(",");
+    const siblingResult = await db.execute({
+      sql: `SELECT DISTINCT oc.osm_id, oc.lat, oc.lon
+        FROM osm_crossings oc
+        JOIN osm_crossing_rail_ways crw ON crw.crossing_osm_id = oc.osm_id
+        WHERE crw.railway_way_id IN (${placeholders})
+          AND oc.lat BETWEEN ? AND ?
+          AND oc.lon BETWEEN ? AND ?`,
+      args: [
+        ...railwayWayIds,
+        Number(crossingRow.lat) - latDelta,
+        Number(crossingRow.lat) + latDelta,
+        Number(crossingRow.lon) - lonDelta,
+        Number(crossingRow.lon) + lonDelta,
+      ],
+    });
+    for (const row of siblingResult.rows as any[]) {
+      const distance = distanceMeters(
+        { lat: Number(crossingRow.lat), lon: Number(crossingRow.lon) },
+        { lat: Number(row.lat), lon: Number(row.lon) },
+      );
+      if (Number.isFinite(distance) && distance <= 15) {
+        crossingNodeIds.add(String(row.osm_id));
+      }
+    }
+  }
+
+  // Backward compatibility for older links that predate corridor rows.
+  if (!railwayWayIds.length) {
+    const tracksResult = await db.execute({
+      sql: `SELECT railway_way_id FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
+      args: [osmCrossingId],
+    });
+    railwayWayIds = [...new Set((tracksResult.rows as any[])
+      .map((row) => String(row.railway_way_id || "").trim())
+      .filter(Boolean))];
+  }
+
+  console.log(
+    `[OSM MAPPING DEBUG] crossing=${crossingId} osmCrossing=${osmCrossingId} ` +
+    `crossingNodes=[${[...crossingNodeIds].join(",")}] ways=[${railwayWayIds.join(",")}]`,
+  );
+
+  if (!railwayWayIds.length) return null;
+  return {
+    crossingId: String(link.crossing_id),
+    osmCrossingId,
+    confidence: Number(link.confidence ?? 0),
+    crossingLat: Number(crossingRow.lat),
+    crossingLon: Number(crossingRow.lon),
+    crossingNodeIds,
+    railwayWayIds,
+  };
 }
 
 async function loadMappingCached(crossingId: string) {
@@ -121,19 +210,23 @@ async function loadMappingCached(crossingId: string) {
   return value;
 }
 
-const CORRIDOR_PROFILE_VERSION = 1;
+// Version 2 explicitly records that graph expansion reached a fixed point.
+ // Older profiles were allowed to persist even when expansion hit a safety
+ // limit; they must be rebuilt before they can produce a positive match.
+const CORRIDOR_PROFILE_VERSION = 2;
 
 type StoredCorridorProfile = {
   version: number;
   wayIds: string[];
   nodePoints: Array<[string, number, number]>;
   adjacency: Array<[string, Array<[string, number, string]>]>;
+  complete: true;
 };
 
 function deserializeCorridorProfile(raw: unknown): CorridorGraph | null {
   try {
     const profile = typeof raw === "string" ? JSON.parse(raw) : raw;
-    if (!profile || profile.version !== CORRIDOR_PROFILE_VERSION ||
+    if (!profile || profile.version !== CORRIDOR_PROFILE_VERSION || profile.complete !== true ||
         !Array.isArray(profile.wayIds) || !Array.isArray(profile.nodePoints) ||
         !Array.isArray(profile.adjacency)) return null;
     const nodePoints = new Map<string, GeoPoint>();
@@ -153,7 +246,8 @@ function deserializeCorridorProfile(raw: unknown): CorridorGraph | null {
       adjacency.set(String(entry[0]), edges);
     }
     if (!nodePoints.size || !adjacency.size) return null;
-    return { graph: { nodePoints, adjacency, wayIds: new Set(profile.wayIds.map(String)) }, wayIds: new Set(profile.wayIds.map(String)) };
+    const wayIds = new Set<string>((profile.wayIds as unknown[]).map((id) => String(id)));
+    return { graph: { nodePoints, adjacency, wayIds }, wayIds, complete: true };
   } catch {
     return null;
   }
@@ -185,6 +279,7 @@ export async function prepareCrossingOsmProfile(crossingId: string) {
   if (!corridor) return { ok: false as const, reason: "corridor-unavailable" };
   const profile: StoredCorridorProfile = {
     version: CORRIDOR_PROFILE_VERSION,
+    complete: true,
     wayIds: [...corridor.wayIds],
     nodePoints: [...corridor.graph.nodePoints.entries()].map(([id, point]) => [id, point.lat, point.lon] as [string, number, number]),
     adjacency: [...corridor.graph.adjacency.entries()].map(([id, edges]) => [
@@ -303,9 +398,18 @@ async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | n
   }
   const graph = buildRailGraph([...allRows.values()]);
   if (graph.nodePoints.size > MAX_GRAPH_NODES) expansionLimited = true;
-  const value: CorridorGraph = { graph, wayIds: graph.wayIds };
+
+  // A truncated graph can make a wrong route appear to be the only available
+  // route. Never persist or use it for a positive crossing assignment.
+  if (expansionLimited) {
+    corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: null });
+    console.warn(`[OSM GRAPH] crossing=${crossingId} incomplete; refusing profile ways=${graph.wayIds.size} nodes=${graph.nodePoints.size} rounds=${expansionRounds} frontier=${frontierWayIds.size}`);
+    return null;
+  }
+
+  const value: CorridorGraph = { graph, wayIds: graph.wayIds, complete: true };
   corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value });
-  console.log(`[OSM GRAPH] crossing=${crossingId} ways=${graph.wayIds.size} nodes=${graph.nodePoints.size} rounds=${expansionRounds} expandedWays=${expandedWays}${expansionLimited ? " expansion-limit" : ""}`);
+  console.log(`[OSM GRAPH] crossing=${crossingId} complete ways=${graph.wayIds.size} nodes=${graph.nodePoints.size} rounds=${expansionRounds} expandedWays=${expandedWays}`);
   return value;
 }
 
@@ -318,14 +422,40 @@ function findCrossingOnPath(graph: CorridorGraph["graph"], pathNodes: string[], 
   return null;
 }
 
-export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined): Promise<CrossingOsmFilterResult> {
-  if (!route?.length) return { status: "unknown" };
-  const resultKey = `${crossingId}|${route.join("|")}`;
+export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined, selectedWayIds?: string[]): Promise<CrossingOsmFilterResult> {
+  if (!route?.length) return { status: "unknown", reason: "route-missing" };
+  const selectedWays = selectedWayIds?.map(String).filter(Boolean) ?? [];
+  const selectedWaySet = selectedWays.length ? new Set(selectedWays) : null;
+  const resultKey = `${crossingId}|${selectedWays.slice().sort().join(",")}|${route.join("|")}`;
   const cachedResult = resultCache.get(resultKey);
   if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
   try {
     const [mapping, coordinateRoute] = await Promise.all([loadMappingCached(crossingId), routeToCoordinates(route)]);
-    if (!mapping || mapping.crossingNodeIds.size === 0) return { status: "unknown" };
+    if (!mapping) return { status: "unknown", reason: "crossing-osm-mapping-missing" };
+    if (mapping.crossingNodeIds.size === 0) return { status: "unknown", reason: "crossing-osm-node-missing" };
+
+    // The UI-selected physical ways and the persisted corridor must describe
+    // exactly the same infrastructure. A partial/stale selection is not a
+    // valid basis for a positive assignment.
+    if (selectedWaySet) {
+      const mappedWays = new Set(mapping.railwayWayIds.map(String));
+      const sameSelection = selectedWaySet.size === mappedWays.size &&
+        [...selectedWaySet].every((wayId) => mappedWays.has(wayId));
+      if (!sameSelection) {
+        return {
+          status: "unknown",
+          reason: "selected-track-corridor-mismatch",
+          diagnostics: {
+            crossingNodes: [...mapping.crossingNodeIds].map((nodeId) => ({
+              nodeId,
+              presentInGraph: false,
+              degree: 0,
+              selectedWayEdges: [],
+            })),
+          },
+        };
+      }
+    }
     if (!isTrainRouteNearCrossing({ lat: mapping.crossingLat, lon: mapping.crossingLon }, coordinateRoute)) {
       const result: CrossingOsmFilterResult = { status: "rejected" };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
@@ -333,11 +463,11 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       return result;
     }
     const corridor = await loadCorridorGraph(crossingId);
-    if (!corridor) return { status: "unknown" };
+    if (!corridor) return { status: "unknown", reason: "corridor-profile-unavailable" };
     const stations = coordinateRoute.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
-    if (stations.length < 2) return { status: "unknown" };
+    if (stations.length < 2) return { status: "unknown", reason: `route-stations-unresolved:${stations.length}/${coordinateRoute.length}` };
     const graph = corridor.graph;
-    let best: { fromIndex: number; toIndex: number; pathDistance: number; crossingDistance: number; wayId?: string; ref?: string } | undefined;
+    const crossingHits: Array<{ fromIndex: number; toIndex: number; pathDistance: number; crossingDistance: number; wayId: string; nodeId: string }> = [];
     // A prepared corridor is local to the crossing. OpenBoards via lists can
     // omit intermediate calls or return only partial route context, so the
     // immediately adjacent listed stops are not always both inside this graph.
@@ -354,30 +484,104 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       if (!path) continue;
       const crossingHit = findCrossingOnPath(graph, path.nodes, mapping.crossingNodeIds);
       if (!crossingHit) continue;
-      let railwayWayId: string | undefined;
-      for (let i = 1; i < path.nodes.length; i += 1) {
-        if (path.nodes[i] !== crossingHit.nodeId) continue;
-        const previousNode = path.nodes[i - 1];
-        const edges = graph.adjacency.get(previousNode) ?? [];
-        const edge = edges.find((candidate) => candidate.to === crossingHit.nodeId && mapping.railwayWayIds.includes(candidate.wayId));
-        if (edge) { railwayWayId = edge.wayId; break; }
+      const crossingPathIndex = crossingHit.index;
+      const adjacentSelectedWays = new Set<string>();
+      if (crossingPathIndex > 0) {
+        const previousNode = path.nodes[crossingPathIndex - 1];
+        for (const edge of graph.adjacency.get(previousNode) ?? []) {
+          if (edge.to === crossingHit.nodeId && mapping.railwayWayIds.includes(edge.wayId)) {
+            adjacentSelectedWays.add(edge.wayId);
+          }
+        }
       }
-      if (!railwayWayId) continue;
+      if (crossingPathIndex < path.nodes.length - 1) {
+        const nextNode = path.nodes[crossingPathIndex + 1];
+        for (const edge of graph.adjacency.get(crossingHit.nodeId) ?? []) {
+          if (edge.to === nextNode && mapping.railwayWayIds.includes(edge.wayId)) {
+            adjacentSelectedWays.add(edge.wayId);
+          }
+        }
+      }
+      // A route may enter and leave a crossing node through two different
+      // selected ways. Without a topology-level continuation proof, that is
+      // not enough to identify one physical track.
+      if (adjacentSelectedWays.size !== 1) continue;
+      const railwayWayId = [...adjacentSelectedWays][0];
       const graphPoint = graph.nodePoints.get(crossingHit.nodeId);
       if (!graphPoint) continue;
       const crossingDistance = distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, graphPoint);
-      if (!best || crossingDistance < best.crossingDistance) best = { fromIndex, toIndex, pathDistance: path.distance, crossingDistance, wayId: railwayWayId };
+      crossingHits.push({ fromIndex, toIndex, pathDistance: path.distance, crossingDistance, wayId: railwayWayId, nodeId: crossingHit.nodeId });
       }
     }
-    if (!best) {
+    if (!crossingHits.length) {
+      // With explicit user-selected tracks, an incomplete route/network match
+      // is not evidence that the train uses another track. Include compact
+      // topology diagnostics so missing station snaps or disconnected crossing
+      // nodes can be distinguished without expanding the graph on a live request.
+      if (selectedWaySet) {
+        const routeStations = stations.map((station) => {
+          const snap = nearestNode(graph, { lat: station.lat, lon: station.lon }, 10_000);
+          return {
+            name: station.name,
+            nodeId: snap?.nodeId ?? null,
+            snapDistanceMeters: snap ? Math.round(snap.distance) : null,
+          };
+        });
+        const crossingNodes = [...mapping.crossingNodeIds].map((nodeId) => ({
+          nodeId,
+          presentInGraph: graph.nodePoints.has(nodeId),
+          degree: graph.adjacency.get(nodeId)?.length ?? 0,
+          selectedWayEdges: (graph.adjacency.get(nodeId) ?? [])
+            .filter((edge) => mapping.railwayWayIds.includes(edge.wayId))
+            .map((edge) => edge.wayId),
+        }));
+        return {
+          status: "unknown",
+          reason: "no-network-path-through-crossing",
+          diagnostics: { routeStations, crossingNodes },
+        };
+      }
       const result: CrossingOsmFilterResult = { status: "rejected" };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
       console.log(`[OSM MATCH] crossing=${crossingId} route=${route.join(" -> ")} result=REJECTED reason=no-network-path`);
       return result;
     }
+    // Several ordered station pairs can produce a crossing path. If they
+    // imply different physical selected ways, the available stop sequence
+    // does not identify one track uniquely. Do not pick whichever happens
+    // to have the closest OSM crossing coordinate.
+    const candidateWayIds = [...new Set(crossingHits.map((hit) => hit.wayId))];
+    if (candidateWayIds.length !== 1) {
+      return {
+        status: "unknown",
+        reason: "ambiguous-track-paths",
+        diagnostics: {
+          routeStations: stations.map((station) => {
+            const snap = nearestNode(graph, { lat: station.lat, lon: station.lon }, 10_000);
+            return { name: station.name, nodeId: snap?.nodeId ?? null, snapDistanceMeters: snap ? Math.round(snap.distance) : null };
+          }),
+          crossingNodes: [...mapping.crossingNodeIds].map((nodeId) => ({
+            nodeId,
+            presentInGraph: graph.nodePoints.has(nodeId),
+            degree: graph.adjacency.get(nodeId)?.length ?? 0,
+            selectedWayEdges: (graph.adjacency.get(nodeId) ?? [])
+              .filter((edge) => mapping.railwayWayIds.includes(edge.wayId))
+              .map((edge) => edge.wayId),
+          })),
+        },
+      };
+    }
+
+    const best = crossingHits.sort((a, b) => a.crossingDistance - b.crossingDistance)[0];
+    if (selectedWaySet && !selectedWaySet.has(String(best.wayId))) {
+      const result: CrossingOsmFilterResult = { status: "rejected", railwayWayId: best.wayId };
+      resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
+      console.log(`[OSM MATCH] crossing=${crossingId} selected-track-mismatch matchedWay=${best.wayId} selected=${selectedWays.join(",")} result=REJECTED`);
+      return result;
+    }
     const MAX_CROSSING_NODE_DISTANCE = 50;
     if (best.crossingDistance > MAX_CROSSING_NODE_DISTANCE) {
-      const result: CrossingOsmFilterResult = { status: "unknown", railwayWayId: best.wayId };
+      const result: CrossingOsmFilterResult = { status: "unknown", railwayWayId: best.wayId, reason: `crossing-node-too-far:${best.crossingDistance.toFixed(1)}m` };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
       console.log(`[OSM MATCH] crossing=${crossingId} result=UNKNOWN crossingDistance=${best.crossingDistance.toFixed(1)}m`);
       return result;
@@ -397,6 +601,6 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     return result;
   } catch (error) {
     console.error(`[OSM MATCH] crossing=${crossingId} failed:`, error);
-    return { status: "unknown" };
+    return { status: "unknown", reason: "osm-filter-exception" };
   }
 }

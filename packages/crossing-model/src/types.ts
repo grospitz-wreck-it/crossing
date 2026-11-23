@@ -33,6 +33,30 @@ export type RerouteWatchRule = {
   direction: "eastbound" | "westbound" | "unknown";
 };
 
+export type CrossingOsmTrack = {
+  wayId: number;
+  ref?: string;
+  name?: string;
+  distanceMeters?: number;
+  lineRelations?: Array<{ id: number; ref?: string; name?: string; routeType?: string }>;
+  segments?: Array<Array<{ lat: number; lon: number }>>;
+};
+
+export type CrossingOsmRules = {
+  lineHints?: string[];
+  selectedOsmTracks?: CrossingOsmTrack[];
+  observationStations?: Array<{
+    eva: string;
+    stationName?: string;
+    side?: "before" | "after";
+    distanceKm?: number;
+    trackDistanceMeters?: number;
+    fallbackOffsetSeconds?: number;
+    lat?: number;
+    lon?: number;
+  }>;
+};
+
 export type Crossing = {
   id: string;
   name: string;
@@ -43,7 +67,9 @@ export type Crossing = {
   lon: number;
   closeOffsetSeconds: number;
   openOffsetSeconds: number;
-  rules?: CrossingRule[];
+  rules?: CrossingRule[] | CrossingOsmRules;
+  /** Platform-specific barrier timing, kept separate from OSM selection rules. */
+  platformRules?: CrossingRule[];
   throughRules?: ThroughRule[];
   diversionRules?: DiversionRule[];
   rerouteWatchRules?: RerouteWatchRule[];

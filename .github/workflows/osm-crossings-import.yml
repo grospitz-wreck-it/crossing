@@ -1,11 +1,23 @@
-name: OSM crossings import
+name: OSM crossings infrastructure
 
 on:
   workflow_dispatch:
     inputs:
-      confirmation:
-        description: 'Type RUN OSM IMPORT to import missing OSM links for active crossings'
+      operation:
+        description: 'Choose the OSM operation'
         required: true
+        type: choice
+        options:
+          - resolve-local
+          - import-all
+      confirmation:
+        description: 'Type RUN OSM IMPORT to allow database changes'
+        required: true
+        type: string
+      source_branch:
+        description: 'Branch whose code should run'
+        required: true
+        default: 'main'
         type: string
 
 permissions:
@@ -16,8 +28,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  import:
-    name: Import missing crossing infrastructure
+  run:
+    name: Run selected OSM infrastructure operation
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -30,19 +42,21 @@ jobs:
             exit 1
           fi
 
-      - name: Check out selected GitHub commit
+      - name: Check out selected source branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_branch }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Import missing OSM links and corridors
+      - name: Validate required Turso credentials
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
@@ -51,4 +65,17 @@ jobs:
             echo "::error::GitHub repository secrets TURSO_DATABASE_URL and/or TURSO_AUTH_TOKEN are missing."
             exit 1
           fi
-          node scripts/osm/import-level-crossings.mjs --all
+
+      - name: Resolve missing OSM links from local network
+        if: inputs.operation == 'resolve-local'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node scripts/osm/resolve-local-crossing-links.mjs
+
+      - name: Import missing OSM links and corridors
+        if: inputs.operation == 'import-all'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: node scripts/osm/import-level-crossings.mjs --all

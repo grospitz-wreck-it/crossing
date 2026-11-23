@@ -24,6 +24,7 @@ function parseArgs() {
     const arg = args[i];
     if (arg === "--bbox") result.bbox = args[++i];
     if (arg === "--crossing") result.crossingId = args[++i];
+    if (arg === "--all") result.all = true;
   }
   return result;
 }
@@ -139,9 +140,13 @@ async function upsertRailWay(way) {
   });
 }
 
-async function linkCrossingWays(crossing, crossingWays) {
+async function linkCrossingWays(crossing, crossingWays, { indexNodes = true } = {}) {
   await upsertCrossing(crossing);
-  for (const way of crossingWays) {
+  const linkedWays = crossingWays.filter(
+    (way) => Array.isArray(way.nodes) && way.nodes.includes(crossing.id),
+  );
+
+  for (const way of linkedWays) {
     if (!Array.isArray(way.nodes) || !way.nodes.includes(crossing.id)) continue;
     const index = way.nodes.indexOf(crossing.id);
     await upsertRailWay(way);
@@ -156,7 +161,15 @@ async function linkCrossingWays(crossing, crossingWays) {
       args: [crossing.id, way.id, index, index === 0 ? "forward" : index === way.nodes.length - 1 ? "backward" : "both"],
     });
   }
-  console.log(`OSM ${crossing.id}: ${crossingWays.length} railway ways`);
+
+  // Single-crossing imports do not pass through the nationwide network importer.
+  // Keep their Ways connected to the shared node index as well.
+  if (indexNodes && linkedWays.length) {
+    const indexedNodes = await upsertRailWayNodeIndex(linkedWays);
+    console.log(`OSM ${crossing.id}: indexed ${indexedNodes} node mappings`);
+  }
+
+  console.log(`OSM ${crossing.id}: ${linkedWays.length} railway ways`);
 }
 
 
@@ -214,7 +227,7 @@ async function importNetworkPayload(payload) {
 
   for (const crossing of crossings) {
     const crossingWays = waysByNode.get(String(crossing.id)) ?? [];
-    await linkCrossingWays(crossing, crossingWays);
+    await linkCrossingWays(crossing, crossingWays, { indexNodes: false });
   }
 
   return {
@@ -379,16 +392,84 @@ async function importSingleCrossing(crossingId) {
 
   osmCrossings.sort((a, b) => Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(a.lat), Number(a.lon))) - Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(b.lat), Number(b.lon))));
   const osmCrossing = osmCrossings[0];
+  const distanceMeters = Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(osmCrossing.lat), Number(osmCrossing.lon)));
+  const secondDistance = osmCrossings[1]
+    ? Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(osmCrossings[1].lat), Number(osmCrossings[1].lon)))
+    : Infinity;
+  if (distanceMeters > 80 || secondDistance - distanceMeters < 10) {
+    throw new Error(`Ambiguous OSM crossing for ${crossing.name}: nearest=${distanceMeters.toFixed(1)}m, second=${Number.isFinite(secondDistance) ? secondDistance.toFixed(1) + "m" : "none"}; manual review required`);
+  }
+
+  const occupied = await db.execute({
+    sql: `SELECT crossing_id FROM crossing_osm_links WHERE osm_crossing_id = ? AND crossing_id <> ? LIMIT 1`,
+    args: [Number(osmCrossing.id), crossingId],
+  });
+  if (occupied.rows.length) {
+    throw new Error(`OSM crossing ${osmCrossing.id} is already linked to another crossing; refusing duplicate assignment`);
+  }
+
+  const confidence = distanceMeters <= 20 ? 0.99 : 0.9;
+  await db.execute({
+    sql: `INSERT INTO crossing_osm_links (crossing_id, osm_crossing_id, match_method, confidence, updated_at)
+      VALUES (?, ?, 'nearest_unique_local', ?, datetime('now'))
+      ON CONFLICT(crossing_id) DO UPDATE SET osm_crossing_id=excluded.osm_crossing_id,
+      match_method=excluded.match_method, confidence=excluded.confidence, updated_at=excluded.updated_at`,
+    args: [crossingId, Number(osmCrossing.id), confidence],
+  });
+
   const ways = (detail.elements ?? []).filter((e) => e.type === "way" && e.tags?.railway === "rail");
   await linkCrossingWays(osmCrossing, ways);
   await saveCrossingCorridor(crossingId, osmCrossing.id, ways);
-  console.log(`OSM candidate for ${crossing.name}: ${osmCrossing.id}`);
+  console.log(`OSM LINK ${crossing.name} -> ${osmCrossing.id} distance=${distanceMeters.toFixed(1)}m confidence=${confidence}`);
+}
+
+async function importAllCrossings() {
+  const result = await db.execute({
+    sql: `SELECT
+      c.id,
+      c.name,
+      l.osm_crossing_id,
+      cr.crossing_id AS corridor_crossing_id
+    FROM crossings c
+    LEFT JOIN crossing_osm_links l ON l.crossing_id = c.id
+    LEFT JOIN crossing_osm_corridors cr ON cr.crossing_id = c.id
+    WHERE c.status = 'active'
+    ORDER BY c.name`,
+    args: [],
+  });
+  let imported = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const row of result.rows) {
+    // A linked crossing with a corridor already has its OSM source data.
+    // Do not re-import it here: saveCrossingCorridor invalidates prepared
+    // profiles, which must only happen when the underlying corridor changes.
+    if (row.osm_crossing_id && row.corridor_crossing_id) {
+      skipped += 1;
+      console.log(`SKIP ${row.name}: OSM link and corridor already exist`);
+      continue;
+    }
+    try {
+      await importSingleCrossing(String(row.id));
+      imported += 1;
+    } catch (error) {
+      failed += 1;
+      console.error(`REVIEW ${row.name} (${row.id}):`, error instanceof Error ? error.message : error);
+    }
+  }
+  console.log(`OSM BULK COMPLETE: imported=${imported} skipped_existing=${skipped} failed_or_review=${failed} total=${result.rows.length}`);
+  return { imported, skipped, failed, total: result.rows.length };
 }
 
 async function main() {
-  const { bbox, crossingId } = parseArgs();
+  const { bbox, crossingId, all } = parseArgs();
   await ensureSchema();
-  if (crossingId) {
+  if (all) {
+    const summary = await importAllCrossings();
+    if (summary.failed > 0) {
+      throw new Error(`${summary.failed} crossing(s) need manual review; see log entries above`);
+    }
+  } else if (crossingId) {
     await importSingleCrossing(crossingId);
   } else {
     const stats = await importByBbox(parseBbox(bbox));
