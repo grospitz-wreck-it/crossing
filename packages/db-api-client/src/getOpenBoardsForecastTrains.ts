@@ -32,24 +32,26 @@ function routeHasStation(observation: OpenBoardsStationObservation, eva: string,
 }
 
 
-function lineRouteAnchors(crossing: any, line: string): string[] {
+function lineRouteAnchorPairs(crossing: any, line: string): string[][] {
   const key = (value: unknown) => String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const wanted = key(line);
   if (!wanted) return [];
   const tracks = Array.isArray(crossing.rules?.selectedOsmTracks)
     ? crossing.rules.selectedOsmTracks
     : [];
-  const anchors = tracks.flatMap((track: any) =>
+  return tracks.flatMap((track: any) =>
     (Array.isArray(track?.lineRelations) ? track.lineRelations : [])
       .filter((relation: any) =>
         String(relation?.routeType || "").toLowerCase() === "train" &&
         key(relation?.ref) === wanted
       )
-      .flatMap((relation: any) => [String(relation?.from || "").trim(), String(relation?.to || "").trim()])
-  ).filter(Boolean);
-  return [...new Set(anchors)];
+      .map((relation: any) => [
+        String(relation?.from || "").trim(),
+        String(relation?.to || "").trim(),
+      ])
+      .filter((pair: string[]) => pair[0] && pair[1] && normalize(pair[0]) !== normalize(pair[1]))
+  );
 }
-
 function hasOrderedRouteAnchors(observation: OpenBoardsStationObservation, requiredStops: string[]): boolean {
   const anchors = requiredStops
     .filter((value) => !/^\d{2,7}$/.test(String(value).trim()))
