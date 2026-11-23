@@ -246,7 +246,7 @@ function deserializeCorridorProfile(raw: unknown): CorridorGraph | null {
       adjacency.set(String(entry[0]), edges);
     }
     if (!nodePoints.size || !adjacency.size) return null;
-    const wayIds = new Set(profile.wayIds.map(String));
+    const wayIds = new Set<string>((profile.wayIds as unknown[]).map((id) => String(id)));
     return { graph: { nodePoints, adjacency, wayIds }, wayIds, complete: true };
   } catch {
     return null;
