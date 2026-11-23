@@ -350,9 +350,35 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       }),
       result: await filterTrainByCrossingOsm(crossing.id, train.route, selectedOsmWayIds.length ? selectedOsmWayIds : undefined),
     })));
-    const rejectedJourneyRefs = new Set(osmShadowResults.filter((item) => item.result.status === "rejected" && item.journeyRef).map((item) => String(item.journeyRef)));
+    // A selected OSM track is a hard assignment boundary, not just a diagnostic.
+    // A train is forecast for this crossing only when its ordered route is
+    // positively matched to this crossing's selected track, either by the
+    // physical rail graph or by a unique directional OSM line-relation match.
+    // Unknown/ambiguous routes are not assigned to a crossing: keeping them in
+    // both adjacent BÜ forecasts would create exactly the cross-track leakage
+    // this filter is intended to prevent.
+    const trackResultByJourney = new Map(
+      osmShadowResults
+        .filter((item) => item.journeyRef)
+        .map((item) => [String(item.journeyRef), item]),
+    );
+    const rejectedJourneyRefs = new Set(osmShadowResults
+      .filter((item) => item.journeyRef && item.result.status === "rejected")
+      .map((item) => String(item.journeyRef)));
+    const assignedJourneyRefs = new Set(osmShadowResults
+      .filter((item) => item.journeyRef && (
+        item.result.status === "matched" ||
+        (item.lineAssignment.status === "matched" &&
+          selectedOsmWayIds.includes(String(item.lineAssignment.wayId)))
+      ))
+      .map((item) => String(item.journeyRef)));
     const osmFilteredTrains = selectedOsmWayIds.length
-      ? enrichedTrains.filter((train: any) => !train.journeyRef || !rejectedJourneyRefs.has(String(train.journeyRef)))
+      ? enrichedTrains.filter((train: any) => {
+          if (!train.journeyRef) return false;
+          const journeyRef = String(train.journeyRef);
+          if (rejectedJourneyRefs.has(journeyRef)) return false;
+          return assignedJourneyRefs.has(journeyRef);
+        })
       : enrichedTrains;
     const osmShadow = {
       mode: selectedOsmWayIds.length ? "selected-track-filter" : "corridor-diagnostic",
@@ -361,6 +387,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       matched: osmShadowResults.filter((item) => item.result.status === "matched").length,
       rejected: osmShadowResults.filter((item) => item.result.status === "rejected").length,
       unknown: osmShadowResults.filter((item) => item.result.status === "unknown").length,
+      assignedToSelectedTrack: assignedJourneyRefs.size,
+      unassignedExcluded: selectedOsmWayIds.length
+        ? osmShadowResults.filter((item) => item.journeyRef && !assignedJourneyRefs.has(String(item.journeyRef))).length
+        : 0,
       lineAssignmentSummary: {
         matched: osmShadowResults.filter((item) => item.lineAssignment.status === "matched").length,
         ambiguous: osmShadowResults.filter((item) => item.lineAssignment.status === "ambiguous").length,
