@@ -421,7 +421,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       selectedWayIds: selectedOsmWayIds,
       snapshotRows: snapshotRows.length,
       primaryCandidates: primarySnapshot.length,
-      throughCandidates: throughSnapshot.length,
+      throughCandidates: (throughSnapshot || []).length,
       openBoardsCandidates: openBoardsTrains.length,
       evaluated: osmShadowResults.length,
       reasonCounts: osmReasonCounts,
