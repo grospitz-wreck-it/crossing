@@ -6,6 +6,7 @@ import { getOpenBoardsForecastTrains } from "../../../../../../../packages/db-ap
 import { getCrossingDirection } from "../../../../../../../packages/prediction-engine/src/getCrossingDirection";
 import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
+import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { return value ? JSON.parse(String(value)) : []; } catch { return []; } }
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
@@ -60,6 +61,43 @@ function normalizeTrainKey(value: unknown): string {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+async function addStationNames(db: any, trains: any[]) {
+  const evas = Array.from(new Set(
+    trains.flatMap((train) => [train.destination, train.origin])
+      .map((value) => String(value || "").trim())
+      .filter((value) => /^\d{7}$/.test(value)),
+  ));
+  if (!evas.length) return trains;
+
+  try {
+    const result = await db.execute({
+      sql: `SELECT eva, name FROM railway_station_catalog WHERE eva IN (${evas.map(() => "?").join(",")})`,
+      args: evas,
+    });
+    const names = new Map((result.rows as any[]).map((row) => [
+      String(row.eva || "").trim(),
+      String(row.name || "").trim(),
+    ]));
+    return trains.map((train) => {
+      const destination = String(train.destination || "").trim();
+      const origin = String(train.origin || "").trim();
+      const destinationName = names.get(destination) || destination;
+      const originName = names.get(origin) || origin;
+      return {
+        ...train,
+        destination: destinationName || train.destination,
+        origin: originName || train.origin,
+        directionLabel: destinationName && /^\d{7}$/.test(destination)
+          ? `Richtung ${destinationName}`
+          : train.directionLabel,
+      };
+    });
+  } catch (error) {
+    console.warn("[STATUS] station-name lookup failed:", error);
+    return trains;
+  }
+}
+
 function matchOpenBoardsReal(
   candidate: { stationEva: string; line: string; journeyNumber: number; scheduledTime?: string },
   observations: any[],
@@ -92,7 +130,7 @@ function matchOpenBoardsReal(
 function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   const now=Date.now(); trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
   const closures:any[]=[];
-  for(const train of trains.filter(t=>Date.parse(t.crossingTime)>now)) { const t=Date.parse(train.crossingTime); const start=new Date(t-crossing.closeOffsetSeconds*1000),end=new Date(t+crossing.openOffsetSeconds*1000); const last=closures[closures.length-1]; if(!last||start.getTime()>last.end.getTime()+30000)closures.push({start,end,trains:[train]});else{if(end>last.end)last.end=end;last.trains.push(train);} }
+  for(const train of trains.filter(t=>Date.parse(t.crossingTime) + crossing.openOffsetSeconds * 1000 > now)) { const t=Date.parse(train.crossingTime); const start=new Date(t-crossing.closeOffsetSeconds*1000),end=new Date(t+crossing.openOffsetSeconds*1000); const last=closures[closures.length-1]; if(!last||start.getTime()>last.end.getTime()+30000)closures.push({start,end,trains:[train]});else{if(end>last.end)last.end=end;last.trains.push(train);} }
   // The snapshot source covers up to three hours ahead. Return that same horizon
   // to the UI; otherwise valid trains disappear between the hero and the later list.
   const forecastHorizonMs = 3 * 60 * 60 * 1000;
@@ -259,6 +297,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
           crossingTime: candidate.crossingTime,
           realtimeSource: candidate.realtimeSource,
           realtimeTimeType: candidate.realtimeTimeType,
+          delayMinutes: candidate.delayMinutes,
         };
       } else {
         combined.push(candidate);
@@ -268,7 +307,39 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       t.journeyRef || `${t.line}-${t.category}-${t.journeyNumber}-${t.origin || ""}-${t.destination || ""}`,
       t,
     ])).values());
-    const payload=toPayload(crossing,unique,lineHints);
+    const enrichedTrains = await addStationNames(db, unique);
+
+    // OSM shadow evaluation: compare the actual Mobilithek journey route with
+    // the prepared OSM corridor without changing the live forecast yet.
+    // Keep this deliberately bounded; missing profiles and ambiguous geometry
+    // remain "unknown" and never suppress an existing candidate.
+    const osmShadowCandidates = Array.from(new Map(
+      [
+        ...(primarySnapshot || []),
+        ...(throughSnapshot || []),
+        ...(openBoardsTrains || []),
+      ]
+        .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
+        .map((train: any) => [train.journeyRef || `${train.line}-${train.journeyNumber}-${train.route.join("|")}`, train]),
+    ).values()).slice(0, 40);
+    const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => ({
+      journeyRef: train.journeyRef || null,
+      line: train.line,
+      journeyNumber: train.journeyNumber,
+      route: train.route,
+      result: await filterTrainByCrossingOsm(crossing.id, train.route),
+    })));
+    const osmShadow = {
+      mode: "shadow",
+      evaluated: osmShadowResults.length,
+      matched: osmShadowResults.filter((item) => item.result.status === "matched").length,
+      rejected: osmShadowResults.filter((item) => item.result.status === "rejected").length,
+      unknown: osmShadowResults.filter((item) => item.result.status === "unknown").length,
+      results: osmShadowResults,
+    };
+
+    const payload=toPayload(crossing,enrichedTrains,lineHints);
+    (payload as any).osmShadow = osmShadow;
     await writeCrossingForecastCache(cacheKey,payload);
     return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }

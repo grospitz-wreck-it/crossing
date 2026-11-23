@@ -52,13 +52,15 @@ async function loadStationCatalog() {
   if (stationCatalogPromise) return stationCatalogPromise;
   stationCatalogPromise = (async () => {
     try {
-      const result = await db.execute({ sql: `SELECT name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`, args: [] });
+      const result = await db.execute({ sql: `SELECT eva, name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`, args: [] });
       const byName = new Map<string, RouteStation>();
       for (const row of result.rows as any[]) {
         const name = String(row.name || "");
         const normalized = normalizeStationName(name);
         if (!normalized || byName.has(normalized)) continue;
         byName.set(normalized, { name, lat: Number(row.lat), lon: Number(row.lon) });
+        const eva = String(row.eva || "").trim();
+        if (eva) byName.set(normalizeStationName(eva), { name, lat: Number(row.lat), lon: Number(row.lon) });
       }
       stationCatalogCache = { expiresAt: Date.now() + CACHE_TTL_MS, value: byName };
       return byName;
@@ -335,10 +337,16 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     const stations = coordinateRoute.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
     if (stations.length < 2) return { status: "unknown" };
     const graph = corridor.graph;
-    let best: { segment: number; pathDistance: number; crossingDistance: number; wayId?: string; ref?: string } | undefined;
-    for (let routeIndex = 1; routeIndex < stations.length; routeIndex += 1) {
-      const from = stations[routeIndex - 1];
-      const to = stations[routeIndex];
+    let best: { fromIndex: number; toIndex: number; pathDistance: number; crossingDistance: number; wayId?: string; ref?: string } | undefined;
+    // A prepared corridor is local to the crossing. OpenBoards via lists can
+    // omit intermediate calls or return only partial route context, so the
+    // immediately adjacent listed stops are not always both inside this graph.
+    // Test ordered station pairs whose endpoints can be snapped to this local
+    // corridor. The route order is preserved; no live graph expansion occurs.
+    for (let toIndex = 1; toIndex < stations.length; toIndex += 1) {
+      for (let fromIndex = toIndex - 1; fromIndex >= 0; fromIndex -= 1) {
+      const from = stations[fromIndex];
+      const to = stations[toIndex];
       const start = nearestNode(graph, { lat: from.lat, lon: from.lon }, 10_000);
       const target = nearestNode(graph, { lat: to.lat, lon: to.lon }, 10_000);
       if (!start || !target) continue;
@@ -358,7 +366,8 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       const graphPoint = graph.nodePoints.get(crossingHit.nodeId);
       if (!graphPoint) continue;
       const crossingDistance = distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, graphPoint);
-      if (!best || crossingDistance < best.crossingDistance) best = { segment: routeIndex, pathDistance: path.distance, crossingDistance, wayId: railwayWayId };
+      if (!best || crossingDistance < best.crossingDistance) best = { fromIndex, toIndex, pathDistance: path.distance, crossingDistance, wayId: railwayWayId };
+      }
     }
     if (!best) {
       const result: CrossingOsmFilterResult = { status: "rejected" };
@@ -384,7 +393,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     }
     const result: CrossingOsmFilterResult = { status: "matched", score, railwayWayId: best.wayId, ref };
     resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
-    console.log(`[OSM MATCH] crossing=${crossingId} segment=${stations[best.segment - 1].name} -> ${stations[best.segment].name} way=${best.wayId ?? "?"} ref=${ref ?? "?"} pathDistance=${best.pathDistance.toFixed(0)}m crossingDistance=${best.crossingDistance.toFixed(1)}m score=${score.toFixed(3)} result=MATCHED`);
+    console.log(`[OSM MATCH] crossing=${crossingId} segment=${stations[best.fromIndex].name} -> ${stations[best.toIndex].name} way=${best.wayId ?? "?"} ref=${ref ?? "?"} pathDistance=${best.pathDistance.toFixed(0)}m crossingDistance=${best.crossingDistance.toFixed(1)}m score=${score.toFixed(3)} result=MATCHED`);
     return result;
   } catch (error) {
     console.error(`[OSM MATCH] crossing=${crossingId} failed:`, error);
