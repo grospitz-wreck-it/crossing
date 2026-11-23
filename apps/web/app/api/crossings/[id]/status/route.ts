@@ -187,6 +187,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   const lineHints=lineHintsForCrossing(crossing);
+  // When a crossing has an explicitly selected physical OSM track, station
+  // line hints must not pre-filter its trains. The track topology, not a
+  // hand-maintained line allowlist, decides which station journeys pass here.
+  const hasSelectedOsmTracks = selectedOsmWayIdsForCrossing(crossing).length > 0;
   // PRIMARY is explicitly declared by reference_stations. Never treat automatically
   // discovered observation_evas as primary; those remain legacy/context data.
   const primaryEvas = Array.from(new Set((crossing.referenceStations || []).map((eva: string) => String(eva).trim()).filter(Boolean)));
@@ -258,7 +262,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
     // SECONDARY: context stations are evaluated in parallel with the primary
     // station-stop analysis. These candidates represent through-runs.
-    for(const train of (throughSnapshot||[]).filter((t:any)=>lineMatches(t,lineHints))) {
+    for(const train of (throughSnapshot||[]).filter((t:any)=>hasSelectedOsmTracks || lineMatches(t,lineHints))) {
       const realtime = matchOpenBoardsReal({
         stationEva: train.observationEva,
         line: train.line,
@@ -293,7 +297,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // OpenBoards is now a first-class fallback/source, not only a realtime
     // enrichment layer. It can supply explicit primary-stop rows even when the
     // Mobilithek snapshot is empty. Through-runs require route anchors.
-    const openBoardsTrains = getOpenBoardsForecastTrains(crossing, realtimeObservations, lineHints);
+    const openBoardsTrains = getOpenBoardsForecastTrains(crossing, realtimeObservations, hasSelectedOsmTracks ? [] : lineHints);
     const combined = [...trains];
     for (const candidate of openBoardsTrains) {
       const duplicateIndex = combined.findIndex((existing) =>
