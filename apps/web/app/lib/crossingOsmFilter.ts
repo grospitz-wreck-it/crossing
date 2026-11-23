@@ -484,15 +484,29 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       if (!path) continue;
       const crossingHit = findCrossingOnPath(graph, path.nodes, mapping.crossingNodeIds);
       if (!crossingHit) continue;
-      let railwayWayId: string | undefined;
-      for (let i = 1; i < path.nodes.length; i += 1) {
-        if (path.nodes[i] !== crossingHit.nodeId) continue;
-        const previousNode = path.nodes[i - 1];
-        const edges = graph.adjacency.get(previousNode) ?? [];
-        const edge = edges.find((candidate) => candidate.to === crossingHit.nodeId && mapping.railwayWayIds.includes(candidate.wayId));
-        if (edge) { railwayWayId = edge.wayId; break; }
+      const crossingPathIndex = crossingHit.index;
+      const adjacentSelectedWays = new Set<string>();
+      if (crossingPathIndex > 0) {
+        const previousNode = path.nodes[crossingPathIndex - 1];
+        for (const edge of graph.adjacency.get(previousNode) ?? []) {
+          if (edge.to === crossingHit.nodeId && mapping.railwayWayIds.includes(edge.wayId)) {
+            adjacentSelectedWays.add(edge.wayId);
+          }
+        }
       }
-      if (!railwayWayId) continue;
+      if (crossingPathIndex < path.nodes.length - 1) {
+        const nextNode = path.nodes[crossingPathIndex + 1];
+        for (const edge of graph.adjacency.get(crossingHit.nodeId) ?? []) {
+          if (edge.to === nextNode && mapping.railwayWayIds.includes(edge.wayId)) {
+            adjacentSelectedWays.add(edge.wayId);
+          }
+        }
+      }
+      // A route may enter and leave a crossing node through two different
+      // selected ways. Without a topology-level continuation proof, that is
+      // not enough to identify one physical track.
+      if (adjacentSelectedWays.size !== 1) continue;
+      const railwayWayId = [...adjacentSelectedWays][0];
       const graphPoint = graph.nodePoints.get(crossingHit.nodeId);
       if (!graphPoint) continue;
       const crossingDistance = distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, graphPoint);
