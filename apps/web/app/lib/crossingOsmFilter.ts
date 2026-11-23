@@ -113,9 +113,7 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
   const crossingRow: any = crossingResult.rows[0];
   if (!crossingRow) return null;
 
-  // The linked OSM crossing ID is itself the OSM node ID. Do not reconstruct
-  // it through osm_crossing_rail_ways/osm_rail_way_nodes: that legacy lookup
-  // can be absent or stale for locally resolved and grouped multi-track links.
+  // The linked OSM crossing ID is itself the OSM node ID.
   const crossingNodeIds = new Set<string>([String(osmCrossingId)]);
 
   // The corridor is the authoritative selected physical-track set. In
@@ -130,6 +128,42 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
       }
     } catch (error) {
       console.warn(`[OSM MAPPING] invalid corridor way list for crossing=${crossingId}:`, error);
+    }
+  }
+
+  // A grouped multi-track corridor can contain one OSM crossing node per
+  // physical track. Recover those sibling nodes from the existing crossing
+  // index, constrained to the selected ways and the resolver's 12m grouping
+  // radius (+3m tolerance). This preserves both Nord/Süd node identities.
+  if (railwayWayIds.length) {
+    const latDelta = 15 / 110_000;
+    const lonDelta = 15 / (111_320 * Math.max(0.2, Math.cos(Number(crossingRow.lat) * Math.PI / 180)));
+    const placeholders = railwayWayIds.map(() => "?").join(",");
+    const siblingResult = await db.execute({
+      sql: `SELECT DISTINCT oc.osm_id, oc.lat, oc.lon
+        FROM osm_crossings oc
+        JOIN osm_crossing_rail_ways crw ON crw.crossing_osm_id = oc.osm_id
+        WHERE crw.railway_way_id IN (${placeholders})
+          AND oc.lat BETWEEN ? AND ?
+          AND oc.lon BETWEEN ? AND ?`,
+      args: [
+        ...railwayWayIds,
+        Number(crossingRow.lat) - latDelta,
+        Number(crossingRow.lat) + latDelta,
+        Number(crossingRow.lon) - lonDelta,
+        Number(crossingRow.lon) + lonDelta,
+      ],
+    });
+    for (const row of siblingResult.rows as any[]) {
+      const distance = distanceMeters(
+        Number(crossingRow.lat),
+        Number(crossingRow.lon),
+        Number(row.lat),
+        Number(row.lon),
+      );
+      if (Number.isFinite(distance) && distance <= 15) {
+        crossingNodeIds.add(String(row.osm_id));
+      }
     }
   }
 
