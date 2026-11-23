@@ -61,7 +61,7 @@ export async function POST(
       ok: true,
       crossingId,
       crossingName: String((crossing.rows[0] as any).name || crossingId),
-      profileVersion: 2,
+      profileVersion: 3,
       ways: result.ways,
       nodes: result.nodes,
       bytes: result.bytes,
