@@ -140,9 +140,13 @@ async function upsertRailWay(way) {
   });
 }
 
-async function linkCrossingWays(crossing, crossingWays) {
+async function linkCrossingWays(crossing, crossingWays, { indexNodes = true } = {}) {
   await upsertCrossing(crossing);
-  for (const way of crossingWays) {
+  const linkedWays = crossingWays.filter(
+    (way) => Array.isArray(way.nodes) && way.nodes.includes(crossing.id),
+  );
+
+  for (const way of linkedWays) {
     if (!Array.isArray(way.nodes) || !way.nodes.includes(crossing.id)) continue;
     const index = way.nodes.indexOf(crossing.id);
     await upsertRailWay(way);
@@ -157,7 +161,15 @@ async function linkCrossingWays(crossing, crossingWays) {
       args: [crossing.id, way.id, index, index === 0 ? "forward" : index === way.nodes.length - 1 ? "backward" : "both"],
     });
   }
-  console.log(`OSM ${crossing.id}: ${crossingWays.length} railway ways`);
+
+  // Single-crossing imports do not pass through the nationwide network importer.
+  // Keep their Ways connected to the shared node index as well.
+  if (indexNodes && linkedWays.length) {
+    const indexedNodes = await upsertRailWayNodeIndex(linkedWays);
+    console.log(`OSM ${crossing.id}: indexed ${indexedNodes} node mappings`);
+  }
+
+  console.log(`OSM ${crossing.id}: ${linkedWays.length} railway ways`);
 }
 
 
@@ -215,7 +227,7 @@ async function importNetworkPayload(payload) {
 
   for (const crossing of crossings) {
     const crossingWays = waysByNode.get(String(crossing.id)) ?? [];
-    await linkCrossingWays(crossing, crossingWays);
+    await linkCrossingWays(crossing, crossingWays, { indexNodes: false });
   }
 
   return {
