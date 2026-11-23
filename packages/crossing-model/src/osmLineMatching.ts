@@ -67,16 +67,13 @@ function exactIndex(values: string[], target: string): number {
 /**
  * Assigns a train to one of the OSM tracks explicitly selected for a crossing.
  *
- * OSM route relations are directional: their from/to tags describe the
- * relation's nominal direction. A train whose ordered route traverses those
- * endpoints from-to is consistent with that relation; to-from is the
- * opposing-direction relation and must not be treated as a second track
- * candidate. Assignment is still ambiguous if more than one physical way has
- * a forward relation match.
+ * OSM route relations are directional, but both travel directions use
+ * the same physical railway way. The train's ordered route may therefore
+ * traverse the relation endpoints from-to OR to-from. Direction is retained
+ * as metadata; physical assignment is based on the unique way ID.
  *
- * This relies on OSM from/to being populated consistently. Incomplete or
- * conflicting metadata stays unknown/ambiguous and never changes live
- * filtering by itself.
+ * Assignment is ambiguous if matching relations point to more than one
+ * selected physical way. Incomplete or conflicting metadata stays unknown.
  */
 export function assignTrainToOsmTrack(input: {
   line?: string;
@@ -134,25 +131,20 @@ export function assignTrainToOsmTrack(input: {
     return { status: "unknown", reason: "route-does-not-contain-relation-endpoints", candidates: [] };
   }
 
-  const forwardMatches = matches.filter((match) => match.direction === "from-to");
-  if (!forwardMatches.length) {
-    return {
-      status: "unknown",
-      reason: "only-opposite-direction-relations-match",
-      candidates: matches,
-    };
-  }
-
-  const uniqueWays = [...new Set(forwardMatches.map((match) => match.wayId))];
+  // Relation direction is not a separate physical track. Count all
+  // endpoint matches, but require them to identify exactly one selected way.
+  const uniqueWays = [...new Set(matches.map((match) => match.wayId))];
   if (uniqueWays.length !== 1) {
     return {
       status: "ambiguous",
-      reason: "forward-line-relation-matches-multiple-selected-tracks",
+      reason: "line-relation-matches-multiple-selected-tracks",
       candidates: matches,
     };
   }
 
-  const selectedWayMatches = forwardMatches.filter((match) => match.wayId === uniqueWays[0]);
+  const selectedWayMatches = matches.filter((match) => match.wayId === uniqueWays[0]);
+  const directions = [...new Set(selectedWayMatches.map((match) => match.direction))];
+  const direction = directions.length === 1 ? directions[0] : undefined;
   const uniqueRelations = [...new Set(selectedWayMatches
     .map((match) => match.relationId)
     .filter((id): id is number => id != null))];
@@ -163,8 +155,8 @@ export function assignTrainToOsmTrack(input: {
     wayId: uniqueWays[0],
     relationId: uniqueRelations.length === 1 ? uniqueRelations[0] : undefined,
     lineRef: uniqueLineRefs.length === 1 ? uniqueLineRefs[0] : undefined,
-    direction: "from-to",
-    reason: "unique-forward-line-relation-match",
+    direction,
+    reason: "unique-physical-way-line-relation-match",
     candidates: matches,
   };
 }
