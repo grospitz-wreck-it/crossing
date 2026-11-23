@@ -24,6 +24,7 @@ export default function CrossingsAdmin() {
   const [lookupError, setLookupError] = useState("");
   const [railwayInfrastructure, setRailwayInfrastructure] = useState<RailwayInfrastructure>({ status: "NOT_RUN", candidates: [] });
   const [selectedRouteKey, setSelectedRouteKey] = useState("");
+  const [selectedRouteKeys, setSelectedRouteKeys] = useState<string[]>([]);
   const [selectedRoute, setSelectedRoute] = useState<RailwayCandidate | null>(null);
   const [selectedLineHints, setSelectedLineHints] = useState<string[]>([]);
   const [stationCandidates, setStationCandidates] = useState<StationCandidate[]>([]);
@@ -42,10 +43,10 @@ export default function CrossingsAdmin() {
   useEffect(() => { void load(); return () => { if (lookupTimer.current) clearTimeout(lookupTimer.current); }; }, []);
   function update<K extends keyof typeof form>(key: K, value: (typeof form)[K]) { setForm((f) => ({ ...f, [key]: value })); }
   function looksLikeLocation(value: string) { const input = value.trim(); if (input.length < 8) return false; if (/[-+]?\d{1,3}[.,]\d+\s*[,; ]\s*[-+]?\d{1,3}[.,]\d+/.test(input)) return true; return /^[23456789CFGHJMPQRVWX]{4,7}\+[23456789CFGHJMPQRVWX]{2,7}(?:\s+.+)?$/i.test(input); }
-  function resetWizard() { setCoords(""); setLocation(null); setLookupError(""); setRailwayInfrastructure({ status: "NOT_RUN", candidates: [] }); setSelectedRouteKey(""); setSelectedRoute(null); setSelectedLineHints([]); setStationCandidates([]); setSelectedObservationStations([]); setStationCandidateLoading(false); setForm({ id: "", name: "", eva: "", lat: "", lon: "", closeOffsetSeconds: "80", openOffsetSeconds: "20", confidence: "0.5", trainSourceMode: "hybrid" }); }
+  function resetWizard() { setCoords(""); setLocation(null); setLookupError(""); setRailwayInfrastructure({ status: "NOT_RUN", candidates: [] }); setSelectedRouteKey(""); setSelectedRouteKeys([]); setSelectedRoute(null); setSelectedLineHints([]); setStationCandidates([]); setSelectedObservationStations([]); setStationCandidateLoading(false); setForm({ id: "", name: "", eva: "", lat: "", lon: "", closeOffsetSeconds: "80", openOffsetSeconds: "20", confidence: "0.5", trainSourceMode: "hybrid" }); }
   async function resolveLocation(value = coords) {
     const input = value.trim(); if (!looksLikeLocation(input)) return;
-    const requestId = ++lookupRequest.current; setLookupError(""); setStationLoading(true); setRailwayInfrastructure({ status: "LOADING", candidates: [] }); setSelectedRouteKey(""); setSelectedRoute(null);
+    const requestId = ++lookupRequest.current; setLookupError(""); setStationLoading(true); setRailwayInfrastructure({ status: "LOADING", candidates: [] }); setSelectedRouteKey(""); setSelectedRouteKeys([]); setSelectedRoute(null);
     try {
       const res = await fetch(`/api/admin/crossings?location=${encodeURIComponent(input)}`, { cache: "no-store" }); const data = await res.json().catch(() => ({}));
       if (requestId !== lookupRequest.current) return;
@@ -115,8 +116,15 @@ export default function CrossingsAdmin() {
     });
   }
   function selectRouteState(candidate: RailwayCandidate) {
-    setSelectedRouteKey(routeKey(candidate));
-    setSelectedRoute({ ...candidate, segments: (candidate.segments || []).map((segment) => segment.map((point) => ({ ...point }))) });
+    const key = routeKey(candidate);
+    const isSelected = selectedRouteKeys.includes(key);
+    const nextKeys = isSelected ? selectedRouteKeys.filter((item) => item !== key) : [...selectedRouteKeys, key];
+    const nextCandidates = nextKeys.map((item) => railwayInfrastructure.candidates.find((entry) => routeKey(entry) === item)).filter(Boolean) as RailwayCandidate[];
+    setSelectedRouteKeys(nextKeys);
+    const primary = nextCandidates[0] || null;
+    setSelectedRouteKey(primary ? routeKey(primary) : "");
+    setSelectedRoute(primary ? { ...primary, segments: nextCandidates.flatMap((entry) => entry.segments || []).map((segment) => segment.map((point) => ({ ...point }))) } : null);
+    if (!primary) { setStationCandidates([]); setSelectedObservationStations([]); return; }
     setSelectedLineHints(
       getLineChips(candidate)
         .map((line) => (line.ref || line.name || "").trim())
@@ -132,10 +140,10 @@ export default function CrossingsAdmin() {
   function handleLocationChange(value: string) { setCoords(value); setLookupError(""); if (lookupTimer.current) clearTimeout(lookupTimer.current); if (!looksLikeLocation(value)) return; lookupTimer.current = setTimeout(() => { void resolveLocation(value); }, 650); }
   async function save() {
     if (!location || !form.lat || !form.lon) { setLookupError("Bitte zuerst einen Standort prüfen."); return; }
-    if (railwayInfrastructure.candidates.length > 0 && !selectedRoute) { setLookupError("Bitte zuerst eine Bahnstrecke auf der Karte auswählen."); return; }
+    if (railwayInfrastructure.candidates.length > 0 && !selectedRouteKeys.length) { setLookupError("Bitte mindestens ein OSM-Gleis aktivieren."); return; }
     setSaving(true); setLookupError("");
     try {
-      const route = selectedRoute; const payload = { ...form, lat: Number(form.lat), lon: Number(form.lon), closeOffsetSeconds: Number(form.closeOffsetSeconds), openOffsetSeconds: Number(form.openOffsetSeconds), confidence: Number(form.confidence), routeRef: route?.ref || "", routeName: route?.name || "", selectedRouteRef: route?.ref || "", selectedRouteName: route?.name || "", selectedRoute: route ? { ...route, segments: route.segments } : null, lineHints: selectedLineHints, observationStations: selectedObservationStations };
+      const route = selectedRoute; const selectedRoutes = railwayInfrastructure.candidates.filter((candidate) => selectedRouteKeys.includes(routeKey(candidate))); const payload = { ...form, selectedRoutes, lat: Number(form.lat), lon: Number(form.lon), closeOffsetSeconds: Number(form.closeOffsetSeconds), openOffsetSeconds: Number(form.openOffsetSeconds), confidence: Number(form.confidence), routeRef: route?.ref || "", routeName: route?.name || "", selectedRouteRef: route?.ref || "", selectedRouteName: route?.name || "", selectedRoute: route ? { ...route, segments: route.segments } : null, lineHints: selectedLineHints, observationStations: selectedObservationStations };
       const res = await fetch("/api/admin/crossings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }); const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Speichern fehlgeschlagen (${res.status})`);
       const savedId = String(data?.crossing?.id || data?.id || "").trim(); if (!savedId) throw new Error("Der Server hat keinen Datensatz bestätigt.");
@@ -186,7 +194,7 @@ export default function CrossingsAdmin() {
       {location && selectedRoute && <section><label>Automatische Konfiguration</label><div className={styles.nearbyStations}><div className={styles.nearbyStation}><div><strong>DB-Stationen werden automatisch bestimmt</strong><span>Streckennahe Beobachtungsbahnhöfe plus größere Bahnhöfe im Umkreis von bis zu 75 km für ICE/IC-Erkennung.</span></div></div><div className={styles.nearbyStation}><div><strong>Prognoseregeln werden automatisch erzeugt</strong><span>OSM-Streckenrelation, Strecken-Endpunkte, Stationen und Entfernung fließen in requiredRouteStops und throughRules ein.</span></div></div></div></section>}
       <section className={styles.sourceModeSection}><label>Betriebsart / Datenquelle für diesen Bahnübergang</label><select value={form.trainSourceMode} onChange={(e) => update("trainSourceMode", e.target.value as typeof form.trainSourceMode)}><option value="hybrid">OpenBoards bevorzugt – Mobilithek als Fallback</option><option value="mobilithek">Nur Mobilithek (manueller Fallback-Betrieb)</option><option value="openboards">OpenBoards bevorzugt – Mobilithek als Fallback (Legacy)</option></select><small>OpenBoards wird nur bei passender, gültiger Beobachtung verwendet. Fehlt sie oder ist OpenBoards nicht verfügbar, bleibt Mobilithek aktiv. Bestehende Übergänge behalten zunächst ihre bisherige Einstellung.</small></section>
       <div className={styles.grid}><Field label="Schließ-Offset (Sek.)" value={form.closeOffsetSeconds} onChange={(v) => update("closeOffsetSeconds", v)} /><Field label="Öffnungs-Offset (Sek.)" value={form.openOffsetSeconds} onChange={(v) => update("openOffsetSeconds", v)} /><Field label="Konfidenz" value={form.confidence} onChange={(v) => update("confidence", v)} /></div>
-    </div><footer className={styles.footer}><button className={styles.cancel} disabled={saving} onClick={() => setOpen(false)}>Abbrechen</button><button className={styles.primary} disabled={saving || !location || (railwayInfrastructure.candidates.length > 0 && !selectedRoute)} onClick={() => void save()}>{saving ? "Speichere…" : "Übergang speichern"}</button></footer></aside></div>}
+    </div><footer className={styles.footer}><button className={styles.cancel} disabled={saving} onClick={() => setOpen(false)}>Abbrechen</button><button className={styles.primary} disabled={saving || !location || (railwayInfrastructure.candidates.length > 0 && !selectedRouteKeys.length)} onClick={() => void save()}>{saving ? "Speichere…" : "Übergang speichern"}</button></footer></aside></div>}
   </main>;
 }
 
