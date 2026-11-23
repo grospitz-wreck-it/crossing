@@ -357,22 +357,18 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       }),
       result: await filterTrainByCrossingOsm(crossing.id, train.route, selectedOsmWayIds.length ? selectedOsmWayIds : undefined),
     })));
-    // A selected OSM track is a hard assignment boundary, not just a diagnostic.
-    // A train is forecast for this crossing only when its ordered route is
-    // positively matched to this crossing's selected track, either by the
-    // physical rail graph or by a unique directional OSM line-relation match.
-    // Unknown/ambiguous routes are not assigned to a crossing: keeping them in
-    // both adjacent BÜ forecasts would create exactly the cross-track leakage
-    // this filter is intended to prevent.
+    // A selected OSM track is a hard physical assignment boundary.
+    // Only a positive route through the selected crossing node on the selected
+    // physical way may release a train into the forecast. OSM line relations are
+    // useful diagnostics, but they describe a line's planned infrastructure
+    // membership and do not prove that this particular journey traverses this
+    // crossing. In particular, never promote an unknown graph result to matched
+    // merely because a line relation points at one of the selected ways.
     const rejectedJourneyRefs = new Set(osmShadowResults
       .filter((item) => item.journeyKey && item.result.status === "rejected")
       .map((item) => String(item.journeyKey)));
     const assignedJourneyRefs = new Set(osmShadowResults
-      .filter((item) => item.journeyKey && (
-        item.result.status === "matched" ||
-        (item.lineAssignment.status === "matched" &&
-          selectedOsmWayIds.includes(String(item.lineAssignment.wayId)))
-      ))
+      .filter((item) => item.journeyKey && item.result.status === "matched")
       .map((item) => String(item.journeyKey)));
     const osmFilteredTrains = selectedOsmWayIds.length
       ? enrichedTrains.filter((train: any) => {
