@@ -292,7 +292,7 @@ async function loadPreparedCorridorGraph(crossingId: string): Promise<CorridorGr
  */
 export async function prepareCrossingOsmProfile(crossingId: string) {
   const build = await buildCorridorGraph(crossingId);
-  if (!build.ok) return { ok: false as const, reason: build.reason, diagnostics: build.diagnostics };
+  if (build.ok === false) return { ok: false as const, reason: build.reason, diagnostics: build.diagnostics };
   const corridor = build.corridor;
   const profile: StoredCorridorProfile = {
     version: CORRIDOR_PROFILE_VERSION,
