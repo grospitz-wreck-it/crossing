@@ -40,11 +40,20 @@ export async function POST(
     const result = await prepareCrossingOsmProfile(crossingId);
     if (!result.ok) {
       const status = result.reason === "corridor-unavailable" ? 422 : 409;
+      const messages: Record<string, string> = {
+        "mapping-missing": "OSM-Zuordnung oder ausgewählte Gleise fehlen.",
+        "no-ways-loaded": "Für die ausgewählten Gleise wurden keine gültigen OSM-Bahnwege im Datenbestand gefunden.",
+        "max-graph-ways": "Der Streckengraph überschreitet das Sicherheitslimit für Bahnwege.",
+        "max-graph-nodes": "Der Streckengraph überschreitet das Sicherheitslimit für Knoten.",
+        "max-expansion-rounds": "Die Streckengraph-Erweiterung hat das Rundenlimit erreicht.",
+        "frontier-over-capacity": "Zu viele Anschlussgleise für das konfigurierte Sicherheitslimit.",
+        "graph-invalid": "Aus den OSM-Daten ließ sich kein gültiger Streckengraph erzeugen.",
+        "corridor-row-missing": "Der gespeicherte OSM-Korridor wurde während der Vorbereitung nicht gefunden.",
+      };
       return NextResponse.json({
-        error: result.reason === "corridor-unavailable"
-          ? "Der OSM-Korridor konnte nicht zu einem Streckengraphen aufgebaut werden."
-          : "Der gespeicherte OSM-Korridor wurde während der Vorbereitung nicht gefunden.",
+        error: messages[result.reason] || "Der OSM-Korridor konnte nicht vorbereitet werden.",
         code: result.reason,
+        diagnostics: "diagnostics" in result ? result.diagnostics : undefined,
       }, { status });
     }
 
