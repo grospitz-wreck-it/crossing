@@ -8,7 +8,8 @@ type Candidate = { kind: "track"; routeType: "track" | "tram" | "light_rail"; in
 
 const INFRASTRUCTURE_TYPES = new Set(["rail", "tram", "light_rail"]);
 const ROUTE_RELATION_TYPES = new Set(["train", "tram", "light_rail", "railway", "tracks"]);
-// Use currently documented global mirrors; kumi.systems is the legacy hostname for private.coffee.\nconst ENDPOINTS = ["https://overpass.private.coffee/api/interpreter", "https://ovp.dresel.systems/api/interpreter"];
+// Use currently documented global mirrors; kumi.systems is the legacy hostname for private.coffee.
+const ENDPOINTS = ["https://overpass.private.coffee/api/interpreter", "https://ovp.dresel.systems/api/interpreter"];
 
 function pointSegmentDistanceMeters(lat: number, lon: number, a: Point, b: Point) {
   const scale = 111320, x = (lon-a.lon)*scale*Math.cos(lat*Math.PI/180), y=(lat-a.lat)*scale;
