@@ -44,8 +44,8 @@ function routeBBox(segments:Point[][],lat:number,lon:number,radiusKm:number){
   };
 }
 
-async function loadRoute(relationId:number){
-  const query=`[out:json][timeout:12];rel(${Math.trunc(relationId)});way(r);out geom;`;
+async function loadRoute(relationId:number,wayId:number){
+  const query=relationId>0?`[out:json][timeout:12];rel(${Math.trunc(relationId)});way(r);out geom;`:`[out:json][timeout:8];way(${Math.trunc(wayId)});out geom;`;
   for(const endpoint of ["https://overpass-api.de/api/interpreter","https://overpass.kumi.systems/api/interpreter"]){
     try{
       const controller=new AbortController();
@@ -70,11 +70,11 @@ async function loadRoute(relationId:number){
 
 export async function GET(request:Request){
   const {searchParams}=new URL(request.url);
-  const lat=Number(searchParams.get("lat")),lon=Number(searchParams.get("lon")),relationId=Number(searchParams.get("relationId"));
-  if(!Number.isFinite(lat)||!Number.isFinite(lon)||!Number.isFinite(relationId)||relationId<=0){
+  const lat=Number(searchParams.get("lat")),lon=Number(searchParams.get("lon")),relationId=Number(searchParams.get("relationId")||0),wayId=Number(searchParams.get("wayId")||0);
+  if(!Number.isFinite(lat)||!Number.isFinite(lon)||!((Number.isFinite(relationId)&&relationId>0)||(Number.isFinite(wayId)&&wayId>0))){
     return NextResponse.json({status:"INVALID_REQUEST",stations:[]},{status:400});
   }
-  const segments=await loadRoute(relationId);
+  const segments=await loadRoute(relationId,wayId);
   if(!segments.length) return NextResponse.json({status:"ROUTE_UNAVAILABLE",stations:[]},{status:502});
   const bbox=routeBBox(segments,lat,lon,80);
   try{
