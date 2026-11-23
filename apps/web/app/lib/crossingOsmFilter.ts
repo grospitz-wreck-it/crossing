@@ -291,8 +291,9 @@ async function loadPreparedCorridorGraph(crossingId: string): Promise<CorridorGr
  * once and stores the resulting graph for later read-only matching.
  */
 export async function prepareCrossingOsmProfile(crossingId: string) {
-  const corridor = await buildCorridorGraph(crossingId);
-  if (!corridor) return { ok: false as const, reason: "corridor-unavailable" };
+  const build = await buildCorridorGraph(crossingId);
+  if (!build.ok) return { ok: false as const, reason: build.reason, diagnostics: build.diagnostics };
+  const corridor = build.corridor;
   const profile: StoredCorridorProfile = {
     version: CORRIDOR_PROFILE_VERSION,
     complete: true,
@@ -339,11 +340,19 @@ async function loadCorridorGraph(crossingId: string): Promise<CorridorGraph | nu
   return promise;
 }
 
-async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | null> {
+type CorridorBuildFailure = {
+  ok: false;
+  reason: "mapping-missing" | "no-ways-loaded" | "max-graph-ways" | "max-graph-nodes" | "max-expansion-rounds" | "frontier-over-capacity" | "graph-invalid";
+  diagnostics: { rounds: number; loadedWays: number; loadedNodes: number; frontierWays: number; parsedWays: number; stopReason: string };
+};
+
+async function buildCorridorGraph(crossingId: string): Promise<{ ok: true; corridor: CorridorGraph } | CorridorBuildFailure> {
   const mapping = await loadMappingCached(crossingId);
   if (!mapping || mapping.railwayWayIds.length === 0 || mapping.crossingNodeIds.size === 0) {
     corridorGraphCache.set(crossingId, { expiresAt: Date.now() + NEGATIVE_CORRIDOR_CACHE_TTL_MS, value: null });
-    return null;
+    const diagnostics = { rounds: 0, loadedWays: 0, loadedNodes: 0, frontierWays: 0, parsedWays: 0, stopReason: "mapping-or-selected-ways-missing" };
+    console.warn(`[OSM GRAPH] crossing=${crossingId} build-failed reason=mapping-missing`, diagnostics);
+    return { ok: false, reason: "mapping-missing", diagnostics };
   }
   const MAX_GRAPH_WAYS = 5000;
   const MAX_GRAPH_NODES = 150000;
@@ -356,6 +365,7 @@ async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | n
   let expansionRounds = 0;
   let expandedWays = 0;
   let expansionLimited = false;
+  let stopReason = "";
   const parseWayRow = (row: any): RailWayRow | null => {
     try {
       const nodeIdsRaw = JSON.parse(String(row.node_ids_json || "[]"));
@@ -370,6 +380,8 @@ async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | n
   };
   while (frontierWayIds.size > 0 && loadedWayIds.size < MAX_GRAPH_WAYS && expansionRounds < MAX_EXPANSION_ROUNDS) {
     expansionRounds += 1;
+    const frontierBefore = frontierWayIds.size;
+    const loadedBefore = loadedWayIds.size;
     const batchIds = [...frontierWayIds].filter((wayId) => !loadedWayIds.has(wayId)).slice(0, WAY_BATCH_SIZE);
     for (const wayId of batchIds) frontierWayIds.delete(wayId);
     if (!batchIds.length) break;
@@ -384,9 +396,9 @@ async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | n
       loadedWayIds.add(wayId); allRows.set(wayId, way); batchRows.push(way);
     }
     expandedWays += batchRows.length;
-    if (loadedWayIds.size >= MAX_GRAPH_WAYS) { expansionLimited = true; break; }
+    if (loadedWayIds.size >= MAX_GRAPH_WAYS) { expansionLimited = true; stopReason = "max-graph-ways"; break; }
     const nodeIds = [...new Set(batchRows.flatMap((way) => way.nodeIds.map(String)))];
-    if (allRows.size > MAX_GRAPH_WAYS || nodeIds.length > MAX_GRAPH_NODES) { expansionLimited = true; break; }
+    if (nodeIds.length > MAX_GRAPH_NODES) { expansionLimited = true; stopReason = "max-graph-nodes-in-batch"; break; }
     if (!nodeIds.length) continue;
     for (let offset = 0; offset < nodeIds.length; offset += NODE_BATCH_SIZE) {
       const nodeBatch = nodeIds.slice(offset, offset + NODE_BATCH_SIZE);
@@ -401,32 +413,47 @@ async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | n
     const remainingCapacity = MAX_GRAPH_WAYS - loadedWayIds.size;
     if (frontierWayIds.size > remainingCapacity) {
       expansionLimited = true;
+      stopReason = "frontier-over-capacity";
       const limitedFrontier = [...frontierWayIds].slice(0, Math.max(0, remainingCapacity));
       frontierWayIds.clear();
       for (const wayId of limitedFrontier) frontierWayIds.add(wayId);
     }
+    console.log(`[OSM GRAPH ROUND] crossing=${crossingId} round=${expansionRounds} frontierBefore=${frontierBefore} requestedWays=${batchIds.length} parsedWays=${batchRows.length} loadedBefore=${loadedBefore} loadedAfter=${loadedWayIds.size} batchNodes=${nodeIds.length} frontierAfter=${frontierWayIds.size}`);
   }
-  if (expansionRounds >= MAX_EXPANSION_ROUNDS && frontierWayIds.size > 0) expansionLimited = true;
-  if (loadedWayIds.size >= MAX_GRAPH_WAYS) expansionLimited = true;
+  if (expansionRounds >= MAX_EXPANSION_ROUNDS && frontierWayIds.size > 0) { expansionLimited = true; stopReason ||= "max-expansion-rounds"; }
+  if (loadedWayIds.size >= MAX_GRAPH_WAYS) { expansionLimited = true; stopReason ||= "max-graph-ways"; }
   if (!allRows.size) {
     corridorGraphCache.set(crossingId, { expiresAt: Date.now() + NEGATIVE_CORRIDOR_CACHE_TTL_MS, value: null });
-    return null;
+    const diagnostics = { rounds: expansionRounds, loadedWays: loadedWayIds.size, loadedNodes: 0, frontierWays: frontierWayIds.size, parsedWays: expandedWays, stopReason: "no-ways-loaded" };
+    console.warn(`[OSM GRAPH] crossing=${crossingId} build-failed reason=no-ways-loaded`, diagnostics);
+    return { ok: false, reason: "no-ways-loaded", diagnostics };
   }
   const graph = buildRailGraph([...allRows.values()]);
-  if (graph.nodePoints.size > MAX_GRAPH_NODES) expansionLimited = true;
+  if (graph.nodePoints.size > MAX_GRAPH_NODES) { expansionLimited = true; stopReason ||= "max-graph-nodes"; }
+  if (!graph.nodePoints.size || !graph.adjacency.size) {
+    const diagnostics = { rounds: expansionRounds, loadedWays: loadedWayIds.size, loadedNodes: graph.nodePoints.size, frontierWays: frontierWayIds.size, parsedWays: expandedWays, stopReason: "graph-empty-or-invalid" };
+    console.warn(`[OSM GRAPH] crossing=${crossingId} build-failed reason=graph-invalid`, diagnostics);
+    return { ok: false, reason: "graph-invalid", diagnostics };
+  }
 
   // A truncated graph can make a wrong route appear to be the only available
   // route. Never persist or use it for a positive crossing assignment.
   if (expansionLimited) {
     corridorGraphCache.set(crossingId, { expiresAt: Date.now() + NEGATIVE_CORRIDOR_CACHE_TTL_MS, value: null });
-    console.warn(`[OSM GRAPH] crossing=${crossingId} incomplete; refusing profile ways=${graph.wayIds.size} nodes=${graph.nodePoints.size} rounds=${expansionRounds} frontier=${frontierWayIds.size}`);
-    return null;
+    const reason = stopReason === "max-graph-ways" ? "max-graph-ways"
+      : stopReason === "max-graph-nodes-in-batch" ? "max-graph-nodes"
+      : stopReason === "max-expansion-rounds" ? "max-expansion-rounds"
+      : stopReason === "frontier-over-capacity" ? "frontier-over-capacity"
+      : "graph-invalid";
+    const diagnostics = { rounds: expansionRounds, loadedWays: graph.wayIds.size, loadedNodes: graph.nodePoints.size, frontierWays: frontierWayIds.size, parsedWays: expandedWays, stopReason: stopReason || "expansion-limit" };
+    console.warn(`[OSM GRAPH] crossing=${crossingId} build-failed reason=${reason}`, diagnostics);
+    return { ok: false, reason, diagnostics };
   }
 
   const value: CorridorGraph = { graph, wayIds: graph.wayIds, complete: true };
   corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value });
   console.log(`[OSM GRAPH] crossing=${crossingId} complete ways=${graph.wayIds.size} nodes=${graph.nodePoints.size} rounds=${expansionRounds} expandedWays=${expandedWays}`);
-  return value;
+  return { ok: true, corridor: value };
 }
 
 function findCrossingOnPath(graph: CorridorGraph["graph"], pathNodes: string[], crossingNodeIds: Set<string>) {
