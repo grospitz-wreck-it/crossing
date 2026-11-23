@@ -191,7 +191,7 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   return { crossing:{id:crossing.id,name:crossing.name,lat:crossing.lat,lon:crossing.lon}, state:next&&now>=next.start.getTime()?"CLOSED":"OPEN", nextCloseIn:next?Math.max(0,Math.floor((next.start.getTime()-now)/1000)):0, nextOpenIn:next?Math.max(0,Math.floor((next.end.getTime()-now)/1000)):0, phase:next?{start:next.start.toISOString(),end:next.end.toISOString(),durationMinutes:Math.round((next.end.getTime()-next.start.getTime())/60000),trainCount:next.trains.length,trains:next.trains}:null, closureCount:visible.length, closures:visible.map(c=>({start:c.start.toISOString(),end:c.end.toISOString(),durationMinutes:Math.round((c.end.getTime()-c.start.getTime())/60000),trainCount:c.trains.length,trains:c.trains})), trainCount:trains.length,trains,divertedTrains:[],lineHints };
 }
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id }=await params;
   let crossing = await loadCrossing(id);
   if (!crossing) {
@@ -224,8 +224,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
   // Version the forecast cache with the persisted crossing configuration. A saved
   // OSM track/rule edit must never keep serving a forecast computed from old rules.
-  // Keep the resolved DB ID so legacy aliases share the canonical crossing record.
-  const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}`;
+  // Keep verbose OSM diagnostics in a separate cache entry so normal app requests
+  // never pay the response-size or cache-storage cost of per-journey route details.
+  const includeOsmDetails = new URL(request.url).searchParams.get("debug") === "osm";
+  const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}${includeOsmDetails ? ":osm-debug" : ""}`;
   const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   const lineHints=lineHintsForCrossing(crossing);
@@ -242,7 +244,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   // configuration. Explicitly selected lines are handled by the station/snapshot
   // analysis so that adjacent stations remain the primary data source.
   const useLegacyInfrastructureForecast = explicitLineHintsForCrossing(crossing).length === 0 && lineHints.length === 1 && lineHints[0] === "S28";
-  if(useLegacyInfrastructureForecast){ try { const { GET: getInfrastructureForecast }=await import("../../../admin/crossings/[id]/forecast/route"); const response=await getInfrastructureForecast(_request,{params:Promise.resolve({id})}); if(response.ok){ const forecast:any=await response.json(); const payload={crossing:{id:crossing.id,name:crossing.name,lat:crossing.lat,lon:crossing.lon},state:forecast.state||"OPEN",nextCloseIn:forecast.nextClosure?.closeInSeconds||0,nextOpenIn:forecast.nextClosure?.openInSeconds||0,phase:forecast.nextClosure?{start:forecast.nextClosure.start,end:forecast.nextClosure.end,durationMinutes:Math.round((Date.parse(forecast.nextClosure.end)-Date.parse(forecast.nextClosure.start))/60000),trainCount:forecast.nextClosure.trains?.length||0,trains:forecast.nextClosure.trains||[]}:null,closureCount:Array.isArray(forecast.closures)?forecast.closures.length:0,closures:forecast.closures||[],trainCount:Array.isArray(forecast.trains)?forecast.trains.length:0,trains:forecast.trains||[],divertedTrains:[],lineHints:forecast.crossing?.lineHints||lineHints}; await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"infrastructure-forecast"}}); } } catch(error){ console.warn("[STATUS] infrastructure forecast failed",error); } }
+  if(useLegacyInfrastructureForecast){ try { const { GET: getInfrastructureForecast }=await import("../../../admin/crossings/[id]/forecast/route"); const response=await getInfrastructureForecast(request,{params:Promise.resolve({id})}); if(response.ok){ const forecast:any=await response.json(); const payload={crossing:{id:crossing.id,name:crossing.name,lat:crossing.lat,lon:crossing.lon},state:forecast.state||"OPEN",nextCloseIn:forecast.nextClosure?.closeInSeconds||0,nextOpenIn:forecast.nextClosure?.openInSeconds||0,phase:forecast.nextClosure?{start:forecast.nextClosure.start,end:forecast.nextClosure.end,durationMinutes:Math.round((Date.parse(forecast.nextClosure.end)-Date.parse(forecast.nextClosure.start))/60000),trainCount:forecast.nextClosure.trains?.length||0,trains:forecast.nextClosure.trains||[]}:null,closureCount:Array.isArray(forecast.closures)?forecast.closures.length:0,closures:forecast.closures||[],trainCount:Array.isArray(forecast.trains)?forecast.trains.length:0,trains:forecast.trains||[],divertedTrains:[],lineHints:forecast.crossing?.lineHints||lineHints}; await writeCrossingForecastCache(cacheKey,payload); return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":"infrastructure-forecast"}}); } } catch(error){ console.warn("[STATUS] infrastructure forecast failed",error); } }
 
   // Primary path: use the worker-fed Mobilithek snapshot. This is a single Turso
   // query and does not contact the DB Timetables API or Overpass during page load.
@@ -471,7 +473,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         ambiguous: osmShadowResults.filter((item) => item.lineAssignment.status === "ambiguous").length,
         unknown: osmShadowResults.filter((item) => item.lineAssignment.status === "unknown").length,
       },
-      results: osmShadowResults,
+      results: includeOsmDetails ? osmShadowResults : undefined,
     };
 
     const payload=toPayload(crossing,osmFilteredTrains,lineHints);
