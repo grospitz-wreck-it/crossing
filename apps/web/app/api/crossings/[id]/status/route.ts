@@ -14,12 +14,15 @@ function jsonValue(value: unknown, fallback: any = {}) { if (value && typeof val
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const linkedObservationEvas = stationRows.filter(s => !s.role || s.role === "observation" || s.role === "automatic" || s.role === "primary").map(s => String(s.eva || "").trim()).filter(Boolean);
   const observationEvas = linkedObservationEvas.length ? Array.from(new Set(linkedObservationEvas)) : jsonArray(row.observation_evas).map(String).filter(Boolean);
-  // Older admin saves wrote selected primary stations only to crossing_station_links
-  // (role=observation/primary), while newer status logic reads reference_stations.
-  // Recover those explicit links when the dedicated field is empty.
+  // Prefer explicitly selected primary links. Older admin saves used role=observation
+  // for selected primary stations, so retain that fallback only when no primary
+  // link exists and the dedicated reference_stations field is empty.
   const storedReferenceStations = jsonArray(row.reference_stations).map((value: any) => String(value).trim()).filter(Boolean);
-  const linkedPrimaryEvas = stationRows.filter(s => s.role === "primary" || s.role === "observation").map(s => String(s.eva || "").trim()).filter(Boolean);
-  const referenceStations = storedReferenceStations.length ? storedReferenceStations : Array.from(new Set(linkedPrimaryEvas));
+  const linkedPrimaryEvas = stationRows.filter(s => s.role === "primary").map(s => String(s.eva || "").trim()).filter(Boolean);
+  const legacyPrimaryEvas = stationRows.filter(s => s.role === "observation").map(s => String(s.eva || "").trim()).filter(Boolean);
+  const referenceStations = storedReferenceStations.length
+    ? storedReferenceStations
+    : Array.from(new Set(linkedPrimaryEvas.length ? linkedPrimaryEvas : legacyPrimaryEvas));
   if (row.eva && !observationEvas.length) observationEvas.unshift(String(row.eva));
   const linkedContextEvas = stationRows.filter(s => s.role === "context").map(s => String(s.eva || "").trim()).filter(Boolean);
   const stationNameByEva = new Map<string, string>();
