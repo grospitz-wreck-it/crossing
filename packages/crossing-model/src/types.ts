@@ -68,6 +68,8 @@ export type Crossing = {
   closeOffsetSeconds: number;
   openOffsetSeconds: number;
   rules?: CrossingRule[] | CrossingOsmRules;
+  /** Platform-specific barrier timing, kept separate from OSM selection rules. */
+  platformRules?: CrossingRule[];
   throughRules?: ThroughRule[];
   diversionRules?: DiversionRule[];
   rerouteWatchRules?: RerouteWatchRule[];
