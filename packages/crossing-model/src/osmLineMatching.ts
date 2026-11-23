@@ -46,7 +46,7 @@ function stationIndex(route: string[], station: string): number {
   if (!target) return -1;
 
   const normalizedRoute = route.map(normalize);
-  const exact = normalizedizedIndex(normalizedRoute, target);
+  const exact = exactIndex(normalizedRoute, target);
   if (exact >= 0) return exact;
 
   // OSM and timetable station labels occasionally differ by a qualifier.
@@ -60,7 +60,7 @@ function stationIndex(route: string[], station: string): number {
   return candidates.length === 1 ? candidates[0].index : -1;
 }
 
-function normalizedizedIndex(values: string[], target: string): number {
+function exactIndex(values: string[], target: string): number {
   return values.findIndex((value) => value === target);
 }
 
