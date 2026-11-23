@@ -180,27 +180,26 @@ function snapshotCallsContain(calls: any[], station: string, observationEva: str
   });
 }
 
-export async function getSnapshotThroughTrains(db: Client, crossing: Crossing): Promise<SnapshotThroughTrain[] | null> {
+export async function getSnapshotThroughTrains(db: Client, crossing: Crossing, snapshotRows?: any[]): Promise<SnapshotThroughTrain[] | null> {
   try {
     const lineHints = lineHintsForCrossing(crossing);
     const rules = (crossing.throughRules || []) as any[];
     if (!rules.length) return null;
 
     const now = Date.now();
-    const from = new Date(now - 24 * 60 * 60_000).toISOString();
-    const to = new Date(now + 3 * 60 * 60_000).toISOString();
-
-    // Do not ORDER BY here. The status layer sorts the small candidate set later.
-    // Without an actual_time index an ORDER BY forces SQLite/Turso to scan and sort
-    // the whole snapshot table before applying LIMIT, which was causing ~100s loads.
-    // The production migration adds the proper index; removing the sort also keeps
-    // the endpoint bounded while that migration propagates.
-    const result = await db.execute({
-      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction FROM mobilithek_train_snapshot WHERE actual_time >= ? AND actual_time <= ? LIMIT 1500`,
-      args: [from, to],
-    });
-
-    const rows = result.rows as any[];
+    let rows = snapshotRows;
+    if (!rows) {
+      const from = new Date(now - 24 * 60 * 60_000).toISOString();
+      const to = new Date(now + 3 * 60 * 60_000).toISOString();
+      const result = await db.execute({
+        sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
+               FROM mobilithek_train_snapshot
+               WHERE actual_time >= ? AND actual_time <= ?
+               LIMIT 1500`,
+        args: [from, to],
+      });
+      rows = result.rows as any[];
+    }
     const parsed = rows.map((row) => ({
       row,
       route: parseJson(row.route_json, []).map(String).filter(Boolean),
