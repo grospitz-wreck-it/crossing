@@ -156,10 +156,8 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
     });
     for (const row of siblingResult.rows as any[]) {
       const distance = distanceMeters(
-        Number(crossingRow.lat),
-        Number(crossingRow.lon),
-        Number(row.lat),
-        Number(row.lon),
+        { lat: Number(crossingRow.lat), lon: Number(crossingRow.lon) },
+        { lat: Number(row.lat), lon: Number(row.lon) },
       );
       if (Number.isFinite(distance) && distance <= 15) {
         crossingNodeIds.add(String(row.osm_id));
