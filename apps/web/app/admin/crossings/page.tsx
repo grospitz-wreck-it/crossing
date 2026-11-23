@@ -72,7 +72,9 @@ export default function CrossingsAdmin() {
     setStationCandidateLoading(true);
     setStationCandidates([]);
     setLookupError("");
-    const routeParam = candidate.relationId ? `relationId=${encodeURIComponent(candidate.relationId)}` : `wayId=${encodeURIComponent(candidate.wayId)}`;
+    const selectedWays = railwayInfrastructure.candidates.filter((item) => selectedRouteKeys.includes(routeKey(item)));
+    const wayIds = (selectedWays.length ? selectedWays : [candidate]).map((item) => item.wayId).filter((id) => Number.isFinite(id) && id > 0);
+    const routeParam = `wayIds=${encodeURIComponent(wayIds.join(","))}`;
     const url = `/api/admin/crossings/stations?lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}&${routeParam}`;
     let lastError: unknown = null;
     try {
