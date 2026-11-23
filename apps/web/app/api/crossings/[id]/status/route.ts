@@ -330,12 +330,13 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
         ...(openBoardsTrains || []),
       ]
         .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
-        .map((train: any) => [train.journeyRef || `${train.line}-${train.journeyNumber}-${train.route.join("|")}`, train]),
+        .map((train: any) => [train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`, train]),
     ).values()).slice(0, 40);
     const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
     const selectedOsmTracks = selectedOsmTracksForCrossing(crossing);
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => ({
       journeyRef: train.journeyRef || null,
+      journeyKey: train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`,
       line: train.line,
       category: train.category,
       journeyNumber: train.journeyNumber,
@@ -359,25 +360,24 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // this filter is intended to prevent.
     const trackResultByJourney = new Map(
       osmShadowResults
-        .filter((item) => item.journeyRef)
-        .map((item) => [String(item.journeyRef), item]),
+        .filter((item) => item.journeyKey)
+        .map((item) => [String(item.journeyKey), item]),
     );
     const rejectedJourneyRefs = new Set(osmShadowResults
-      .filter((item) => item.journeyRef && item.result.status === "rejected")
-      .map((item) => String(item.journeyRef)));
+      .filter((item) => item.journeyKey && item.result.status === "rejected")
+      .map((item) => String(item.journeyKey)));
     const assignedJourneyRefs = new Set(osmShadowResults
-      .filter((item) => item.journeyRef && (
+      .filter((item) => item.journeyKey && (
         item.result.status === "matched" ||
         (item.lineAssignment.status === "matched" &&
           selectedOsmWayIds.includes(String(item.lineAssignment.wayId)))
       ))
-      .map((item) => String(item.journeyRef)));
+      .map((item) => String(item.journeyKey)));
     const osmFilteredTrains = selectedOsmWayIds.length
       ? enrichedTrains.filter((train: any) => {
-          if (!train.journeyRef) return false;
-          const journeyRef = String(train.journeyRef);
-          if (rejectedJourneyRefs.has(journeyRef)) return false;
-          return assignedJourneyRefs.has(journeyRef);
+          const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
+          if (rejectedJourneyRefs.has(journeyKey)) return false;
+          return assignedJourneyRefs.has(journeyKey);
         })
       : enrichedTrains;
     const osmShadow = {
