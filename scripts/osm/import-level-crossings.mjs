@@ -379,7 +379,6 @@ async function importSingleCrossing(crossingId) {
   if (!osmCrossings.length) throw new Error(`No OSM level crossing found near ${crossing.name}`);
 
   osmCrossings.sort((a, b) => Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(a.lat), Number(a.lon))) - Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(b.lat), Number(b.lon))));
-  osmCrossings.sort((a, b) => Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(a.lat), Number(a.lon))) - Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(b.lat), Number(b.lon))));
   const osmCrossing = osmCrossings[0];
   const distanceMeters = Math.sqrt(distance2(Number(crossing.lat), Number(crossing.lon), Number(osmCrossing.lat), Number(osmCrossing.lon)));
   const secondDistance = osmCrossings[1]
