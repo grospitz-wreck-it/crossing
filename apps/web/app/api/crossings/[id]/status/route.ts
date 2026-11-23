@@ -14,12 +14,15 @@ function jsonValue(value: unknown, fallback: any = {}) { if (value && typeof val
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const linkedObservationEvas = stationRows.filter(s => !s.role || s.role === "observation" || s.role === "automatic" || s.role === "primary").map(s => String(s.eva || "").trim()).filter(Boolean);
   const observationEvas = linkedObservationEvas.length ? Array.from(new Set(linkedObservationEvas)) : jsonArray(row.observation_evas).map(String).filter(Boolean);
-  // Older admin saves wrote selected primary stations only to crossing_station_links
-  // (role=observation/primary), while newer status logic reads reference_stations.
-  // Recover those explicit links when the dedicated field is empty.
+  // Prefer explicitly selected primary links. Older admin saves used role=observation
+  // for selected primary stations, so retain that fallback only when no primary
+  // link exists and the dedicated reference_stations field is empty.
   const storedReferenceStations = jsonArray(row.reference_stations).map((value: any) => String(value).trim()).filter(Boolean);
-  const linkedPrimaryEvas = stationRows.filter(s => s.role === "primary" || s.role === "observation").map(s => String(s.eva || "").trim()).filter(Boolean);
-  const referenceStations = storedReferenceStations.length ? storedReferenceStations : Array.from(new Set(linkedPrimaryEvas));
+  const linkedPrimaryEvas = stationRows.filter(s => s.role === "primary").map(s => String(s.eva || "").trim()).filter(Boolean);
+  const legacyPrimaryEvas = stationRows.filter(s => s.role === "observation").map(s => String(s.eva || "").trim()).filter(Boolean);
+  const referenceStations = storedReferenceStations.length
+    ? storedReferenceStations
+    : Array.from(new Set(linkedPrimaryEvas.length ? linkedPrimaryEvas : legacyPrimaryEvas));
   if (row.eva && !observationEvas.length) observationEvas.unshift(String(row.eva));
   const linkedContextEvas = stationRows.filter(s => s.role === "context").map(s => String(s.eva || "").trim()).filter(Boolean);
   const stationNameByEva = new Map<string, string>();
@@ -32,6 +35,11 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
     requiredRouteStops: jsonArray(row.required_route_stops).map(String).filter(Boolean),
     lat: Number(row.lat), lon: Number(row.lon), closeOffsetSeconds: Number(row.close_offset_seconds || 80), openOffsetSeconds: Number(row.open_offset_seconds || 20),
     rules: jsonValue(row.rules, {}),
+    // The legacy Kirchlengern alias still uses the static platform timing rules.
+    // Keep them separate: the persisted rules field now stores OSM configuration.
+    platformRules: String(row.id) === "kirchlengern-bahnhof-lubbecker-str-b8095d49"
+      ? (staticCrossings.find((item) => item.id === "kirchlengern")?.rules as any[] || [])
+      : [],
     configUpdatedAt: String(row.updated_at || ""),
     throughRules: sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva),
     diversionRules: jsonArray(row.diversion_rules), rerouteWatchRules: jsonArray(row.reroute_watch_rules), confidence: Number(row.confidence || 0.5)
@@ -141,9 +149,41 @@ function matchOpenBoardsReal(
 }
 
 function toPayload(crossing: any, trains: any[], lineHints: string[]) {
-  const now=Date.now(); trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
+  const now = Date.now();
+  const platformRules = Array.isArray(crossing.platformRules)
+    ? crossing.platformRules
+    : Array.isArray(crossing.rules) ? crossing.rules : [];
+  const offsetsForTrain = (train: any) => {
+    const matchingRule = platformRules.find((rule: any) =>
+      rule?.stopping === true &&
+      train?.isStoppingTrain === true &&
+      String(rule?.platform ?? "").trim() !== "" &&
+      String(rule.platform).trim() === String(train?.platform ?? "").trim()
+    );
+    const safeOffset = (value: unknown, fallback: number) =>
+      value == null || value === "" || !Number.isFinite(Number(value)) ? fallback : Number(value);
+    return {
+      close: safeOffset(matchingRule?.closeOffsetSeconds, crossing.closeOffsetSeconds),
+      open: safeOffset(matchingRule?.openOffsetSeconds, crossing.openOffsetSeconds),
+    };
+  };
+  trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
   const closures:any[]=[];
-  for(const train of trains.filter(t=>Date.parse(t.crossingTime) + crossing.openOffsetSeconds * 1000 > now)) { const t=Date.parse(train.crossingTime); const start=new Date(t-crossing.closeOffsetSeconds*1000),end=new Date(t+crossing.openOffsetSeconds*1000); const last=closures[closures.length-1]; if(!last||start.getTime()>last.end.getTime()+30000)closures.push({start,end,trains:[train]});else{if(end>last.end)last.end=end;last.trains.push(train);} }
+  for (const train of trains) {
+    const t = Date.parse(train.crossingTime);
+    if (!Number.isFinite(t)) continue;
+    const offsets = offsetsForTrain(train);
+    const start = new Date(t - offsets.close * 1000);
+    const end = new Date(t + offsets.open * 1000);
+    if (end.getTime() <= now) continue;
+    const last = closures[closures.length - 1];
+    if (!last || start.getTime() > last.end.getTime() + 30000) {
+      closures.push({start,end,trains:[train]});
+    } else {
+      if (end > last.end) last.end = end;
+      last.trains.push(train);
+    }
+  }
   // The snapshot source covers up to three hours ahead. Return that same horizon
   // to the UI; otherwise valid trains disappear between the hero and the later list.
   const forecastHorizonMs = 3 * 60 * 60 * 1000;
@@ -209,11 +249,25 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   try {
     const trains:any[]=[];
 
-    // PRIMARY: only the explicitly declared reference station(s), read from the
-    // worker-fed Mobilithek snapshot. Automatically discovered observation EVAs
-    // are deliberately excluded.
-    const primarySnapshot=await getSnapshotPrimaryTrains(db,crossing);
-    const throughSnapshot=await getSnapshotThroughTrains(db,crossing);
+    // One bounded Mobilithek read feeds both primary-stop and through-route
+    // detection. The time index supports newest-first retrieval without sorting
+    // the full snapshot table; all candidate matching then happens in memory.
+    const snapshotFrom = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const snapshotTo = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
+    const snapshotResult = await db.execute({
+      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
+             FROM mobilithek_train_snapshot
+             WHERE actual_time >= ? AND actual_time <= ?
+             ORDER BY actual_time DESC
+             LIMIT 1500`,
+      args: [snapshotFrom, snapshotTo],
+    });
+    const snapshotRows = snapshotResult.rows as any[];
+
+    // PRIMARY: only explicitly declared reference stations.
+    const primarySnapshot=await getSnapshotPrimaryTrains(db,crossing,snapshotRows);
+    // SECONDARY: through candidates are derived from the exact same snapshot rows.
+    const throughSnapshot=await getSnapshotThroughTrains(db,crossing,snapshotRows);
     const realtimeEvas = Array.from(new Set([
       ...primaryEvas,
       ...(crossing.throughRules || []).map((rule: any) => String(rule.observationEva || "").trim()),
