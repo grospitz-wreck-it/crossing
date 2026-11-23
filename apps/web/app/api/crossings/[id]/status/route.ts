@@ -331,7 +331,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       ]
         .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
         .map((train: any) => [train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`, train]),
-    ).values()).slice(0, 40);
+    ).values());
     const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
     const selectedOsmTracks = selectedOsmTracksForCrossing(crossing);
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => ({
