@@ -131,7 +131,7 @@ const verification = await db.execute(`
   FROM osm_rail_ways w
 `);
 
-console.log("\\n=== COMPLETE ===");
+console.log("\n=== COMPLETE ===");
 console.log("processed ways:", totalWays);
 console.log("node mappings written:", totalNodes);
 console.log("verification:", verification.rows[0]);
