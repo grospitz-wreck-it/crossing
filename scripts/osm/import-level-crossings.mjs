@@ -446,13 +446,17 @@ async function importAllCrossings() {
     }
   }
   console.log(`OSM BULK COMPLETE: imported=${imported} skipped_existing=${skipped} failed_or_review=${failed} total=${result.rows.length}`);
+  return { imported, skipped, failed, total: result.rows.length };
 }
 
 async function main() {
   const { bbox, crossingId, all } = parseArgs();
   await ensureSchema();
   if (all) {
-    await importAllCrossings();
+    const summary = await importAllCrossings();
+    if (summary.failed > 0) {
+      throw new Error(`${summary.failed} crossing(s) need manual review; see log entries above`);
+    }
   } else if (crossingId) {
     await importSingleCrossing(crossingId);
   } else {
