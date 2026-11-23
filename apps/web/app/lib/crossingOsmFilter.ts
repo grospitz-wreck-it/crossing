@@ -39,6 +39,7 @@ type CorridorGraph = {
 
 const CACHE_TTL_MS = 300_000;
 const RESULT_CACHE_TTL_MS = 300_000;
+const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 15_000;
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
@@ -328,7 +329,7 @@ async function loadCorridorGraph(crossingId: string): Promise<CorridorGraph | nu
     if (!prepared) {
       // Never expand an OSM graph in a live status request. Missing profiles
       // remain unknown until the explicit admin preparation workflow builds them.
-      corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: null });
+      corridorGraphCache.set(crossingId, { expiresAt: Date.now() + NEGATIVE_CORRIDOR_CACHE_TTL_MS, value: null });
       return null;
     }
     corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: prepared });
@@ -341,7 +342,7 @@ async function loadCorridorGraph(crossingId: string): Promise<CorridorGraph | nu
 async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | null> {
   const mapping = await loadMappingCached(crossingId);
   if (!mapping || mapping.railwayWayIds.length === 0 || mapping.crossingNodeIds.size === 0) {
-    corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: null });
+    corridorGraphCache.set(crossingId, { expiresAt: Date.now() + NEGATIVE_CORRIDOR_CACHE_TTL_MS, value: null });
     return null;
   }
   const MAX_GRAPH_WAYS = 5000;
@@ -408,7 +409,7 @@ async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | n
   if (expansionRounds >= MAX_EXPANSION_ROUNDS && frontierWayIds.size > 0) expansionLimited = true;
   if (loadedWayIds.size >= MAX_GRAPH_WAYS) expansionLimited = true;
   if (!allRows.size) {
-    corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: null });
+    corridorGraphCache.set(crossingId, { expiresAt: Date.now() + NEGATIVE_CORRIDOR_CACHE_TTL_MS, value: null });
     return null;
   }
   const graph = buildRailGraph([...allRows.values()]);
@@ -417,7 +418,7 @@ async function buildCorridorGraph(crossingId: string): Promise<CorridorGraph | n
   // A truncated graph can make a wrong route appear to be the only available
   // route. Never persist or use it for a positive crossing assignment.
   if (expansionLimited) {
-    corridorGraphCache.set(crossingId, { expiresAt: Date.now() + CACHE_TTL_MS, value: null });
+    corridorGraphCache.set(crossingId, { expiresAt: Date.now() + NEGATIVE_CORRIDOR_CACHE_TTL_MS, value: null });
     console.warn(`[OSM GRAPH] crossing=${crossingId} incomplete; refusing profile ways=${graph.wayIds.size} nodes=${graph.nodePoints.size} rounds=${expansionRounds} frontier=${frontierWayIds.size}`);
     return null;
   }
