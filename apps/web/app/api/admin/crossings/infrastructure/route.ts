@@ -8,7 +8,7 @@ type Candidate = { kind: "track"; routeType: "track" | "tram" | "light_rail"; in
 
 const INFRASTRUCTURE_TYPES = new Set(["rail", "tram", "light_rail"]);
 const ROUTE_RELATION_TYPES = new Set(["train", "tram", "light_rail", "railway", "tracks"]);
-const ENDPOINTS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter"];
+// Use currently documented global mirrors; kumi.systems is the legacy hostname for private.coffee.\nconst ENDPOINTS = ["https://overpass.private.coffee/api/interpreter", "https://ovp.dresel.systems/api/interpreter"];
 
 function pointSegmentDistanceMeters(lat: number, lon: number, a: Point, b: Point) {
   const scale = 111320, x = (lon-a.lon)*scale*Math.cos(lat*Math.PI/180), y=(lat-a.lat)*scale;
@@ -22,7 +22,7 @@ function geometryDistanceMeters(lat:number,lon:number,geometry:Point[]) {
 async function queryOverpass(endpoint:string,query:string,timeoutMs:number) {
   const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),timeoutMs);
   try {
-    const response=await fetch(`${endpoint}?${new URLSearchParams({data:query})}`,{cache:"no-store",signal:controller.signal,headers:{accept:"application/json","user-agent":"Crossings/1.0 (meineschranke.com)"}});
+    const response=await fetch(endpoint,{method:"POST",cache:"no-store",signal:controller.signal,headers:{accept:"application/json","content-type":"application/x-www-form-urlencoded;charset=UTF-8","user-agent":"Crossings/1.0 (meineschranke.com)"},body:new URLSearchParams({data:query}).toString()});
     if(!response.ok) throw new Error(`HTTP_${response.status}`);
     return await response.json();
   } finally { clearTimeout(timer); }
@@ -40,7 +40,7 @@ async function fetchRelations(wayIds:number[]) {
   if(!wayIds.length) return {relations:[] as any[],errors:[] as string[]};
   const ids=wayIds.slice(0,80).join(",");
   const query=`[out:json][timeout:5];way(id:${ids})->.localWays;rel(bw.localWays)[type=route][route~"^(train|tram|light_rail|railway|tracks)$"];out body;`;
-  const results=await Promise.allSettled(ENDPOINTS.map(endpoint=>queryOverpass(endpoint,query,6500)));
+  const results=await Promise.allSettled(ENDPOINTS.map(endpoint=>queryOverpass(endpoint,query,6000)));
   const success=results.find((result):result is PromiseFulfilledResult<any>=>result.status==="fulfilled");
   if(success) return {relations:(success.value?.elements||[]).filter((e:any)=>e?.type==="relation"),errors:results.filter((r):r is PromiseRejectedResult=>r.status==="rejected").map(r=>String(r.reason?.message||r.reason))};
   return {relations:[] as any[],errors:results.map(r=>r.status==="rejected"?String(r.reason?.message||r.reason):"").filter(Boolean)};
