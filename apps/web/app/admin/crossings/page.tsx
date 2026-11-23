@@ -61,7 +61,7 @@ export default function CrossingsAdmin() {
     } catch { if (requestId === lookupRequest.current) { setRailwayInfrastructure({ status: "ERROR", candidates: [] }); setLookupError("Standort konnte nicht geladen werden. Bitte erneut versuchen."); } }
     finally { if (requestId === lookupRequest.current) setStationLoading(false); }
   }
-  async function loadStationCandidates(candidate: RailwayCandidate) {
+  async function loadStationCandidates(candidate: RailwayCandidate, selectedTracks?: RailwayCandidate[]) {
     const requestId = ++stationRequest.current;
     if (!location || (!candidate.relationId && !candidate.wayId)) {
       setStationCandidates([]);
@@ -72,7 +72,7 @@ export default function CrossingsAdmin() {
     setStationCandidateLoading(true);
     setStationCandidates([]);
     setLookupError("");
-    const selectedWays = railwayInfrastructure.candidates.filter((item) => selectedRouteKeys.includes(routeKey(item)));
+    const selectedWays = selectedTracks || railwayInfrastructure.candidates.filter((item) => selectedRouteKeys.includes(routeKey(item)));
     const wayIds = (selectedWays.length ? selectedWays : [candidate]).map((item) => item.wayId).filter((id) => Number.isFinite(id) && id > 0);
     const routeParam = `wayIds=${encodeURIComponent(wayIds.join(","))}`;
     const url = `/api/admin/crossings/stations?lat=${encodeURIComponent(location.lat)}&lon=${encodeURIComponent(location.lon)}&${routeParam}`;
@@ -132,7 +132,7 @@ export default function CrossingsAdmin() {
         .map((line) => (line.ref || line.name || "").trim())
         .filter(Boolean)
     );
-    void loadStationCandidates(candidate);
+    void loadStationCandidates(primary, nextCandidates);
   }
   function toggleLineHint(value: string) {
     setSelectedLineHints((current) =>
