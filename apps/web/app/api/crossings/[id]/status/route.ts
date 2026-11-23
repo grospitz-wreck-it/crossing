@@ -322,7 +322,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const enrichedTrains = await addStationNames(db, unique);
 
     // Evaluate each journey against this crossing's explicitly selected OSM ways.
-    // Unknown/ambiguous matches remain visible; only a confident mismatch is excluded.
+    // The result is used below as a real assignment decision, not merely telemetry.
     const osmShadowCandidates = Array.from(new Map(
       [
         ...(primarySnapshot || []),
@@ -358,11 +358,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     // Unknown/ambiguous routes are not assigned to a crossing: keeping them in
     // both adjacent BÜ forecasts would create exactly the cross-track leakage
     // this filter is intended to prevent.
-    const trackResultByJourney = new Map(
-      osmShadowResults
-        .filter((item) => item.journeyKey)
-        .map((item) => [String(item.journeyKey), item]),
-    );
     const rejectedJourneyRefs = new Set(osmShadowResults
       .filter((item) => item.journeyKey && item.result.status === "rejected")
       .map((item) => String(item.journeyKey)));
