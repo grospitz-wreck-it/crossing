@@ -413,12 +413,30 @@ async function importSingleCrossing(crossingId) {
 
 async function importAllCrossings() {
   const result = await db.execute({
-    sql: `SELECT id, name FROM crossings WHERE status = 'active' ORDER BY name`,
+    sql: `SELECT
+      c.id,
+      c.name,
+      l.osm_crossing_id,
+      cr.crossing_id AS corridor_crossing_id
+    FROM crossings c
+    LEFT JOIN crossing_osm_links l ON l.crossing_id = c.id
+    LEFT JOIN crossing_osm_corridors cr ON cr.crossing_id = c.id
+    WHERE c.status = 'active'
+    ORDER BY c.name`,
     args: [],
   });
   let imported = 0;
+  let skipped = 0;
   let failed = 0;
   for (const row of result.rows) {
+    // A linked crossing with a corridor already has its OSM source data.
+    // Do not re-import it here: saveCrossingCorridor invalidates prepared
+    // profiles, which must only happen when the underlying corridor changes.
+    if (row.osm_crossing_id && row.corridor_crossing_id) {
+      skipped += 1;
+      console.log(`SKIP ${row.name}: OSM link and corridor already exist`);
+      continue;
+    }
     try {
       await importSingleCrossing(String(row.id));
       imported += 1;
@@ -427,7 +445,7 @@ async function importAllCrossings() {
       console.error(`REVIEW ${row.name} (${row.id}):`, error instanceof Error ? error.message : error);
     }
   }
-  console.log(`OSM BULK COMPLETE: imported=${imported} failed_or_review=${failed} total=${result.rows.length}`);
+  console.log(`OSM BULK COMPLETE: imported=${imported} skipped_existing=${skipped} failed_or_review=${failed} total=${result.rows.length}`);
 }
 
 async function main() {
