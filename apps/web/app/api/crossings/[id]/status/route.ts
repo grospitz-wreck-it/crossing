@@ -18,14 +18,19 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   // stations and must never become primary merely because older admin records
   // stored them with role=observation. If no primary was configured, use only
   // the crossing's own station EVA (when available), never every linked station.
-  const storedReferenceStations = jsonArray(row.reference_stations).map((value: any) => String(value).trim()).filter(Boolean);
-  const linkedPrimaryEvas = stationRows.filter(s => s.role === "primary").map(s => String(s.eva || "").trim()).filter(Boolean);
+  // Only station links explicitly marked "primary" are allowed to create
+  // direct OpenBoards train candidates. The legacy reference_stations JSON
+  // may contain observation/context EVAs from older configurations; treating
+  // that list as primary caused unrelated trains (e.g. Hannover S-Bahn) to
+  // appear at this crossing. If no primary link exists, use the crossing EVA.
+  const linkedPrimaryEvas = stationRows
+    .filter(s => s.role === "primary")
+    .map(s => String(s.eva || "").trim())
+    .filter(Boolean);
   const referenceStations = Array.from(new Set(
-    storedReferenceStations.length
-      ? storedReferenceStations
-      : linkedPrimaryEvas.length
-        ? linkedPrimaryEvas
-        : row.eva ? [String(row.eva).trim()] : [],
+    linkedPrimaryEvas.length
+      ? linkedPrimaryEvas
+      : row.eva ? [String(row.eva).trim()] : [],
   ));
   if (row.eva && !observationEvas.length) observationEvas.unshift(String(row.eva));
   const linkedContextEvas = stationRows.filter(s => s.role === "context").map(s => String(s.eva || "").trim()).filter(Boolean);
