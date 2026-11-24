@@ -312,6 +312,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}${includeOsmDetails ? ":osm-debug" : ""}`;
   const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
+  // Keep a short-lived previous forecast as a safety net when one snapshot poll
+  // temporarily loses a journey. Explicit OSM rejections are never resurrected.
+  const previousForecast = await readCrossingForecastCache<any>(cacheKey,90_000);
   const lineHints=lineHintsForCrossing(crossing);
   // When a crossing has an explicitly selected physical OSM track, station
   // line hints must not pre-filter its trains. The track topology, not a
@@ -611,7 +614,32 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       results: includeOsmDetails ? osmShadowResults : undefined,
     };
 
-    const payload=toPayload(crossing,osmFilteredTrains,lineHints);
+    const journeyKeyForRetention = (train: any) => String(train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`);
+    const currentJourneyKeys = new Set(osmFilteredTrains.map(journeyKeyForRetention));
+    const rejectedKeys = new Set(osmShadowResults
+      .filter((item: any) => item.journeyKey && item.result.status === "rejected")
+      .map((item: any) => String(item.journeyKey)));
+    const nowForRetention = Date.now();
+    const retainedFromPrevious = (Array.isArray(previousForecast?.trains) ? previousForecast.trains : [])
+      .filter((train: any) => {
+        const key = journeyKeyForRetention(train);
+        const crossingAt = Date.parse(String(train.crossingTime || ""));
+        return key && !currentJourneyKeys.has(key) && !rejectedKeys.has(key) &&
+          Number.isFinite(crossingAt) && crossingAt > nowForRetention;
+      });
+    const forecastTrains = [...osmFilteredTrains, ...retainedFromPrevious];
+    const payload=toPayload(crossing,forecastTrains,lineHints);
+    (payload as any).forecastDiagnostics = {
+      snapshotRows: snapshotRows.length,
+      primaryCandidates: primarySnapshot.length,
+      throughCandidates: (throughSnapshot || []).length,
+      openBoardsObservations: realtimeObservations.length,
+      openBoardsCandidates: openBoardsTrains.length,
+      enrichedCandidates: enrichedTrains.length,
+      osmAcceptedCandidates: osmFilteredTrains.length,
+      retainedPreviousCandidates: retainedFromPrevious.length,
+      retentionWindowSeconds: 90,
+    };
     (payload as any).osmTrackFilter = { selectedWayIds: selectedOsmWayIds, evaluated: osmShadowResults.length, matched: osmShadow.matched, rejected: osmShadow.rejected, unknown: osmShadow.unknown, removedTrainCount: enrichedTrains.length - osmFilteredTrains.length };
     (payload as any).osmShadow = osmShadow;
     await writeCrossingForecastCache(cacheKey,payload);
