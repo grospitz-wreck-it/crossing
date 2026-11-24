@@ -633,11 +633,6 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
         };
       }
     }
-    // Check the prepared profile before resolving route names against the full
-    // station catalogue. Missing profiles must not trigger a catalogue scan.
-    const corridor = await loadCorridorGraph(crossingId);
-    if (!corridor) return { status: "unknown", reason: "corridor-profile-unavailable" };
-
     const coordinateRoute = await routeToCoordinates(route);
     if (!isTrainRouteNearCrossing({ lat: mapping.crossingLat, lon: mapping.crossingLon }, coordinateRoute)) {
       const result: CrossingOsmFilterResult = { status: "rejected" };
@@ -645,6 +640,9 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       console.log(`[OSM MATCH] crossing=${crossingId} route=${route.join(" -> ")} result=REJECTED reason=route-too-far`);
       return result;
     }
+    const corridor = await loadCorridorGraph(crossingId);
+    if (!corridor) return { status: "unknown", reason: "corridor-profile-unavailable" };
+
     const stations = coordinateRoute.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
     if (stations.length < 2) return { status: "unknown", reason: `route-stations-unresolved:${stations.length}/${coordinateRoute.length}` };
     const graph = corridor.graph;
