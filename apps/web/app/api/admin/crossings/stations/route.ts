@@ -11,6 +11,7 @@ type StationCandidate = {
   lon: number;
   distanceKm: number;
   trackDistanceMeters: number;
+  alongTrackDistanceMeters: number | null;
 };
 
 function pointSegmentDistanceMeters(lat:number,lon:number,a:Point,b:Point){
