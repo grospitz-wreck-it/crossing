@@ -183,6 +183,13 @@ function snapshotCallsContain(calls: any[], station: string, observationEva: str
 export async function getSnapshotThroughTrains(db: Client, crossing: Crossing, snapshotRows?: any[]): Promise<SnapshotThroughTrain[] | null> {
   try {
     const lineHints = lineHintsForCrossing(crossing);
+    const crossingRules: any = crossing.rules;
+    const hasSelectedOsmTracks = Boolean(
+      crossingRules &&
+      !Array.isArray(crossingRules) &&
+      Array.isArray(crossingRules.selectedOsmTracks) &&
+      crossingRules.selectedOsmTracks.some((track: any) => track && track.wayId != null),
+    );
     const rules = (crossing.throughRules || []) as any[];
     if (!rules.length) return null;
 
@@ -222,7 +229,11 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing, s
       const train = { line: String(row.line || ""), category: String(row.category || "") };
 
       for (const rule of rules) {
-        if (!ruleAllowsTrain(rule, train, lineHints)) continue;
+        // With explicitly selected physical OSM tracks, line/category allowlists
+        // must not suppress a journey before the physical track matcher sees it.
+        // Route anchors, observation-station presence, direction and the later
+        // selected-way graph check remain in force as independent safety gates.
+        if (!hasSelectedOsmTracks && !ruleAllowsTrain(rule, train, lineHints)) continue;
         const observationEva = String(rule.observationEva || "");
         const observationStation = stationNames.get(normalizeEva(observationEva)) || String(rule.observationStation || "");
         if (!matchesRoute(route, calls, observationStation, crossing.requiredRouteStops || [])) continue;
