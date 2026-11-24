@@ -102,7 +102,10 @@ export async function getSnapshotPrimaryTrains(
     const calls = parseJson(row.calls_json, []);
     if (!Array.isArray(calls) || !calls.length) continue;
 
-    for (const eva of candidateEvas) {
+    // Only explicit reference stations may create primary-stop candidates.
+    // Configured before/after stations are attached below as timing observations
+    // for this same journey; they must never become independent train anchors.
+    for (const eva of primaryEvas) {
       const stationName = stationNames.get(eva) || eva;
 
       const call = calls.find((item: any) =>
