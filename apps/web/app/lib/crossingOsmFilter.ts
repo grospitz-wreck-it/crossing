@@ -606,7 +606,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
   if (!route?.length) return { status: "unknown", reason: "route-missing" };
   const selectedWays = selectedWayIds?.map(String).filter(Boolean) ?? [];
   const selectedWaySet = selectedWays.length ? new Set(selectedWays) : null;
-  const resultKey = `${crossingId}|${selectedWays.slice().sort().join(",")}|${route.join("|")}`;
+  const resultKey = `${crossingId}|${selectedWays.slice().sort().join(",")}|${route.join("|")}|${observationStation || ""}`;
   const cachedResult = resultCache.get(resultKey);
   if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
   try {
@@ -777,7 +777,10 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
           ? -hit.distanceToEnd
           : null,
     }));
-    const best = directedHits.sort((a, b) => a.crossingDistance - b.crossingDistance)[0];
+    const best = directedHits.sort((a, b) =>
+      Number(b.signedDistanceMeters != null) - Number(a.signedDistanceMeters != null) ||
+      a.crossingDistance - b.crossingDistance
+    )[0];
     if (selectedWaySet && !selectedWaySet.has(String(best.wayId))) {
       const result: CrossingOsmFilterResult = { status: "rejected", railwayWayId: best.wayId };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
