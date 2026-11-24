@@ -148,9 +148,11 @@ function matchOpenBoardsReal(
   return best?.timeType === "REAL" ? best : null;
 }
 
-function timingCorrectionForCrossing(crossing: any): number {
-  const globalValue = Number(process.env.CROSSING_TIME_CORRECTION_SECONDS ?? 0);
-  const globalCorrection = Number.isFinite(globalValue) ? globalValue : 0;
+function timingCorrectionForCrossing(crossing: any, configuredGlobal?: number): number {
+  const envValue = Number(process.env.CROSSING_TIME_CORRECTION_SECONDS ?? 0);
+  const globalCorrection = configuredGlobal != null && Number.isFinite(configuredGlobal)
+    ? configuredGlobal
+    : Number.isFinite(envValue) ? envValue : 0;
   const configured = crossing?.rules && !Array.isArray(crossing.rules)
     ? crossing.rules?.timing?.crossingTimeCorrectionSeconds
     : undefined;
@@ -159,12 +161,12 @@ function timingCorrectionForCrossing(crossing: any): number {
   return Number.isFinite(override) ? override : globalCorrection;
 }
 
-function toPayload(crossing: any, trains: any[], lineHints: string[]) {
+function toPayload(crossing: any, trains: any[], lineHints: string[], globalTimingCorrectionSeconds = 0) {
   const now = Date.now();
   // Positive values move the calculated crossing event later; negative values
   // move it earlier. The same correction is applied before deriving both the
   // barrier-close and barrier-open timestamps.
-  const timingCorrectionSeconds = timingCorrectionForCrossing(crossing);
+  const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds);
   const platformRules = Array.isArray(crossing.platformRules)
     ? crossing.platformRules
     : Array.isArray(crossing.rules) ? crossing.rules : [];
@@ -321,12 +323,34 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     crossing = crossing || legacyCrossing || null;
   }
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
+  let globalTimingCorrectionSeconds = 0;
+  try {
+    await db.execute(`CREATE TABLE IF NOT EXISTS crossing_timing_settings (
+      setting_key TEXT PRIMARY KEY,
+      setting_value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`);
+    const timingSetting = await db.execute({
+      sql: "SELECT setting_value FROM crossing_timing_settings WHERE setting_key = ? LIMIT 1",
+      args: ["global_crossing_time_correction_seconds"],
+    });
+    const storedValue = timingSetting.rows[0]?.setting_value;
+    const envValue = Number(process.env.CROSSING_TIME_CORRECTION_SECONDS ?? 0);
+    globalTimingCorrectionSeconds = storedValue == null
+      ? (Number.isFinite(envValue) ? envValue : 0)
+      : Number(storedValue);
+    if (!Number.isFinite(globalTimingCorrectionSeconds)) globalTimingCorrectionSeconds = 0;
+  } catch (error) {
+    console.warn("[STATUS] global timing setting unavailable; using environment default", error);
+    const envValue = Number(process.env.CROSSING_TIME_CORRECTION_SECONDS ?? 0);
+    globalTimingCorrectionSeconds = Number.isFinite(envValue) ? envValue : 0;
+  }
   // Version the forecast cache with the persisted crossing configuration. A saved
   // OSM track/rule edit must never keep serving a forecast computed from old rules.
   // Keep verbose OSM diagnostics in a separate cache entry so normal app requests
   // never pay the response-size or cache-storage cost of per-journey route details.
   const includeOsmDetails = new URL(request.url).searchParams.get("debug") === "osm";
-  const timingCorrectionSeconds = timingCorrectionForCrossing(crossing);
+  const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds);
   const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}:timing-${timingCorrectionSeconds}${includeOsmDetails ? ":osm-debug" : ""}`;
   const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
@@ -656,7 +680,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       })),
       ...retainedFromPrevious,
     ];
-    const payload=toPayload(crossing,forecastTrains,lineHints);
+    const payload=toPayload(crossing,forecastTrains,lineHints,globalTimingCorrectionSeconds);
     (payload as any).forecastDiagnostics = {
       snapshotRows: snapshotRows.length,
       primaryCandidates: primarySnapshot.length,
