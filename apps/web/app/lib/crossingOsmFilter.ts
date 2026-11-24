@@ -15,9 +15,12 @@ export type CrossingOsmFilterResult = {
   railwayWayId?: string;
   ref?: string;
   reason?: string;
+  directedDistanceMeters?: number;
   diagnostics?: {
     routeStations?: Array<{ name: string; nodeId: string | null; snapDistanceMeters: number | null }>;
     crossingNodes?: Array<{ nodeId: string; presentInGraph: boolean; degree: number; selectedWayEdges: string[] }>;
+    observationStation?: string;
+    crossingBeforeObservation?: boolean;
   };
 };
 
@@ -803,8 +806,8 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       railwayWayId: best.wayId,
       ref,
       reason: best.signedDistanceMeters == null ? "matched-direction-distance-unavailable" : "matched-with-directed-distance",
+      directedDistanceMeters: best.signedDistanceMeters == null ? undefined : Math.round(best.signedDistanceMeters),
       diagnostics: best.signedDistanceMeters == null ? undefined : {
-        directedDistanceMeters: Math.round(best.signedDistanceMeters),
         observationStation,
         crossingBeforeObservation: best.signedDistanceMeters < 0,
       },
