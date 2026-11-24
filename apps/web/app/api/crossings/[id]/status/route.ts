@@ -387,6 +387,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         destination:train.destination,
         platform:train.platform,
         isStoppingTrain:true,
+        observationStation:train.stationName,
+        observationTime:train.arrival,
+        fallbackOffsetSeconds:offsetSeconds,
         direction:getCrossingDirection([]),
         directionLabel:train.destination?`Richtung ${train.destination}`:null,
         delayMinutes:realtime
@@ -496,12 +499,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         route: train.route,
         selectedTracks: selectedOsmTracks,
       }),
-      observationStation: train.observationStation || "",
+      observationStation: train.observationStation || train.stationName || "",
       result: await filterTrainByCrossingOsm(
         crossing.id,
         train.route,
         selectedOsmWayIds.length ? selectedOsmWayIds : undefined,
-        train.observationStation || undefined,
+        train.observationStation || train.stationName || undefined,
       ),
     })));
     const osmReasonCounts = osmShadowResults.reduce((counts: Record<string, number>, item: any) => {
