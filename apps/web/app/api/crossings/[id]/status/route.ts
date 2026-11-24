@@ -349,6 +349,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         realtimeTimeType:realtime?.timeType || null,
         crossingTime:crossingTime.toISOString(),
         arrival:crossingTime.toISOString(),
+        observationStation:train.observationStation,
+        observationTime:train.observationActualTime,
+        fallbackOffsetSeconds:Number(train.fallbackOffsetSeconds || 300),
         etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)
       });
     }
@@ -411,7 +414,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         route: train.route,
         selectedTracks: selectedOsmTracks,
       }),
-      result: await filterTrainByCrossingOsm(crossing.id, train.route, selectedOsmWayIds.length ? selectedOsmWayIds : undefined),
+      observationStation: train.observationStation || "",
+      result: await filterTrainByCrossingOsm(
+        crossing.id,
+        train.route,
+        selectedOsmWayIds.length ? selectedOsmWayIds : undefined,
+        train.observationStation || undefined,
+      ),
     })));
     const osmReasonCounts = osmShadowResults.reduce((counts: Record<string, number>, item: any) => {
       const key = item.result.reason || item.result.status;
@@ -450,11 +459,25 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const assignedJourneyRefs = new Set(osmShadowResults
       .filter((item) => item.journeyKey && item.result.status === "matched")
       .map((item) => String(item.journeyKey)));
+    const osmResultByJourney = new Map(osmShadowResults.map((item: any) => [String(item.journeyKey), item.result]));
     const osmFilteredTrains = selectedOsmWayIds.length
-      ? enrichedTrains.filter((train: any) => {
+      ? enrichedTrains.flatMap((train: any) => {
           const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
-          if (rejectedJourneyRefs.has(journeyKey)) return false;
-          return assignedJourneyRefs.has(journeyKey);
+          if (rejectedJourneyRefs.has(journeyKey) || !assignedJourneyRefs.has(journeyKey)) return [];
+          const osmResult: any = osmResultByJourney.get(String(journeyKey));
+          // The ordered OSM path determines which side of the observation
+          // station the crossing lies on. Keep the configured travel-time
+          // magnitude for now, but apply its sign from the actual route topology.
+          if (osmResult?.directedDistanceMeters != null && train.observationTime) {
+            const observationAt = Date.parse(String(train.observationTime));
+            const offsetSeconds = Math.abs(Number(train.fallbackOffsetSeconds || 300));
+            if (Number.isFinite(observationAt) && Number.isFinite(offsetSeconds)) {
+              const signedOffset = Math.sign(Number(osmResult.directedDistanceMeters)) * offsetSeconds;
+              const crossingAt = new Date(observationAt + signedOffset * 1000);
+              return [{ ...train, crossingTime: crossingAt.toISOString(), arrival: crossingAt.toISOString(), etaSeconds: Math.floor((crossingAt.getTime() - Date.now()) / 1000), osmDirectedDistanceMeters: osmResult.directedDistanceMeters }];
+            }
+          }
+          return [train];
         })
       : enrichedTrains;
     const osmShadow = {
