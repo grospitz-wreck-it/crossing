@@ -148,14 +148,13 @@ function matchOpenBoardsReal(
   return best?.timeType === "REAL" ? best : null;
 }
 
-function timingCorrectionForCrossing(crossing: any, configuredGlobal?: number): number {
+function timingCorrectionForCrossing(crossing: any, configuredGlobal?: number, direction?: string): number {
   const envValue = Number(process.env.CROSSING_TIME_CORRECTION_SECONDS ?? 0);
-  const globalCorrection = configuredGlobal != null && Number.isFinite(configuredGlobal)
-    ? configuredGlobal
-    : Number.isFinite(envValue) ? envValue : 0;
-  const configured = crossing?.rules && !Array.isArray(crossing.rules)
-    ? crossing.rules?.timing?.crossingTimeCorrectionSeconds
-    : undefined;
+  const globalCorrection = configuredGlobal != null && Number.isFinite(configuredGlobal) ? configuredGlobal : Number.isFinite(envValue) ? envValue : 0;
+  const timing = crossing?.rules && !Array.isArray(crossing.rules) ? crossing.rules?.timing : undefined;
+  const directional = direction === "eastbound" || direction === "westbound" ? timing?.directionalCrossingTimeCorrectionSeconds?.[direction] : undefined;
+  if (directional != null && directional !== "" && Number.isFinite(Number(directional))) return Number(directional);
+  const configured = timing?.crossingTimeCorrectionSeconds;
   if (configured == null || configured === "") return globalCorrection;
   const override = Number(configured);
   return Number.isFinite(override) ? override : globalCorrection;
@@ -166,7 +165,6 @@ function toPayload(crossing: any, trains: any[], lineHints: string[], globalTimi
   // Positive values move the calculated crossing event later; negative values
   // move it earlier. The same correction is applied before deriving both the
   // barrier-close and barrier-open timestamps.
-  const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds);
   const platformRules = Array.isArray(crossing.platformRules)
     ? crossing.platformRules
     : Array.isArray(crossing.rules) ? crossing.rules : [];
@@ -216,6 +214,7 @@ function toPayload(crossing: any, trains: any[], lineHints: string[], globalTimi
   const occupancies = trains.flatMap((train: any) => {
     const rawCrossingAt = Date.parse(String(train.crossingTime || ""));
     if (!Number.isFinite(rawCrossingAt)) return [];
+    const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds, train.direction);
     const crossingAt = rawCrossingAt + timingCorrectionSeconds * 1000;
     const offsets = offsetsForTrain(train);
     const start = new Date(crossingAt - offsets.approach * 1000);
@@ -622,6 +621,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
               const crossingAt = new Date(observationAt + signedTravelSeconds * 1000);
               return [{
                 ...train,
+                direction: osmResult.direction || train.direction || "unknown",
                 directionLabel,
                 osmRailwayWayId,
                 crossingTime: crossingAt.toISOString(),
