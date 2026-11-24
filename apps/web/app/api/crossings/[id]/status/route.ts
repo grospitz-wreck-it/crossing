@@ -465,6 +465,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
           if (rejectedJourneyRefs.has(journeyKey) || !assignedJourneyRefs.has(journeyKey)) return [];
           const osmResult: any = osmResultByJourney.get(String(journeyKey));
+          if (!osmResult || osmResult.status !== "matched") return [];
+          // A train is displayed only when its ordered route has a positive
+          // physical path through the selected crossing track. Use the same
+          // matched route to label the direction, never the stale endpoint field.
+          const directionLabel = osmResult.directionLabel || train.directionLabel;
           // The ordered OSM path determines which side of the observation
           // station the crossing lies on. Keep the configured travel-time
           // magnitude for now, but apply its sign from the actual route topology.
@@ -474,10 +479,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
             if (Number.isFinite(observationAt) && Number.isFinite(offsetSeconds)) {
               const signedOffset = Math.sign(Number(osmResult.directedDistanceMeters)) * offsetSeconds;
               const crossingAt = new Date(observationAt + signedOffset * 1000);
-              return [{ ...train, crossingTime: crossingAt.toISOString(), arrival: crossingAt.toISOString(), etaSeconds: Math.floor((crossingAt.getTime() - Date.now()) / 1000), osmDirectedDistanceMeters: osmResult.directedDistanceMeters }];
+              return [{ ...train, directionLabel, crossingTime: crossingAt.toISOString(), arrival: crossingAt.toISOString(), etaSeconds: Math.floor((crossingAt.getTime() - Date.now()) / 1000), osmDirectedDistanceMeters: osmResult.directedDistanceMeters }];
             }
           }
-          return [train];
+          return [{ ...train, directionLabel }];
         })
       : enrichedTrains;
     const osmShadow = {
