@@ -148,8 +148,23 @@ function matchOpenBoardsReal(
   return best?.timeType === "REAL" ? best : null;
 }
 
+function timingCorrectionForCrossing(crossing: any): number {
+  const globalValue = Number(process.env.CROSSING_TIME_CORRECTION_SECONDS ?? 0);
+  const globalCorrection = Number.isFinite(globalValue) ? globalValue : 0;
+  const configured = crossing?.rules && !Array.isArray(crossing.rules)
+    ? crossing.rules?.timing?.crossingTimeCorrectionSeconds
+    : undefined;
+  if (configured == null || configured === "") return globalCorrection;
+  const override = Number(configured);
+  return Number.isFinite(override) ? override : globalCorrection;
+}
+
 function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   const now = Date.now();
+  // Positive values move the calculated crossing event later; negative values
+  // move it earlier. The same correction is applied before deriving both the
+  // barrier-close and barrier-open timestamps.
+  const timingCorrectionSeconds = timingCorrectionForCrossing(crossing);
   const platformRules = Array.isArray(crossing.platformRules)
     ? crossing.platformRules
     : Array.isArray(crossing.rules) ? crossing.rules : [];
@@ -197,8 +212,9 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
   // Intervals are merged only when the next approach begins before the previous
   // train has cleared; there is no arbitrary extra 30-second hold-down.
   const occupancies = trains.flatMap((train: any) => {
-    const crossingAt = Date.parse(String(train.crossingTime || ""));
-    if (!Number.isFinite(crossingAt)) return [];
+    const rawCrossingAt = Date.parse(String(train.crossingTime || ""));
+    if (!Number.isFinite(rawCrossingAt)) return [];
+    const crossingAt = rawCrossingAt + timingCorrectionSeconds * 1000;
     const offsets = offsetsForTrain(train);
     const start = new Date(crossingAt - offsets.approach * 1000);
     const end = new Date(crossingAt + offsets.clearance * 1000);
@@ -211,6 +227,7 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
       train: {
         ...train,
         predictedCrossingAt: new Date(crossingAt).toISOString(),
+        timingCorrectionSeconds,
         predictedBarrierCloseAt: start.toISOString(),
         predictedBarrierOpenAt: end.toISOString(),
         predictedTailClearanceSeconds: offsets.tailClearance,
@@ -309,7 +326,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // Keep verbose OSM diagnostics in a separate cache entry so normal app requests
   // never pay the response-size or cache-storage cost of per-journey route details.
   const includeOsmDetails = new URL(request.url).searchParams.get("debug") === "osm";
-  const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}${includeOsmDetails ? ":osm-debug" : ""}`;
+  const timingCorrectionSeconds = timingCorrectionForCrossing(crossing);
+  const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}:timing-${timingCorrectionSeconds}${includeOsmDetails ? ":osm-debug" : ""}`;
   const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   // Keep a short-lived previous forecast as a safety net when one snapshot poll
