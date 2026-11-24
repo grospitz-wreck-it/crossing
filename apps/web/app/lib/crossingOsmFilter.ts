@@ -38,6 +38,7 @@ type CorridorGraph = {
 };
 
 const CACHE_TTL_MS = 300_000;
+const STATION_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
 const RESULT_CACHE_TTL_MS = 300_000;
 const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 15_000;
 
@@ -60,6 +61,7 @@ async function loadStationCatalog() {
   stationCatalogPromise = (async () => {
     try {
       const result = await db.execute({ sql: `SELECT eva, name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`, args: [] });
+      console.info(`[STATION CATALOG] source=web mode=full-scan rows=${result.rows.length}`);
       const byName = new Map<string, RouteStation>();
       for (const row of result.rows as any[]) {
         const name = String(row.name || "");
@@ -69,7 +71,7 @@ async function loadStationCatalog() {
         const eva = String(row.eva || "").trim();
         if (eva) byName.set(normalizeStationName(eva), { name, lat: Number(row.lat), lon: Number(row.lon) });
       }
-      stationCatalogCache = { expiresAt: Date.now() + CACHE_TTL_MS, value: byName };
+      stationCatalogCache = { expiresAt: Date.now() + STATION_CATALOG_CACHE_TTL_MS, value: byName };
       return byName;
     } finally { stationCatalogPromise = null; }
   })();
@@ -605,7 +607,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
   const cachedResult = resultCache.get(resultKey);
   if (cachedResult && cachedResult.expiresAt > Date.now()) return cachedResult.value;
   try {
-    const [mapping, coordinateRoute] = await Promise.all([loadMappingCached(crossingId), routeToCoordinates(route)]);
+    const mapping = await loadMappingCached(crossingId);
     if (!mapping) return { status: "unknown", reason: "crossing-osm-mapping-missing" };
     if (mapping.crossingNodeIds.size === 0) return { status: "unknown", reason: "crossing-osm-node-missing" };
 
@@ -631,14 +633,18 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
         };
       }
     }
+    // Check the prepared profile before resolving route names against the full
+    // station catalogue. Missing profiles must not trigger a catalogue scan.
+    const corridor = await loadCorridorGraph(crossingId);
+    if (!corridor) return { status: "unknown", reason: "corridor-profile-unavailable" };
+
+    const coordinateRoute = await routeToCoordinates(route);
     if (!isTrainRouteNearCrossing({ lat: mapping.crossingLat, lon: mapping.crossingLon }, coordinateRoute)) {
       const result: CrossingOsmFilterResult = { status: "rejected" };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
       console.log(`[OSM MATCH] crossing=${crossingId} route=${route.join(" -> ")} result=REJECTED reason=route-too-far`);
       return result;
     }
-    const corridor = await loadCorridorGraph(crossingId);
-    if (!corridor) return { status: "unknown", reason: "corridor-profile-unavailable" };
     const stations = coordinateRoute.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
     if (stations.length < 2) return { status: "unknown", reason: `route-stations-unresolved:${stations.length}/${coordinateRoute.length}` };
     const graph = corridor.graph;
