@@ -42,19 +42,28 @@ export type CrossingOsmTrack = {
   segments?: Array<Array<{ lat: number; lon: number }>>;
 };
 
+export type CrossingObservationStation = {
+  eva: string;
+  stationName?: string;
+  side: "before" | "after";
+  /** OSM way IDs this station is assigned to; empty means legacy/unassigned. */
+  trackWayIds?: number[];
+  /** Direction in which this station is used for the configured track. */
+  direction?: "eastbound" | "westbound" | "unknown";
+  enabled?: boolean;
+  priority?: number;
+  distanceKm?: number;
+  /** Along-track distance from the crossing, not lateral distance to the OSM geometry. */
+  trackDistanceMeters?: number;
+  fallbackOffsetSeconds?: number;
+  lat?: number;
+  lon?: number;
+};
+
 export type CrossingOsmRules = {
   lineHints?: string[];
   selectedOsmTracks?: CrossingOsmTrack[];
-  observationStations?: Array<{
-    eva: string;
-    stationName?: string;
-    side?: "before" | "after";
-    distanceKm?: number;
-    trackDistanceMeters?: number;
-    fallbackOffsetSeconds?: number;
-    lat?: number;
-    lon?: number;
-  }>;
+  observationStations?: CrossingObservationStation[];
 };
 
 export type Crossing = {
