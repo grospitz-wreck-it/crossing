@@ -14,15 +14,19 @@ function jsonValue(value: unknown, fallback: any = {}) { if (value && typeof val
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const linkedObservationEvas = stationRows.filter(s => !s.role || s.role === "observation" || s.role === "automatic" || s.role === "primary").map(s => String(s.eva || "").trim()).filter(Boolean);
   const observationEvas = linkedObservationEvas.length ? Array.from(new Set(linkedObservationEvas)) : jsonArray(row.observation_evas).map(String).filter(Boolean);
-  // Prefer explicitly selected primary links. Older admin saves used role=observation
-  // for selected primary stations, so retain that fallback only when no primary
-  // link exists and the dedicated reference_stations field is empty.
+  // Primary anchors must be explicit. Observation links are auxiliary timing
+  // stations and must never become primary merely because older admin records
+  // stored them with role=observation. If no primary was configured, use only
+  // the crossing's own station EVA (when available), never every linked station.
   const storedReferenceStations = jsonArray(row.reference_stations).map((value: any) => String(value).trim()).filter(Boolean);
   const linkedPrimaryEvas = stationRows.filter(s => s.role === "primary").map(s => String(s.eva || "").trim()).filter(Boolean);
-  const legacyPrimaryEvas = stationRows.filter(s => s.role === "observation").map(s => String(s.eva || "").trim()).filter(Boolean);
-  const referenceStations = storedReferenceStations.length
-    ? storedReferenceStations
-    : Array.from(new Set(linkedPrimaryEvas.length ? linkedPrimaryEvas : legacyPrimaryEvas));
+  const referenceStations = Array.from(new Set(
+    storedReferenceStations.length
+      ? storedReferenceStations
+      : linkedPrimaryEvas.length
+        ? linkedPrimaryEvas
+        : row.eva ? [String(row.eva).trim()] : [],
+  ));
   if (row.eva && !observationEvas.length) observationEvas.unshift(String(row.eva));
   const linkedContextEvas = stationRows.filter(s => s.role === "context").map(s => String(s.eva || "").trim()).filter(Boolean);
   const stationNameByEva = new Map<string, string>();
