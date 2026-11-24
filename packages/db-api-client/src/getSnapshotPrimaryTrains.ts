@@ -145,7 +145,9 @@ export async function getSnapshotPrimaryTrains(
         stationEva: eva,
         stationName,
         platform: call?.platform ? String(call.platform) : undefined,
-        delayMinutes: Number(row.delay_minutes || 0),
+        delayMinutes: actualStationTime && plannedStationTime
+          ? Math.round((Date.parse(String(actualStationTime)) - Date.parse(String(plannedStationTime))) / 60000)
+          : Number(row.delay_minutes || 0),
         crossingTime: crossingTime.toISOString(),
         arrival: parsedTime.toISOString(),
         scheduledTime: String(scheduledStationTime),
