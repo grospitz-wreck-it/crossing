@@ -120,7 +120,8 @@ export async function GET(request:Request){
           ibnr:row.ibnr?String(row.ibnr):undefined,
           lat:stationLat,lon:stationLon,
           distanceKm:distanceKm(lat,lon,stationLat,stationLon),
-          trackDistanceMeters:geometryDistanceMeters({lat:stationLat,lon:stationLon},segments),\n          alongTrackDistanceMeters:alongTrackDistance({lat:stationLat,lon:stationLon},{lat,lon},segments)
+          trackDistanceMeters:geometryDistanceMeters({lat:stationLat,lon:stationLon},segments),
+          alongTrackDistanceMeters:alongTrackDistance({lat:stationLat,lon:stationLon},{lat,lon},segments)
         } as StationCandidate;
       })
       .filter(s=>s.eva&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)&&s.distanceKm<=80&&s.trackDistanceMeters<=2500&&s.alongTrackDistanceMeters!=null)
