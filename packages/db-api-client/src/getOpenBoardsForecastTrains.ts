@@ -159,6 +159,9 @@ export function getOpenBoardsForecastTrains(
         destination: observation.destinationEva,
         platform: observation.platform,
         isStoppingTrain: false,
+        observationStation: String(rule.observationStation || eva),
+        observationTime: observation.eventTime,
+        fallbackOffsetSeconds: offset,
         direction: rule.direction || "unknown",
         directionLabel: "Durchfahrt",
         delayMinutes: observation.timeType === "REAL" && observation.scheduledTime
