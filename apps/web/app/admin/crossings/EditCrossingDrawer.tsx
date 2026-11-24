@@ -7,7 +7,7 @@ type StationLink = { id?: string; eva: string; station_name: string; role: strin
 type NearbyStation = { eva: string; name: string; ril100?: string; lat: number; lon: number; city?: string; distanceKm: number };
 type InfrastructureCandidate = { kind: "route" | "track"; ref: string; name: string; wayId: number; routeType?: string; relationId?: number | null; from?: string; to?: string; distanceMeters: number; lineRelations: { id: number; ref: string; name: string; routeType?: string }[]; segments: { lat: number; lon: number }[][] };
 type TrackStationCandidate = { eva: string; stationName: string; ril100?: string; ibnr?: string; lat: number; lon: number; distanceKm: number; trackDistanceMeters: number };
-type SelectedTrackStation = TrackStationCandidate & { side: "before" | "after" };
+type SelectedTrackStation = TrackStationCandidate & { side: "before" | "after"; trackWayIds: number[]; direction: "eastbound" | "westbound" | "unknown"; enabled: boolean; priority: number };
 type Props = { crossingId: string; onClose: () => void; onSaved?: () => void };
 
 const inputStyle: CSSProperties = { width: "100%", boxSizing: "border-box", border: "1px solid #dfe3e8", borderRadius: 10, padding: "11px 12px", font: "inherit", fontSize: 13 };
@@ -109,7 +109,7 @@ export default function EditCrossingDrawer({ crossingId, onClose, onSaved }: Pro
     setSelectedTrackStations((current) => {
       const existing = current.find((item) => item.eva === station.eva);
       if (existing?.side === side) return current.filter((item) => item.eva !== station.eva);
-      return [...current.filter((item) => item.eva !== station.eva), { ...station, side }];
+      return [...current.filter((item) => item.eva !== station.eva), { ...station, side, trackWayIds: [...selectedWayIds], direction: "unknown", enabled: true, priority: 1 }];
     });
   }
   function toggleLineHint(value: string) {
@@ -148,7 +148,7 @@ export default function EditCrossingDrawer({ crossingId, onClose, onSaved }: Pro
         timing: { ...(crossingRules.timing || {}), ...(overrideValue === null ? {} : { crossingTimeCorrectionSeconds: Math.round(overrideValue) }), ...(Object.keys(directionalCorrections).length ? { directionalCrossingTimeCorrectionSeconds: directionalCorrections } : {}) },
         lineHints: selectedLineHints.filter((hint) => availableHints.includes(hint)),
         selectedOsmTracks: selectedTracks,
-        observationStations: selectedTrackStations,
+        observationStations: selectedTrackStations.map((station) => ({ ...station, trackDistanceMeters: undefined })),
       };
       if (overrideValue === null) delete rules.timing.crossingTimeCorrectionSeconds;
       if (!Object.keys(directionalCorrections).length) delete rules.timing.directionalCrossingTimeCorrectionSeconds;
@@ -216,6 +216,7 @@ export default function EditCrossingDrawer({ crossingId, onClose, onSaved }: Pro
       <span style={{ flex: 1, minWidth: 0 }}><strong style={{ display: "block", fontSize: 11 }}>{station.stationName}</strong><small style={{ color: "#68717d" }}>EVA {station.eva} · {station.distanceKm.toFixed(1)} km · {Math.round(station.trackDistanceMeters)} m zur Strecke</small></span>
       <button type="button" onClick={() => setTrackStationSide(station, "before")} style={{ border: "1px solid #dfe3e8", borderRadius: 8, padding: "7px 8px", background: selected?.side === "before" ? "#e9f6ef" : "#fff", fontSize: 10, fontWeight: 750 }}>Vorher</button>
       <button type="button" onClick={() => setTrackStationSide(station, "after")} style={{ border: "1px solid #dfe3e8", borderRadius: 8, padding: "7px 8px", background: selected?.side === "after" ? "#e9f6ef" : "#fff", fontSize: 10, fontWeight: 750 }}>Nachher</button>
+      {selected && <select aria-label={`Fahrtrichtung für ${station.stationName}`} value={selected.direction} onChange={(event) => setSelectedTrackStations((items) => items.map((item) => item.eva === station.eva ? { ...item, direction: event.target.value as SelectedTrackStation["direction"] } : item))} style={{ ...inputStyle, width: 118, padding: "7px 8px", fontSize: 10 }}><option value="unknown">Richtung offen</option><option value="eastbound">Ost</option><option value="westbound">West</option></select>}
     </div>; })}
     {selectedTrackStations.length > 0 && <small style={{ color: "#18834d" }}>Ausgewählt: {selectedTrackStations.map((station) => `${station.stationName} (${station.side === "before" ? "vorher" : "nachher"})`).join(" · ")}</small>}
   </div>}
