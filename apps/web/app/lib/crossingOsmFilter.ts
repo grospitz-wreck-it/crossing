@@ -599,7 +599,7 @@ function findCrossingOnPath(graph: CorridorGraph["graph"], pathNodes: string[], 
   return null;
 }
 
-export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined, selectedWayIds?: string[]): Promise<CrossingOsmFilterResult> {
+export async function filterTrainByCrossingOsm(crossingId: string, route: string[] | undefined, selectedWayIds?: string[], observationStation?: string): Promise<CrossingOsmFilterResult> {
   if (!route?.length) return { status: "unknown", reason: "route-missing" };
   const selectedWays = selectedWayIds?.map(String).filter(Boolean) ?? [];
   const selectedWaySet = selectedWays.length ? new Set(selectedWays) : null;
@@ -646,7 +646,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     const stations = coordinateRoute.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
     if (stations.length < 2) return { status: "unknown", reason: `route-stations-unresolved:${stations.length}/${coordinateRoute.length}` };
     const graph = corridor.graph;
-    const crossingHits: Array<{ fromIndex: number; toIndex: number; pathDistance: number; crossingDistance: number; wayId: string; nodeId: string }> = [];
+    const crossingHits: Array<{ fromIndex: number; toIndex: number; pathDistance: number; distanceFromStart: number; distanceToEnd: number; crossingDistance: number; wayId: string; nodeId: string }> = [];
     // A prepared corridor is local to the crossing. OpenBoards via lists can
     // omit intermediate calls or return only partial route context, so the
     // immediately adjacent listed stops are not always both inside this graph.
@@ -689,7 +689,19 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       const graphPoint = graph.nodePoints.get(crossingHit.nodeId);
       if (!graphPoint) continue;
       const crossingDistance = distanceMeters({ lat: mapping.crossingLat, lon: mapping.crossingLon }, graphPoint);
-      crossingHits.push({ fromIndex, toIndex, pathDistance: path.distance, crossingDistance, wayId: railwayWayId, nodeId: crossingHit.nodeId });
+      const pathDistanceAt = (startIndex: number, endIndex: number) => {
+        let distance = 0;
+        for (let index = startIndex + 1; index <= endIndex; index += 1) {
+          const a = graph.nodePoints.get(path.nodes[index - 1]);
+          const b = graph.nodePoints.get(path.nodes[index]);
+          if (!a || !b) return NaN;
+          distance += distanceMeters(a, b);
+        }
+        return distance;
+      };
+      const distanceFromStart = pathDistanceAt(0, crossingPathIndex);
+      const distanceToEnd = pathDistanceAt(crossingPathIndex, path.nodes.length - 1);
+      crossingHits.push({ fromIndex, toIndex, pathDistance: path.distance, distanceFromStart, distanceToEnd, crossingDistance, wayId: railwayWayId, nodeId: crossingHit.nodeId });
       }
     }
     if (!crossingHits.length) {
@@ -751,7 +763,18 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       };
     }
 
-    const best = crossingHits.sort((a, b) => a.crossingDistance - b.crossingDistance)[0];
+    const observationIndex = observationStation
+      ? route.findIndex((name) => normalizeStationName(name) === normalizeStationName(observationStation))
+      : -1;
+    const directedHits = crossingHits.map((hit) => ({
+      ...hit,
+      signedDistanceMeters: observationIndex === hit.fromIndex && Number.isFinite(hit.distanceFromStart)
+        ? hit.distanceFromStart
+        : observationIndex === hit.toIndex && Number.isFinite(hit.distanceToEnd)
+          ? -hit.distanceToEnd
+          : null,
+    }));
+    const best = directedHits.sort((a, b) => a.crossingDistance - b.crossingDistance)[0];
     if (selectedWaySet && !selectedWaySet.has(String(best.wayId))) {
       const result: CrossingOsmFilterResult = { status: "rejected", railwayWayId: best.wayId };
       resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
@@ -774,7 +797,18 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
         try { const tags = JSON.parse(String(refRow.tags_json || "{}")); if (tags?.ref != null) ref = String(tags.ref); } catch {}
       }
     }
-    const result: CrossingOsmFilterResult = { status: "matched", score, railwayWayId: best.wayId, ref };
+    const result: CrossingOsmFilterResult = {
+      status: "matched",
+      score,
+      railwayWayId: best.wayId,
+      ref,
+      reason: best.signedDistanceMeters == null ? "matched-direction-distance-unavailable" : "matched-with-directed-distance",
+      diagnostics: best.signedDistanceMeters == null ? undefined : {
+        directedDistanceMeters: Math.round(best.signedDistanceMeters),
+        observationStation,
+        crossingBeforeObservation: best.signedDistanceMeters < 0,
+      },
+    };
     resultCache.set(resultKey, { expiresAt: Date.now() + RESULT_CACHE_TTL_MS, value: result });
     console.log(`[OSM MATCH] crossing=${crossingId} segment=${stations[best.fromIndex].name} -> ${stations[best.toIndex].name} way=${best.wayId ?? "?"} ref=${ref ?? "?"} pathDistance=${best.pathDistance.toFixed(0)}m crossingDistance=${best.crossingDistance.toFixed(1)}m score=${score.toFixed(3)} result=MATCHED`);
     return result;
