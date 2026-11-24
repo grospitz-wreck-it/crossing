@@ -138,8 +138,13 @@ async function loadDemand(
 
     for (const rule of parseArray(row.through_rules)) {
       if (!rule || typeof rule !== "object") continue;
-      const name = String((rule as Record<string, unknown>).observationStation || "").trim();
-      if (name) stationNames.add(name);
+      const record = rule as Record<string, unknown>;
+      const ruleEva = String(record.observationEva || "").trim();
+      if (ruleEva) configuredEvas.add(ruleEva);
+      else {
+        const name = String(record.observationStation || "").trim();
+        if (name) stationNames.add(name);
+      }
     }
   }
 
@@ -153,6 +158,9 @@ async function loadDemand(
         })
       : { rows: [] as Array<Record<string, unknown>> };
 
+  if (stationNames.size) {
+    console.info(`[STATION CATALOG] source=openboards-worker mode=full-scan rows=${catalogResult.rows.length}`);
+  }
   const stationByName = new Map<string, { eva: string; name: string }>();
   const stationByEva = new Map<string, { eva: string; name: string }>();
   for (const row of catalogResult.rows as Array<Record<string, unknown>>) {
@@ -186,8 +194,12 @@ async function loadDemand(
     for (const rule of parseArray(row.through_rules)) {
       if (!rule || typeof rule !== "object") continue;
       const record = rule as Record<string, unknown>;
-      const name = String(record.observationStation || "").trim();
-      if (name) stationNames.push(name);
+      const ruleEva = String(record.observationEva || "").trim();
+      if (ruleEva) evas.add(ruleEva);
+      else {
+        const name = String(record.observationStation || "").trim();
+        if (name) stationNames.push(name);
+      }
     }
 
     for (const name of stationNames) {

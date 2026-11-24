@@ -102,34 +102,28 @@ export async function getDbApiUsage() {
     throw new Error("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN fehlen für den DB-API-Counter.");
   }
 
+  // One index-backed scan from local midnight replaces several independent
+  // COUNT(*) subqueries over the full usage history.
   const result = await db.execute({
     sql: `
       SELECT
-        COUNT(*) AS last_60_seconds,
-        (SELECT COUNT(*) FROM api_usage_log
-          WHERE api_name = 'db-timetables'
-            AND cache_hit = 0
-            AND created_at >= datetime('now', '-60 minutes')) AS last_hour,
-        (SELECT COUNT(*) FROM api_usage_log
-          WHERE api_name = 'db-timetables'
-            AND cache_hit = 0
-            AND date(created_at, 'localtime') = date('now', 'localtime')) AS today,
-        (SELECT COUNT(*) FROM api_usage_log
-          WHERE api_name = 'db-timetables'
-            AND cache_hit = 1
-            AND date(created_at, 'localtime') = date('now', 'localtime')) AS cache_hits_today,
-        (SELECT COUNT(*) FROM api_usage_log
-          WHERE api_name = 'db-timetables'
-            AND cache_hit = 0
-            AND created_at >= datetime('now', '-60 seconds')) AS current_window,
-        (SELECT MIN(created_at) FROM api_usage_log
-          WHERE api_name = 'db-timetables'
-            AND cache_hit = 0
-            AND created_at >= datetime('now', '-60 seconds')) AS oldest_request
+        SUM(CASE
+          WHEN cache_hit = 0 AND created_at >= datetime('now', '-60 seconds')
+          THEN 1 ELSE 0
+        END) AS current_window,
+        SUM(CASE
+          WHEN cache_hit = 0 AND created_at >= datetime('now', '-60 minutes')
+          THEN 1 ELSE 0
+        END) AS last_hour,
+        SUM(CASE WHEN cache_hit = 0 THEN 1 ELSE 0 END) AS today,
+        SUM(CASE WHEN cache_hit = 1 THEN 1 ELSE 0 END) AS cache_hits_today,
+        MIN(CASE
+          WHEN cache_hit = 0 AND created_at >= datetime('now', '-60 seconds')
+          THEN created_at
+        END) AS oldest_request
       FROM api_usage_log
       WHERE api_name = 'db-timetables'
-        AND cache_hit = 0
-        AND created_at >= datetime('now', '-60 seconds')
+        AND created_at >= datetime('now', 'localtime', 'start of day', 'utc')
     `,
   });
 
@@ -137,6 +131,9 @@ export async function getDbApiUsage() {
   const limit = getLimit();
   const current = asNumber(row.current_window);
 
+  // Keep the EVA breakdown for the dedicated API details screen. The
+  // composite index in 010_api_usage_log_indexes.sql makes this a bounded
+  // 24-hour range scan rather than a full-table scan.
   const evaResult = await db.execute({
     sql: `
       SELECT eva, COUNT(*) AS requests

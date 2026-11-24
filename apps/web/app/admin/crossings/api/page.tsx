@@ -7,7 +7,7 @@ type Usage = { limitPerMinute:number; currentWindow:number; remaining:number; ut
 
 export default function ApiDetailsPage(){
   const [usage,setUsage]=useState<Usage|null>(null); const [error,setError]=useState("");
-  useEffect(()=>{let alive=true;async function load(){try{const r=await fetch("/api/admin/api-usage",{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"API-Status konnte nicht geladen werden.");if(alive)setUsage(d);}catch(e){if(alive)setError(e instanceof Error?e.message:"API-Status konnte nicht geladen werden.");}}void load();const t=window.setInterval(load,10000);return()=>{alive=false;window.clearInterval(t)}},[]);
+  useEffect(()=>{let alive=true;async function load(){try{const r=await fetch("/api/admin/api-usage",{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error(d.error||"API-Status konnte nicht geladen werden.");if(alive)setUsage(d);}catch(e){if(alive)setError(e instanceof Error?e.message:"API-Status konnte nicht geladen werden.");}}void load();const t=window.setInterval(load,60000);return()=>{alive=false;window.clearInterval(t)}},[]);
   const pct=Math.min(100,Math.max(0,usage?.utilizationPercent||0));
   return <main className={styles.page}><header className={styles.header}><div><div className={styles.eyebrow}>SYSTEM · DB API</div><h1>API-Übersicht</h1><p>Rate-Limit, Verbrauch und die teuersten EVA-Abfragen auf einen Blick.</p></div><a className={styles.back} href="/admin/crossings">← Bahnübergänge</a></header>
     {error&&<div className={styles.error}>{error}</div>}
