@@ -27,7 +27,34 @@ function geometryDistanceMeters(point:Point,segments:Point[][]){
   for(const segment of segments) for(let i=1;i<segment.length;i++) best=Math.min(best,pointSegmentDistanceMeters(point.lat,point.lon,segment[i-1],segment[i]));
   return best;
 }
-function distanceKm(lat1:number,lon1:number,lat2:number,lon2:number){
+
+function projectOnSegment(point:Point,a:Point,b:Point,latitude:number){
+  const scale=111320,cos=Math.cos(latitude*Math.PI/180);
+  const ax=(a.lon-point.lon)*scale*cos, ay=(a.lat-point.lat)*scale;
+  const bx=(b.lon-a.lon)*scale*cos, by=(b.lat-a.lat)*scale;
+  const length=Math.hypot(bx,by);
+  const t=length ? Math.max(0,Math.min(1,-(ax*bx+ay*by)/(length*length))) : 0;
+  return { distance:Math.hypot(ax+bx*t,ay+by*t), along:t*length };
+}
+function alongTrackDistance(point:Point,crossing:Point,segments:Point[][]){
+  let best:{score:number;delta:number}|null=null;
+  for(const segment of segments){
+    if(segment.length<2) continue;
+    let stationAlong=0,crossingAlong=0,walked=0,stationDistance=Infinity,crossingDistance=Infinity;
+    for(let i=1;i<segment.length;i++){
+      const a=segment[i-1],b=segment[i];
+      const length=Math.hypot((b.lon-a.lon)*111320*Math.cos(crossing.lat*Math.PI/180),(b.lat-a.lat)*111320);
+      const ps=projectOnSegment(point,a,b,crossing.lat),pc=projectOnSegment(crossing,a,b,crossing.lat);
+      if(ps.distance<stationDistance){stationDistance=ps.distance;stationAlong=walked+ps.along;}
+      if(pc.distance<crossingDistance){crossingDistance=pc.distance;crossingAlong=walked+pc.along;}
+      walked+=length;
+    }
+    const score=stationDistance+crossingDistance;
+    if(!best||score<best.score) best={score,delta:Math.abs(stationAlong-crossingAlong)};
+  }
+  return best && best.score<5000 ? Math.round(best.delta) : null;
+}
+\nfunction distanceKm(lat1:number,lon1:number,lat2:number,lon2:number){
   const r=6371,dLat=(lat2-lat1)*Math.PI/180,dLon=(lon2-lon1)*Math.PI/180;
   const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
   return r*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
@@ -93,10 +120,10 @@ export async function GET(request:Request){
           ibnr:row.ibnr?String(row.ibnr):undefined,
           lat:stationLat,lon:stationLon,
           distanceKm:distanceKm(lat,lon,stationLat,stationLon),
-          trackDistanceMeters:geometryDistanceMeters({lat:stationLat,lon:stationLon},segments)
+          trackDistanceMeters:geometryDistanceMeters({lat:stationLat,lon:stationLon},segments),\n          alongTrackDistanceMeters:alongTrackDistance({lat:stationLat,lon:stationLon},{lat,lon},segments)
         } as StationCandidate;
       })
-      .filter(s=>s.eva&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)&&s.distanceKm<=80&&s.trackDistanceMeters<=2500)
+      .filter(s=>s.eva&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)&&s.distanceKm<=80&&s.trackDistanceMeters<=2500&&s.alongTrackDistanceMeters!=null)
       .sort((a,b)=>a.distanceKm-b.distanceKm)
       .slice(0,20);
     return NextResponse.json({status:"OK",stations});
