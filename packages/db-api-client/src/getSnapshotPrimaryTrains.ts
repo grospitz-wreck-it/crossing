@@ -114,7 +114,13 @@ export async function getSnapshotPrimaryTrains(
       // were written before stopPointRef/stopPlaceRef was persisted.
       // We do not infer primary status from nearby stations, route anchors,
       // line hints or automatically discovered observation EVAs.
-      const stationTime = call?.actual || call?.planned || row.actual_time;
+      // For a journey continuing beyond this station, anchor the estimate
+      // to its departure event. Keep actual/planned values paired by event type
+      // so an arrival is never compared with a planned departure.
+      const actualStationTime = call?.actualDeparture || call?.actual || call?.actualArrival;
+      const plannedStationTime = call?.plannedDeparture || call?.planned || call?.plannedArrival;
+      const stationTime = actualStationTime || plannedStationTime || row.actual_time;
+      const scheduledStationTime = plannedStationTime || stationTime;
       const parsedTime = new Date(stationTime);
       if (!Number.isFinite(parsedTime.getTime())) continue;
 
@@ -142,7 +148,7 @@ export async function getSnapshotPrimaryTrains(
         delayMinutes: Number(row.delay_minutes || 0),
         crossingTime: crossingTime.toISOString(),
         arrival: parsedTime.toISOString(),
-        scheduledTime: String(call?.plannedDeparture || call?.plannedArrival || call?.planned || stationTime),
+        scheduledTime: String(scheduledStationTime),
         // Mobilithek calls preserve the ordered journey path needed by OSM matching.
         route: (Array.isArray(calls) ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean) : []).length >= 2
           ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean)
