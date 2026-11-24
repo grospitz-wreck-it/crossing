@@ -60,11 +60,11 @@ export async function getSnapshotPrimaryTrains(
       .map((eva: unknown) => String(eva).trim())
       .filter((eva: string) => Boolean(eva)),
   ));
-  if (!primaryEvas.length) return [];
-
   const configuredObservationStations = (crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations) ? crossing.rules.observationStations : [])
     .filter((station: any) => station && station.enabled !== false && station.eva && (station.side === "before" || station.side === "after") && Number.isFinite(Number(station.trackDistanceMeters)) && Number(station.trackDistanceMeters) > 0);
-  const stationEvas = Array.from(new Set([...primaryEvas, ...configuredObservationStations.map((station: any) => String(station.eva).trim())]));
+  const candidateEvas = Array.from(new Set([...primaryEvas, ...configuredObservationStations.map((station: any) => String(station.eva).trim())].filter(Boolean)));
+  if (!candidateEvas.length) return [];
+  const stationEvas = candidateEvas;
   const stationResult = await db.execute({
     sql: "SELECT eva,name FROM railway_station_catalog WHERE eva IN (" +
       stationEvas.map(() => "?").join(",") + ")",
@@ -102,7 +102,7 @@ export async function getSnapshotPrimaryTrains(
     const calls = parseJson(row.calls_json, []);
     if (!Array.isArray(calls) || !calls.length) continue;
 
-    for (const eva of primaryEvas) {
+    for (const eva of candidateEvas) {
       const stationName = stationNames.get(eva) || eva;
 
       const call = calls.find((item: any) =>
