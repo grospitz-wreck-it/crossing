@@ -258,7 +258,9 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing, s
           destination: row.destination ? String(row.destination) : undefined,
           origin: row.origin ? String(row.origin) : undefined,
           route,
-          delayMinutes: Number(row.delay_minutes || 0),
+          delayMinutes: observationCall?.actual && (observationCall?.plannedDeparture || observationCall?.planned || observationCall?.plannedArrival)
+            ? Math.round((Date.parse(String(observationCall.actualDeparture || observationCall.actual)) - Date.parse(String(observationCall.plannedDeparture || observationCall.planned || observationCall.plannedArrival))) / 60000)
+            : Number(row.delay_minutes || 0),
           observationEva: String(rule.observationEva || ""),
           observationStation,
           observationActualTime: parsedObservation.toISOString(),
