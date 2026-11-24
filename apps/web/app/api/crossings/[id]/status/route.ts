@@ -388,7 +388,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         platform:train.platform,
         isStoppingTrain:true,
         observationStation:train.stationName,
-        observationTime:train.arrival,
+        observationTime:liveTime,
         fallbackOffsetSeconds:offsetSeconds,
         direction:getCrossingDirection([]),
         directionLabel:train.destination?`Richtung ${train.destination}`:null,
@@ -435,7 +435,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         crossingTime:crossingTime.toISOString(),
         arrival:crossingTime.toISOString(),
         observationStation:train.observationStation,
-        observationTime:train.observationActualTime,
+        observationTime:liveObservationTime,
         fallbackOffsetSeconds:Number(train.fallbackOffsetSeconds || 300),
         etaSeconds:Math.floor((crossingTime.getTime()-Date.now())/1000)
       });
@@ -556,16 +556,37 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           // matched route to label the direction, never the stale endpoint field.
           const directionLabel = osmResult.directionLabel || train.directionLabel;
           const osmRailwayWayId = osmResult.railwayWayId == null ? undefined : String(osmResult.railwayWayId);
-          // The ordered OSM path determines which side of the observation
-          // station the crossing lies on. Keep the configured travel-time
-          // magnitude for now, but apply its sign from the actual route topology.
+          // Use the directed OSM rail distance as the travel-time basis.
+          // The time anchor is OpenBoards REAL when available, otherwise the
+          // actual station event from the Mobilithek snapshot.
           if (osmResult?.directedDistanceMeters != null && train.observationTime) {
             const observationAt = Date.parse(String(train.observationTime));
-            const offsetSeconds = Math.abs(Number(train.fallbackOffsetSeconds || 300));
-            if (Number.isFinite(observationAt) && Number.isFinite(offsetSeconds)) {
-              const signedOffset = Math.sign(Number(osmResult.directedDistanceMeters)) * offsetSeconds;
-              const crossingAt = new Date(observationAt + signedOffset * 1000);
-              return [{ ...train, directionLabel, osmRailwayWayId, crossingTime: crossingAt.toISOString(), arrival: crossingAt.toISOString(), etaSeconds: Math.floor((crossingAt.getTime() - Date.now()) / 1000), osmDirectedDistanceMeters: osmResult.directedDistanceMeters }];
+            const distanceMeters = Number(osmResult.directedDistanceMeters);
+            const category = String(train.category || "").toUpperCase();
+            const line = String(train.line || "").toUpperCase();
+            const isRegional = /^(RB|RE|R|S)/.test(line) || /REGIONAL|S-BAHN/.test(category);
+            const isStopping = train.isStoppingTrain === true;
+            // Conservative corridor-average speeds, not a claim about live speed.
+            const speedKmh = /ICE|IC|EC|INTERCITY/.test(category) ? 90
+              : isRegional ? (isStopping ? 45 : 65)
+              : /GÜTER|FREIGHT/.test(category) ? 40
+              : 50;
+            const travelSeconds = Math.max(0, Math.round(Math.abs(distanceMeters) / (speedKmh / 3.6)));
+            if (Number.isFinite(observationAt) && Number.isFinite(distanceMeters)) {
+              const signedTravelSeconds = Math.sign(distanceMeters) * travelSeconds;
+              const crossingAt = new Date(observationAt + signedTravelSeconds * 1000);
+              return [{
+                ...train,
+                directionLabel,
+                osmRailwayWayId,
+                crossingTime: crossingAt.toISOString(),
+                arrival: crossingAt.toISOString(),
+                etaSeconds: Math.floor((crossingAt.getTime() - Date.now()) / 1000),
+                osmDirectedDistanceMeters: distanceMeters,
+                osmEstimatedSpeedKmh: speedKmh,
+                osmEstimatedTravelSeconds: travelSeconds,
+                crossingTimeModel: "osm-distance-estimated-speed",
+              }];
             }
           }
           return [{ ...train, directionLabel, osmRailwayWayId }];
