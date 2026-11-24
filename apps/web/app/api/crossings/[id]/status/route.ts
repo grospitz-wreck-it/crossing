@@ -154,19 +154,41 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
     ? crossing.platformRules
     : Array.isArray(crossing.rules) ? crossing.rules : [];
   const offsetsForTrain = (train: any) => {
-    const matchingRule = platformRules.find((rule: any) =>
+    const isStopping = train?.isStoppingTrain === true;
+    const matchingRule = isStopping ? platformRules.find((rule: any) =>
       rule?.stopping === true &&
-      train?.isStoppingTrain === true &&
       String(rule?.platform ?? "").trim() !== "" &&
       String(rule.platform).trim() === String(train?.platform ?? "").trim()
-    );
+    ) : undefined;
     const safeOffset = (value: unknown, fallback: number) =>
       value == null || value === "" || !Number.isFinite(Number(value)) ? fallback : Math.max(0, Number(value));
+
+    // Initial conservative model: through-runs use the configured base clearance;
+    // stopping trains get a longer tail-clearance allowance unless an explicit
+    // platform rule provides a crossing-specific value. Five seconds are then
+    // reserved for the release/safety interval before the barrier may rise.
+    // These are operational estimates, not measured train speeds or relay timings.
+    const configuredClearance = safeOffset(crossing.openOffsetSeconds, 20);
+    const tailClearance = matchingRule
+      ? safeOffset(matchingRule.openOffsetSeconds, configuredClearance)
+      : isStopping
+        ? Math.max(configuredClearance, 30)
+        : configuredClearance;
+    const releaseBuffer = 5;
+
     return {
       // Seconds before the train's front reaches the crossing.
       approach: safeOffset(matchingRule?.closeOffsetSeconds, crossing.closeOffsetSeconds),
-      // Seconds after the train's front passes until its tail has cleared the danger area.
-      clearance: safeOffset(matchingRule?.openOffsetSeconds, crossing.openOffsetSeconds),
+      tailClearance,
+      releaseBuffer,
+      clearance: tailClearance + releaseBuffer,
+      clearanceModel: matchingRule
+        ? "platform-rule"
+        : isStopping
+          ? "stopping-train-conservative"
+          : train?.isStoppingTrain === false
+            ? "through-train-base"
+            : "unknown-train-base",
     };
   };
 
@@ -191,7 +213,10 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
         predictedCrossingAt: new Date(crossingAt).toISOString(),
         predictedBarrierCloseAt: start.toISOString(),
         predictedBarrierOpenAt: end.toISOString(),
+        predictedTailClearanceSeconds: offsets.tailClearance,
+        predictedReleaseBufferSeconds: offsets.releaseBuffer,
         predictedClearanceSeconds: offsets.clearance,
+        clearanceModel: offsets.clearanceModel,
       },
     }];
   }).sort((a, b) => a.start.getTime() - b.start.getTime());
