@@ -16,6 +16,7 @@ export type CrossingOsmFilterResult = {
   ref?: string;
   reason?: string;
   directedDistanceMeters?: number;
+  directionLabel?: string;
   diagnostics?: {
     routeStations?: Array<{ name: string; nodeId: string | null; snapDistanceMeters: number | null }>;
     crossingNodes?: Array<{ nodeId: string; presentInGraph: boolean; degree: number; selectedWayEdges: string[] }>;
@@ -778,6 +779,7 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
           : null,
     }));
     const best = directedHits.sort((a, b) =>
+      (a.toIndex - a.fromIndex) - (b.toIndex - b.fromIndex) ||
       Number(b.signedDistanceMeters != null) - Number(a.signedDistanceMeters != null) ||
       a.crossingDistance - b.crossingDistance
     )[0];
@@ -810,6 +812,10 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       ref,
       reason: best.signedDistanceMeters == null ? "matched-direction-distance-unavailable" : "matched-with-directed-distance",
       directedDistanceMeters: best.signedDistanceMeters == null ? undefined : Math.round(best.signedDistanceMeters),
+      // Route arrays are ordered in the train's travel direction. The final
+      // route stop is therefore a safer public direction label than a stale
+      // origin/destination field or an eastbound/westbound enum.
+      directionLabel: route.length ? `Richtung ${route[route.length - 1]}` : undefined,
       diagnostics: best.signedDistanceMeters == null ? undefined : {
         observationStation,
         crossingBeforeObservation: best.signedDistanceMeters < 0,
