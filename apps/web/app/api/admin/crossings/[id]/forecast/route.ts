@@ -55,7 +55,12 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       Array.isArray(rule?.lineHints) ? rule.lineHints.map((value: any) => String(value || "").trim()) : []
     )
   )).filter(Boolean);
-  const isInfrastructureForecast = infrastructureRefs.length > 0 || /strecke\s*2530/i.test(String(crossing.name || ""));
+  // The admin drawer must remain fast and must not scan every Mobilithek
+  // subscription when a primary station EVA is configured. In that case the
+  // station timetable is the authoritative, narrowly scoped source; the
+  // registry-wide infrastructure path is reserved for crossings without an EVA.
+  const isInfrastructureForecast = !String(crossing.eva || "").trim() &&
+    (infrastructureRefs.length > 0 || /strecke\s*2530/i.test(String(crossing.name || "")));
   // Only real railway line identifiers may constrain a train registry.
   // Infrastructure IDs and station names are not train lines and must never
   // be used as broad fallbacks (an empty filter previously admitted every train).
