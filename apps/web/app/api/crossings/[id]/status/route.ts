@@ -624,10 +624,20 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       .filter((train: any) => {
         const key = journeyKeyForRetention(train);
         const crossingAt = Date.parse(String(train.crossingTime || ""));
+        const firstSeenAt = Number(train.forecastObservedAt || nowForRetention);
         return key && !currentJourneyKeys.has(key) && !rejectedKeys.has(key) &&
-          Number.isFinite(crossingAt) && crossingAt > nowForRetention;
+          Number.isFinite(crossingAt) && crossingAt > nowForRetention &&
+          Number.isFinite(firstSeenAt) && nowForRetention - firstSeenAt <= 90_000;
       });
-    const forecastTrains = [...osmFilteredTrains, ...retainedFromPrevious];
+    // Preserve the original observation timestamp so repeated cache refreshes
+    // cannot extend a missing journey's grace period indefinitely.
+    const forecastTrains = [
+      ...osmFilteredTrains.map((train: any) => ({
+        ...train,
+        forecastObservedAt: Number(train.forecastObservedAt || nowForRetention),
+      })),
+      ...retainedFromPrevious,
+    ];
     const payload=toPayload(crossing,forecastTrains,lineHints);
     (payload as any).forecastDiagnostics = {
       snapshotRows: snapshotRows.length,
