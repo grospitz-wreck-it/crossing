@@ -13,6 +13,7 @@ export type SnapshotPrimaryTrain = {
   arrival: string;
   scheduledTime: string;
   route: string[];
+  observationPoints?: Array<{ eva: string; stationName: string; side: "before" | "after"; trackWayIds: number[]; direction: "eastbound" | "westbound" | "unknown"; distanceMeters: number; actualTime: string; scheduledTime?: string; eventType: "arrival" | "departure" | "actual" }>;
 };
 
 function parseJson(value: unknown, fallback: any) {
@@ -61,10 +62,13 @@ export async function getSnapshotPrimaryTrains(
   ));
   if (!primaryEvas.length) return [];
 
+  const configuredObservationStations = (crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations) ? crossing.rules.observationStations : [])
+    .filter((station: any) => station && station.enabled !== false && station.eva && (station.side === "before" || station.side === "after") && Number.isFinite(Number(station.trackDistanceMeters)) && Number(station.trackDistanceMeters) > 0);
+  const stationEvas = Array.from(new Set([...primaryEvas, ...configuredObservationStations.map((station: any) => String(station.eva).trim())]));
   const stationResult = await db.execute({
     sql: "SELECT eva,name FROM railway_station_catalog WHERE eva IN (" +
-      primaryEvas.map(() => "?").join(",") + ")",
-    args: primaryEvas,
+      stationEvas.map(() => "?").join(",") + ")",
+    args: stationEvas,
   });
 
   const stationNames = new Map(
@@ -135,6 +139,21 @@ export async function getSnapshotPrimaryTrains(
       const crossingTime = new Date(parsedTime.getTime() + offsetSeconds * 1000);
       if (crossingTime.getTime() < now - 60_000 || crossingTime.getTime() > now + 3 * 60 * 60_000) continue;
 
+      const observationPoints = configuredObservationStations.flatMap((station: any) => {
+        const configuredEva = String(station.eva).trim();
+        const observedCall = calls.find((item: any) => refMatches(item?.stopPointRef, configuredEva) || refMatches(item?.stopPlaceRef, configuredEva) || (stationNames.has(configuredEva) && stationMatches(String(item?.name || ""), stationNames.get(configuredEva) || "")));
+        if (!observedCall) return [];
+        const actualDeparture = observedCall.actualDeparture;
+        const actualArrival = observedCall.actualArrival;
+        const actualGeneric = observedCall.actual;
+        const actualValue = actualDeparture || actualArrival || actualGeneric;
+        const actualAt = Date.parse(String(actualValue || ""));
+        if (!Number.isFinite(actualAt)) return [];
+        const wayIds = Array.isArray(station.trackWayIds) ? station.trackWayIds.map(Number).filter((value: number) => Number.isFinite(value) && value > 0) : [];
+        if (!wayIds.length) return [];
+        return [{ eva: configuredEva, stationName: stationNames.get(configuredEva) || String(station.stationName || configuredEva), side: station.side as "before" | "after", trackWayIds: wayIds, direction: station.direction || "unknown", distanceMeters: Number(station.trackDistanceMeters), actualTime: new Date(actualAt).toISOString(), scheduledTime: String((actualDeparture && observedCall.plannedDeparture) || (actualArrival && observedCall.plannedArrival) || observedCall.planned || ""), eventType: actualDeparture ? "departure" as const : actualArrival ? "arrival" as const : "actual" as const }];
+      });
+
       candidates.push({
         line: String(row.line || ""),
         category: String(row.category || ""),
@@ -155,6 +174,7 @@ export async function getSnapshotPrimaryTrains(
         route: (Array.isArray(calls) ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean) : []).length >= 2
           ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean)
           : parseJson(row.route_json, []).map(String).filter(Boolean),
+        observationPoints,
       });
       break;
     }
