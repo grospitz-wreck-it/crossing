@@ -350,7 +350,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // never pay the response-size or cache-storage cost of per-journey route details.
   const includeOsmDetails = new URL(request.url).searchParams.get("debug") === "osm";
   const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds);
-  const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}:timing-${timingCorrectionSeconds}${includeOsmDetails ? ":osm-debug" : ""}`;
+  const timingConfigKey = JSON.stringify(crossing.rules && !Array.isArray(crossing.rules) ? crossing.rules.timing || {} : {});
+  const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}:global-${globalTimingCorrectionSeconds}:timing-${timingConfigKey}${includeOsmDetails ? ":osm-debug" : ""}`;
   const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   // Keep a short-lived previous forecast as a safety net when one snapshot poll
