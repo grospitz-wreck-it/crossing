@@ -161,34 +161,91 @@ function toPayload(crossing: any, trains: any[], lineHints: string[]) {
       String(rule.platform).trim() === String(train?.platform ?? "").trim()
     );
     const safeOffset = (value: unknown, fallback: number) =>
-      value == null || value === "" || !Number.isFinite(Number(value)) ? fallback : Number(value);
+      value == null || value === "" || !Number.isFinite(Number(value)) ? fallback : Math.max(0, Number(value));
     return {
-      close: safeOffset(matchingRule?.closeOffsetSeconds, crossing.closeOffsetSeconds),
-      open: safeOffset(matchingRule?.openOffsetSeconds, crossing.openOffsetSeconds),
+      // Seconds before the train's front reaches the crossing.
+      approach: safeOffset(matchingRule?.closeOffsetSeconds, crossing.closeOffsetSeconds),
+      // Seconds after the train's front passes until its tail has cleared the danger area.
+      clearance: safeOffset(matchingRule?.openOffsetSeconds, crossing.openOffsetSeconds),
     };
   };
-  trains.sort((a,b)=>Date.parse(a.crossingTime)-Date.parse(b.crossingTime));
-  const closures:any[]=[];
-  for (const train of trains) {
-    const t = Date.parse(train.crossingTime);
-    if (!Number.isFinite(t)) continue;
+
+  // Each train occupies the crossing from its predicted approach until its tail
+  // has cleared. The crossing may reopen immediately after that clearance.
+  // Intervals are merged only when the next approach begins before the previous
+  // train has cleared; there is no arbitrary extra 30-second hold-down.
+  const occupancies = trains.flatMap((train: any) => {
+    const crossingAt = Date.parse(String(train.crossingTime || ""));
+    if (!Number.isFinite(crossingAt)) return [];
     const offsets = offsetsForTrain(train);
-    const start = new Date(t - offsets.close * 1000);
-    const end = new Date(t + offsets.open * 1000);
-    if (end.getTime() <= now) continue;
+    const start = new Date(crossingAt - offsets.approach * 1000);
+    const end = new Date(crossingAt + offsets.clearance * 1000);
+    if (end.getTime() <= now) return [];
+    return [{
+      start,
+      end,
+      crossingAt: new Date(crossingAt),
+      trackId: train.osmRailwayWayId == null ? null : String(train.osmRailwayWayId),
+      train: {
+        ...train,
+        predictedCrossingAt: new Date(crossingAt).toISOString(),
+        predictedBarrierCloseAt: start.toISOString(),
+        predictedBarrierOpenAt: end.toISOString(),
+        predictedClearanceSeconds: offsets.clearance,
+      },
+    }];
+  }).sort((a, b) => a.start.getTime() - b.start.getTime());
+
+  // Until independent barrier sections are explicitly configured, every
+  // selected track at this crossing shares one conservative barrier group.
+  // This avoids predicting an unsafe opening between trains on parallel tracks.
+  const closures: any[] = [];
+  for (const occupancy of occupancies) {
     const last = closures[closures.length - 1];
-    if (!last || start.getTime() > last.end.getTime() + 30000) {
-      closures.push({start,end,trains:[train]});
+    if (!last || occupancy.start.getTime() > last.end.getTime()) {
+      closures.push({
+        start: occupancy.start,
+        end: occupancy.end,
+        trains: [occupancy.train],
+        trackIds: occupancy.trackId ? [occupancy.trackId] : [],
+      });
     } else {
-      if (end > last.end) last.end = end;
-      last.trains.push(train);
+      if (occupancy.end.getTime() > last.end.getTime()) last.end = occupancy.end;
+      last.trains.push(occupancy.train);
+      if (occupancy.trackId && !last.trackIds.includes(occupancy.trackId)) last.trackIds.push(occupancy.trackId);
     }
   }
+
   // The snapshot source covers up to three hours ahead. Return that same horizon
   // to the UI; otherwise valid trains disappear between the hero and the later list.
   const forecastHorizonMs = 3 * 60 * 60 * 1000;
-  const visible=closures.filter(c=>c.start.getTime()<=now+forecastHorizonMs); const next=closures.find(c=>c.end.getTime()>now)||null;
-  return { crossing:{id:crossing.id,name:crossing.name,lat:crossing.lat,lon:crossing.lon}, state:next&&now>=next.start.getTime()?"CLOSED":"OPEN", nextCloseIn:next?Math.max(0,Math.floor((next.start.getTime()-now)/1000)):0, nextOpenIn:next?Math.max(0,Math.floor((next.end.getTime()-now)/1000)):0, phase:next?{start:next.start.toISOString(),end:next.end.toISOString(),durationMinutes:Math.round((next.end.getTime()-next.start.getTime())/60000),trainCount:next.trains.length,trains:next.trains}:null, closureCount:visible.length, closures:visible.map(c=>({start:c.start.toISOString(),end:c.end.toISOString(),durationMinutes:Math.round((c.end.getTime()-c.start.getTime())/60000),trainCount:c.trains.length,trains:c.trains})), trainCount:trains.length,trains,divertedTrains:[],lineHints };
+  const visible = closures.filter((closure) => closure.start.getTime() <= now + forecastHorizonMs);
+  const next = closures.find((closure) => closure.end.getTime() > now) || null;
+  return {
+    crossing: { id: crossing.id, name: crossing.name, lat: crossing.lat, lon: crossing.lon },
+    state: next && now >= next.start.getTime() ? "CLOSED" : "OPEN",
+    nextCloseIn: next ? Math.max(0, Math.floor((next.start.getTime() - now) / 1000)) : 0,
+    nextOpenIn: next ? Math.max(0, Math.floor((next.end.getTime() - now) / 1000)) : 0,
+    phase: next ? {
+      start: next.start.toISOString(),
+      end: next.end.toISOString(),
+      durationMinutes: Math.round((next.end.getTime() - next.start.getTime()) / 60000),
+      trainCount: next.trains.length,
+      trains: next.trains,
+    } : null,
+    closureCount: visible.length,
+    closures: visible.map((closure) => ({
+      start: closure.start.toISOString(),
+      end: closure.end.toISOString(),
+      durationMinutes: Math.round((closure.end.getTime() - closure.start.getTime()) / 60000),
+      trainCount: closure.trains.length,
+      trains: closure.trains,
+    })),
+    trainCount: trains.length,
+    trains,
+    divertedTrains: [],
+    lineHints,
+  };
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -470,6 +527,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           // physical path through the selected crossing track. Use the same
           // matched route to label the direction, never the stale endpoint field.
           const directionLabel = osmResult.directionLabel || train.directionLabel;
+          const osmRailwayWayId = osmResult.railwayWayId == null ? undefined : String(osmResult.railwayWayId);
           // The ordered OSM path determines which side of the observation
           // station the crossing lies on. Keep the configured travel-time
           // magnitude for now, but apply its sign from the actual route topology.
@@ -479,10 +537,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
             if (Number.isFinite(observationAt) && Number.isFinite(offsetSeconds)) {
               const signedOffset = Math.sign(Number(osmResult.directedDistanceMeters)) * offsetSeconds;
               const crossingAt = new Date(observationAt + signedOffset * 1000);
-              return [{ ...train, directionLabel, crossingTime: crossingAt.toISOString(), arrival: crossingAt.toISOString(), etaSeconds: Math.floor((crossingAt.getTime() - Date.now()) / 1000), osmDirectedDistanceMeters: osmResult.directedDistanceMeters }];
+              return [{ ...train, directionLabel, osmRailwayWayId, crossingTime: crossingAt.toISOString(), arrival: crossingAt.toISOString(), etaSeconds: Math.floor((crossingAt.getTime() - Date.now()) / 1000), osmDirectedDistanceMeters: osmResult.directedDistanceMeters }];
             }
           }
-          return [{ ...train, directionLabel }];
+          return [{ ...train, directionLabel, osmRailwayWayId }];
         })
       : enrichedTrains;
     const osmShadow = {
