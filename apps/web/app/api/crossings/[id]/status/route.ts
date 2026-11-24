@@ -400,6 +400,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const realtimeEvas = Array.from(new Set([
       ...primaryEvas,
       ...(crossing.throughRules || []).map((rule: any) => String(rule.observationEva || "").trim()),
+      ...((crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations)) ? crossing.rules.observationStations.map((station: any) => String(station.eva || "").trim()) : []),
     ].filter(Boolean)));
     const realtimeObservations = await getOpenBoardsObservations(db, realtimeEvas, {
       from: new Date(Date.now() - 5 * 60_000).toISOString(),
@@ -421,6 +422,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         ? 0
         : Math.max(30, Number((crossing.throughRules || []).find((rule: any) => String(rule.observationEva) === train.stationEva)?.fallbackOffsetSeconds || 300));
       const predictedCrossingTime = new Date(Date.parse(liveTime) + offsetSeconds * 1000).toISOString();
+      const observationPoints = (train.observationPoints || []).map((point: any) => {
+        const pointRealtime = matchOpenBoardsReal({ stationEva: point.eva, line: train.line, journeyNumber: train.journeyNumber, scheduledTime: point.scheduledTime }, realtimeObservations);
+        return { ...point, actualTime: pointRealtime?.eventTime || point.actualTime, realtimeSource: pointRealtime ? "DB OpenBoards REAL" : "Mobilithek actual" };
+      });
       trains.push({
         id:`primary-${train.stationEva}-${train.category}-${train.journeyNumber}`,
         source:"primary-stop",
@@ -434,6 +439,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         isStoppingTrain:true,
         observationStation:train.stationName,
         observationTime:liveTime,
+        observationPoints,
         fallbackOffsetSeconds:offsetSeconds,
         direction:getCrossingDirection([]),
         directionLabel:train.destination?`Richtung ${train.destination}`:null,
@@ -604,6 +610,47 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           // Use the directed OSM rail distance as the travel-time basis.
           // The time anchor is OpenBoards REAL when available, otherwise the
           // actual station event from the Mobilithek snapshot.
+          const matchedWayId = Number(osmRailwayWayId || osmResult.railwayWayId);
+          const configuredPoints = (Array.isArray(train.observationPoints) ? train.observationPoints : [])
+            .filter((point: any) => Array.isArray(point.trackWayIds) && point.trackWayIds.map(Number).includes(matchedWayId) && Number.isFinite(Number(point.distanceMeters)) && Number(point.distanceMeters) > 0);
+          const beforePoints = configuredPoints.filter((point: any) => point.side === "before");
+          const afterPoints = configuredPoints.filter((point: any) => point.side === "after");
+          let measuredCrossingAt: Date | null = null;
+          let measuredDirection = "unknown";
+          let measuredDiagnostics: any = null;
+          for (const before of beforePoints) {
+            for (const after of afterPoints) {
+              if (before.direction !== "unknown" && after.direction !== "unknown" && before.direction !== after.direction) continue;
+              const beforeAt = Date.parse(String(before.actualTime || ""));
+              const afterAt = Date.parse(String(after.actualTime || ""));
+              const elapsedSeconds = (afterAt - beforeAt) / 1000;
+              const distanceBefore = Number(before.distanceMeters);
+              const distanceAfter = Number(after.distanceMeters);
+              const totalDistance = distanceBefore + distanceAfter;
+              const speedKmh = totalDistance / Math.max(1, elapsedSeconds) * 3.6;
+              if (!Number.isFinite(beforeAt) || !Number.isFinite(afterAt) || elapsedSeconds <= 0 || elapsedSeconds > 1800 || totalDistance < 500 || totalDistance > 100000 || speedKmh < 10 || speedKmh > 200) continue;
+              const crossingAt = new Date(beforeAt + elapsedSeconds * 1000 * (distanceBefore / totalDistance));
+              if (crossingAt.getTime() < Date.now() - 60_000 || crossingAt.getTime() > Date.now() + 3 * 60 * 60_000) continue;
+              measuredCrossingAt = crossingAt;
+              measuredDirection = before.direction !== "unknown" ? before.direction : after.direction || "unknown";
+              measuredDiagnostics = { beforeEva: before.eva, afterEva: after.eva, distanceBeforeMeters: distanceBefore, distanceAfterMeters: distanceAfter, elapsedSeconds: Math.round(elapsedSeconds), measuredSpeedKmh: Math.round(speedKmh * 10) / 10, source: before.realtimeSource === "DB OpenBoards REAL" && after.realtimeSource === "DB OpenBoards REAL" ? "two-openboards-real" : "two-mobilithek-actual" };
+              break;
+            }
+            if (measuredCrossingAt) break;
+          }
+          if (measuredCrossingAt) {
+            return [{
+              ...train,
+              direction: measuredDirection,
+              directionLabel,
+              osmRailwayWayId,
+              crossingTime: measuredCrossingAt.toISOString(),
+              arrival: measuredCrossingAt.toISOString(),
+              etaSeconds: Math.floor((measuredCrossingAt.getTime() - Date.now()) / 1000),
+              crossingTimeModel: "two-station-measured-interpolation",
+              crossingTimeDiagnostics: measuredDiagnostics,
+            }];
+          }
           if (osmResult?.directedDistanceMeters != null && train.observationTime) {
             const observationAt = Date.parse(String(train.observationTime));
             const distanceMeters = Number(osmResult.directedDistanceMeters);
