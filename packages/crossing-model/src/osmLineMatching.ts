@@ -24,6 +24,10 @@ export type OSMLineAssignment = {
     relationId?: number;
     lineRef: string;
     direction: "from-to" | "to-from";
+    from?: string;
+    to?: string;
+    fromIndex?: number;
+    toIndex?: number;
   }>;
 };
 
@@ -117,6 +121,10 @@ export function assignTrainToOsmTrack(input: {
         relationId: relation.id,
         lineRef: String(relation.ref || relation.name || ""),
         direction: fromIndex < toIndex ? "from-to" : "to-from",
+        from: String(relation.from ?? ""),
+        to: String(relation.to ?? ""),
+        fromIndex,
+        toIndex,
       });
     }
   }
