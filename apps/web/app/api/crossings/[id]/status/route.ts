@@ -610,7 +610,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       : [];
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => {
       const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
-      const lineAssignment = assignTrainToOsmTrack({
+      const rawLineAssignment = assignTrainToOsmTrack({
         line: train.line,
         category: train.category,
         route: train.route,
@@ -623,10 +623,46 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         train.observationStation || train.stationName || undefined,
       );
 
-      // The prepared OSM line relations are the authoritative assignment
-      // between a service and the physical tracks selected for this crossing.
-      // The route graph may enrich that assignment with a directed distance,
-      // but an incomplete/ambiguous graph must not veto a unique line match.
+      // If several OSM ways carry the same forward line relation, use the
+      // prepared crossing topology as the final physical discriminator. Only
+      // ways that are direct edges at a mapped crossing node can represent
+      // the track that actually traverses this level crossing. Adjacent route
+      // continuation ways remain useful corridor context, but are not crossing
+      // tracks merely because they share the same line relation.
+      const crossingTopologyWayIds = [...new Set(
+        (graphResult.diagnostics?.crossingNodes || [])
+          .flatMap((node) => node.selectedWayEdges || [])
+          .map(String)
+          .filter(Boolean),
+      )];
+      const forwardLineCandidates = rawLineAssignment.candidates.filter(
+        (candidate) => candidate.direction === "from-to",
+      );
+      const topologyMatchedCandidates = forwardLineCandidates.filter(
+        (candidate) => crossingTopologyWayIds.includes(String(candidate.wayId)),
+      );
+      const topologyMatchedWayIds = [...new Set(
+        topologyMatchedCandidates.map((candidate) => String(candidate.wayId)),
+      )];
+      const topologyCandidate = topologyMatchedCandidates[0];
+      const lineAssignment = rawLineAssignment.status === "ambiguous" &&
+        rawLineAssignment.reason === "multiple-tracks-match-train-direction" &&
+        topologyMatchedWayIds.length === 1 &&
+        topologyCandidate
+        ? {
+            ...rawLineAssignment,
+            status: "matched" as const,
+            wayId: topologyMatchedWayIds[0],
+            relationId: topologyCandidate.relationId,
+            lineRef: topologyCandidate.lineRef,
+            direction: "from-to" as const,
+            reason: "unique-crossing-node-topology-match",
+          }
+        : rawLineAssignment;
+
+      // The prepared OSM line relations establish service and travel direction.
+      // Direct crossing-node topology now resolves otherwise ambiguous ways;
+      // the route graph remains an optional source of directed-distance detail.
       const assignedWayId = lineAssignment.wayId == null ? "" : String(lineAssignment.wayId);
       const assignmentIsSelected = Boolean(
         lineAssignment.status === "matched" &&
@@ -640,7 +676,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
             status: "matched" as const,
             score: 1,
             railwayWayId: assignedWayId,
-            reason: "matched-by-osm-line-relation",
+            reason: lineAssignment.reason === "unique-crossing-node-topology-match"
+              ? "matched-by-crossing-node-topology"
+              : "matched-by-osm-line-relation",
             directionLabel: Array.isArray(train.route) && train.route.length
               ? `Richtung ${train.route[train.route.length - 1]}`
               : undefined,
@@ -650,6 +688,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
                 lineRef: lineAssignment.lineRef,
                 direction: lineAssignment.direction,
                 reason: lineAssignment.reason,
+              },
+              crossingTopology: {
+                directCrossingWayIds: crossingTopologyWayIds,
+                forwardCandidateWayIds: [...new Set(forwardLineCandidates.map((candidate) => String(candidate.wayId)))],
+                matchedCandidateWayIds: topologyMatchedWayIds,
               },
               graphResult: {
                 status: graphResult.status,
@@ -667,6 +710,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         journeyNumber: train.journeyNumber,
         route: train.route,
         lineAssignment,
+        lineAssignmentBeforeTopology: rawLineAssignment.status === "ambiguous" ? rawLineAssignment : undefined,
+        crossingTopology: {
+          directCrossingWayIds: crossingTopologyWayIds,
+          forwardCandidateWayIds: [...new Set(forwardLineCandidates.map((candidate) => String(candidate.wayId)))],
+          matchedCandidateWayIds: topologyMatchedWayIds,
+        },
         observationStation: train.observationStation || train.stationName || "",
         routeDirection: train.direction || "unknown",
         observationPoints: Array.isArray(train.observationPoints) ? train.observationPoints.map((point: any) => ({
