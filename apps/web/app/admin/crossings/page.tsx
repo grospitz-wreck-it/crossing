@@ -12,7 +12,7 @@ type Point = { lat: number; lon: number };
 type RailwayLine = { id: number; routeType: string; ref: string; name: string; from: string; to: string; network?: string; operator?: string };
 type RailwayCandidate = { kind: string; routeType: string; ref: string; name: string; from: string; to: string; distanceMeters: number; wayId: number; relationId?: number | null; source: string; waysCount: number; segments: Point[][]; lineRelations?: RailwayLine[] };
 type RailwayInfrastructure = { status: string; candidates: RailwayCandidate[]; error?: string };
-type StationCandidate = { eva: string; stationName: string; ril100?: string; ibnr?: string; lat: number; lon: number; distanceKm: number; trackDistanceMeters: number };
+type StationCandidate = { id?: string; eva: string; stationName: string; ril100?: string; ibnr?: string; lat: number; lon: number; distanceKm: number; trackDistanceMeters: number; source?: string; selectable?: boolean };
 type SelectedObservationStation = StationCandidate & { side: "before" | "after" };
 type Forecast = { crossing: any; state: string; nextClosure: any; closures: any[]; trains: any[]; stations: any[]; message?: string };
 
@@ -240,7 +240,7 @@ function ObservationStationPicker({ candidates, selected, loading, onSelect }: {
     {!loading && candidates.length > 0 && <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
       {candidates.map((station) => {
         const current = selected.find((item) => item.eva === station.eva);
-        return <div key={station.eva} className={styles.nearbyStation}>
+        return <div key={station.eva || station.id || station.stationName} className={styles.nearbyStation}>
           <div style={{ flex: 1 }}>
             <strong>{station.stationName}</strong>
             <span>{station.source === "osm" ? "OSM-Halt · DB-Zuordnung noch offen" : `${station.distanceKm.toFixed(1)} km vom BÜ · ${Math.round(station.trackDistanceMeters)} m zur Strecke`}</span>
