@@ -374,7 +374,6 @@ function EditInfrastructureMap({ lat, lon, candidates, stations, selectedEva, se
   function beginPan(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest("button")) return;
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false };
-    event.currentTarget.setPointerCapture(event.pointerId);
   }
   function movePan(event: ReactPointerEvent<HTMLDivElement>) {
     const active = drag.current;
@@ -392,7 +391,7 @@ function EditInfrastructureMap({ lat, lon, candidates, stations, selectedEva, se
     if (suppressClick.current) { suppressClick.current = false; return; }
     onToggleTrack(wayId);
   }
-  return <div ref={mapRef} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onClickCapture={(event) => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }} style={{ position: "relative", height: 280, overflow: "hidden", borderRadius: 13, border: "1px solid #dfe3e8", background: "#e8edf0", touchAction: "none", cursor: drag.current?.moved ? "grabbing" : "grab", userSelect: "none" }}>
+  return <div ref={mapRef} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onPointerLeave={() => { if (drag.current?.moved) drag.current = null; }} onClickCapture={(event) => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }} style={{ position: "relative", height: 280, overflow: "hidden", borderRadius: 13, border: "1px solid #dfe3e8", background: "#e8edf0", touchAction: "none", cursor: drag.current?.moved ? "grabbing" : "grab", userSelect: "none" }}>
     {tiles.map(({ x, y }) => <img key={`${zoom}/${x}/${y}`} src={`https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`} alt="" draggable={false} style={{ position: "absolute", width: 256, height: 256, maxWidth: "none", pointerEvents: "none", left: x * 256 - originX, top: y * 256 - originY }} />)}
     <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "hidden" }} aria-label="OSM-Gleise und DB-Bahnhöfe">
       {candidates.map((candidate, index) => { const selected = selectedWayIds.includes(candidate.wayId), color = selected ? "#18834d" : colors[index % colors.length]; return <g key={`${candidate.wayId}-${index}`} onClick={() => toggleTrack(candidate.wayId)} style={{ cursor: "pointer", pointerEvents: "stroke" }}>{candidate.segments.map((segment, j) => { const points = segment.map(project).map((point) => `${point.x},${point.y}`).join(" "); return <g key={j}><polyline points={points} fill="none" stroke="#fff" strokeWidth={selected ? 11 : 8} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke"/><polyline points={points} fill="none" stroke={color} strokeWidth={selected ? 7 : 4.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke"/></g>; })}</g>; })}
