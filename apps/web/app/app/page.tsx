@@ -168,6 +168,9 @@ const [data, setData] =
     message,
     setMessage,
   ] = useState("");
+  const [unexpectedTrainSaved, setUnexpectedTrainSaved] = useState(false);
+  const [savingMeasurement, setSavingMeasurement] = useState(false);
+  const [savingUnexpectedTrain, setSavingUnexpectedTrain] = useState(false);
 
   const refreshTimeout =
     useRef<ReturnType<typeof setTimeout> | null>(
@@ -237,161 +240,84 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
 }
 
 async function saveUnexpectedTrain() {
-  if (!data?.predictionId) {
+  if (!data?.predictionId || measurementState !== "close-recorded" || unexpectedTrainSaved || savingUnexpectedTrain) {
     return;
   }
 
-  await fetch(
-    "/api/measurements/flag",
-    {
+  setSavingUnexpectedTrain(true);
+  try {
+    const response = await fetch("/api/measurements/flag", {
       method: "POST",
-
-      headers: {
-        "Content-Type":
-          "application/json",
-      },
-
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        predictionId:
-          data.predictionId,
-
-        flag:
-          "unexpected_train",
+        predictionId: data.predictionId,
+        flag: "unexpected_train",
       }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success !== true) {
+      throw new Error(result.error || "Der Sonderfall konnte nicht gespeichert werden.");
     }
-  );
 
-  setMessage(
-    "⚠ Sonderfall markiert"
-  );
-
-  setTimeout(() => {
-    setMessage("");
-  }, 3000);
+    setUnexpectedTrainSaved(true);
+    setMessage("✓ Güterzug-Sonderfall gespeichert");
+  } catch (error) {
+    console.error("Unexpected train flag failed:", error);
+    setMessage("⚠️ Speichern fehlgeschlagen – bitte erneut versuchen");
+  } finally {
+    setSavingUnexpectedTrain(false);
+    setTimeout(() => setMessage(""), 4000);
+  }
 }
-  async function saveMeasurement(
+
+async function saveMeasurement(
   event: "close" | "open",
   precision: "exact" | "at_least"
 ) {
-  if (!data) {
-    return;
+  if (!data?.predictionId || savingMeasurement) return;
+  if (event === "close" && measurementState === "close-recorded") return;
+  if (event === "open" && measurementState === "open-recorded") return;
+
+  setSavingMeasurement(true);
+  try {
+    const response = await fetch("/api/measurements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        predictionId: data.predictionId,
+        event,
+        actualAt: new Date().toISOString(),
+        phase: data.phase,
+        precision,
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || result.success !== true) {
+      throw new Error(result.error || "Die Messung konnte nicht gespeichert werden.");
+    }
+
+    if (event === "close") {
+      setMeasurementState("close-recorded");
+      setFirstClickAt(Date.now());
+      setUnexpectedTrainSaved(false);
+      setMessage(precision === "exact"
+        ? "✓ Schranke geschlossen – Messung gespeichert"
+        : "✓ Zustand erfasst (Zeitpunkt ungenau)");
+    } else {
+      setMeasurementState("none");
+      setFirstClickAt(null);
+      setUnexpectedTrainSaved(false);
+      setMessage(precision === "exact"
+        ? "✓ Schranke offen – Messung gespeichert"
+        : "✓ Öffnungszustand erfasst (Zeitpunkt ungenau)");
+    }
+  } catch (error) {
+    console.error("Measurement save failed:", error);
+    setMessage("⚠️ Speichern fehlgeschlagen – bitte erneut versuchen");
+  } finally {
+    setSavingMeasurement(false);
+    setTimeout(() => setMessage(""), 4000);
   }
-
-  if (
-  event === "close" &&
-  measurementState ===
-    "close-recorded"
-) {
-  return;
-}
-
-if (
-  event === "open" &&
-  measurementState ===
-    "open-recorded"
-) {
-  return;
-}
-
-  const res =
-    await fetch(
-      "/api/measurements",
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/json",
-        },
-
-        body: JSON.stringify({
-          predictionId:
-            data.predictionId,
-
-          event,
-
-          actualAt:
-            new Date().toISOString(),
-
-          phase:
-            data.phase,
-
-          precision,
-        }),
-      }
-    );
-
-  await res.json();
-
-  if (
-  event === "close"
-) {
-  if (
-    measurementState ===
-    "open-recorded"
-  ) {
-    setMeasurementState(
-      "none"
-    );
-
-    setFirstClickAt(
-      null
-    );
-
-    setMessage(
-      "✓ Messung abgeschlossen"
-    );
-  } else {
-    setMeasurementState(
-      "close-recorded"
-    );
-
-    setFirstClickAt(
-      Date.now()
-    );
-
-    setMessage(
-      "✓ Schranke runter gespeichert"
-    );
-  }
-}
-
-if (
-  event === "open"
-) {
-  if (
-    measurementState ===
-    "close-recorded"
-  ) {
-    setMeasurementState(
-      "none"
-    );
-
-    setFirstClickAt(
-      null
-    );
-
-    setMessage(
-      "✓ Messung abgeschlossen"
-    );
-  } else {
-    setMeasurementState(
-      "open-recorded"
-    );
-
-    setFirstClickAt(
-      Date.now()
-    );
-
-    setMessage(
-      "✓ Schranke hoch gespeichert"
-    );
-  }
-}
-
-  setTimeout(() => {
-    setMessage("");
-  }, 3000);
 }
 
 const wakeLockRef =
@@ -1159,11 +1085,9 @@ return (
 
     <button
       className="cta ctaOpen"
+      disabled={savingMeasurement}
       onClick={() => {
-        saveMeasurement(
-          pendingEvent,
-          "exact"
-        );
+        void saveMeasurement(pendingEvent, "exact");
         setPendingEvent(null);
       }}
     >
@@ -1172,11 +1096,9 @@ return (
 
     <button
       className="cta ctaSecondary"
+      disabled={savingMeasurement}
       onClick={() => {
-        saveMeasurement(
-          pendingEvent,
-          "at_least"
-        );
+        void saveMeasurement(pendingEvent, "at_least");
         setPendingEvent(null);
       }}
     >
@@ -1229,12 +1151,19 @@ return (
 >
   SCHRANKE HOCH
 </button>
- <button
-  className="flagButton"
-  onClick={saveUnexpectedTrain}
->
-  ⚠ GÜTERZUG / SONDERFALL
-</button>
+ {measurementState === "close-recorded" && (
+  <button
+    className="flagButton"
+    disabled={unexpectedTrainSaved || savingUnexpectedTrain}
+    onClick={() => void saveUnexpectedTrain()}
+  >
+    {savingUnexpectedTrain
+      ? "WIRD GESPEICHERT …"
+      : unexpectedTrainSaved
+        ? "✓ SONDERFALL GESPEICHERT"
+        : "⚠ GÜTERZUG / SONDERFALL"}
+  </button>
+)}
     </div>
 )}
  
