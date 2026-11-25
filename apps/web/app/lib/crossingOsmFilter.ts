@@ -26,6 +26,14 @@ export type CrossingOsmFilterResult = {
     unexpectedInCorridor?: string[];
     observationStation?: string;
     crossingBeforeObservation?: boolean;
+    crossingHits?: Array<{
+      fromStation: string; toStation: string; fromIndex: number; toIndex: number;
+      startNodeId: string; targetNodeId: string;
+      startSnapDistanceMeters: number; targetSnapDistanceMeters: number;
+      crossingNodeId: string; railwayWayId: string; pathDistanceMeters: number;
+      pathNodeCount: number; pathWayIds: string[]; crossingDistanceMeters: number;
+    }>;
+    candidateWayIds?: string[];
   };
 };
 
@@ -673,7 +681,13 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     const stations = coordinateRoute.filter((station): station is RouteStation & { lat: number; lon: number } => station.lat != null && station.lon != null);
     if (stations.length < 2) return { status: "unknown", reason: `route-stations-unresolved:${stations.length}/${coordinateRoute.length}` };
     const graph = corridor.graph;
-    const crossingHits: Array<{ fromIndex: number; toIndex: number; pathDistance: number; distanceFromStart: number; distanceToEnd: number; crossingDistance: number; wayId: string; nodeId: string }> = [];
+    const crossingHits: Array<{
+      fromIndex: number; toIndex: number; pathDistance: number;
+      distanceFromStart: number; distanceToEnd: number; crossingDistance: number;
+      wayId: string; nodeId: string; startNodeId: string; targetNodeId: string;
+      startSnapDistance: number; targetSnapDistance: number; pathNodeCount: number;
+      pathWayIds: string[];
+    }> = [];
     // A prepared corridor is local to the crossing. OpenBoards via lists can
     // omit intermediate calls or return only partial route context, so the
     // immediately adjacent listed stops are not always both inside this graph.
@@ -728,7 +742,13 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       };
       const distanceFromStart = pathDistanceAt(0, crossingPathIndex);
       const distanceToEnd = pathDistanceAt(crossingPathIndex, path.nodes.length - 1);
-      crossingHits.push({ fromIndex, toIndex, pathDistance: path.distance, distanceFromStart, distanceToEnd, crossingDistance, wayId: railwayWayId, nodeId: crossingHit.nodeId });
+      crossingHits.push({
+        fromIndex, toIndex, pathDistance: path.distance, distanceFromStart, distanceToEnd,
+        crossingDistance, wayId: railwayWayId, nodeId: crossingHit.nodeId,
+        startNodeId: start.nodeId, targetNodeId: target.nodeId,
+        startSnapDistance: start.distance, targetSnapDistance: target.distance,
+        pathNodeCount: path.nodes.length, pathWayIds: [...path.wayIds].sort(),
+      });
       }
     }
     if (!crossingHits.length) {
