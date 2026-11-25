@@ -20,7 +20,7 @@ function categories(value: unknown, depth = 0): string[] {
       if (parsed !== value) return categories(parsed, depth + 1);
     } catch {}
   }
-  return text.split(/[\\s,;]+/).map((item) => item.trim().replace(/^["'\\[]+|["'\\]]+$/g, "")).filter((item) => /^(ICE|IC|EC|RE|RB|S|U|TGV|RJ|NJ|EN|D|IR|FLX)$/i.test(item));
+  return text.split(/[\s,;]+/).map((item) => item.trim().replace(/^["'\[]+|["'\]]+$/g, "")).filter((item) => /^(ICE|IC|EC|RE|RB|S|U|TGV|RJ|NJ|EN|D|IR|FLX)$/i.test(item));
 }
 function requireDb() { if (!db) throw new Error("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN fehlen."); return db; }
 
@@ -62,7 +62,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (selectedTrackRows && selectedTrackRows.length > 0) {
       const selectedWayIds = [...new Set(selectedTrackRows
         .map((track: any) => String(track?.wayId ?? "").trim())
-        .filter((wayId: string) => /^\\d+$/.test(wayId)))];
+        .filter((wayId: string) => /^\d+$/.test(wayId)))];
       if (!selectedWayIds.length || selectedWayIds.length !== new Set(selectedTrackRows.map((track: any) => String(track?.wayId ?? "").trim()).filter(Boolean)).size) {
         return Response.json({ error: "Die Gleisauswahl enthält ungültige OSM-Way-IDs. Bitte Gleise erneut auswählen." }, { status: 400 });
       }
