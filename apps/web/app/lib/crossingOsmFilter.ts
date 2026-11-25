@@ -193,8 +193,10 @@ async function loadMapping(crossingId: string): Promise<Mapping | null> {
     }
   }
 
-  // Backward compatibility for older links that predate corridor rows.
-  if (!railwayWayIds.length) {
+  // Backward compatibility applies only when no corridor row exists.
+  // An existing row with [] is an intentional empty selection and must not
+  // silently widen to every way indexed at the OSM crossing node.
+  if (!corridorRow && !railwayWayIds.length) {
     const tracksResult = await db.execute({
       sql: `SELECT railway_way_id FROM osm_crossing_rail_ways WHERE crossing_osm_id = ?`,
       args: [osmCrossingId],
