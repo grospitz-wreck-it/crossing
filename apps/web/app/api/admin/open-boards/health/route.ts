@@ -57,6 +57,6 @@ export async function GET() {
       lastObservedAt: null,
       lastSuccessAt: null,
       error: error instanceof Error ? error.message : "Open-Boards-Status konnte nicht geladen werden.",
-    }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }, { headers: { "Cache-Control": "no-store" } });
   }
 }
