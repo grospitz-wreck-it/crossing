@@ -37,6 +37,8 @@ export default function EditCrossingDrawer({ crossingId, onClose, onSaved }: Pro
   const [selectedTrackStations, setSelectedTrackStations] = useState<SelectedTrackStation[]>([]);
   const [trackStationsLoading, setTrackStationsLoading] = useState(false);
   const [trackStationsError, setTrackStationsError] = useState("");
+  const [profileCalculating, setProfileCalculating] = useState(false);
+  const [profileError, setProfileError] = useState("");
   useEffect(() => {
     let alive = true;
     fetch("/api/admin/crossings/timing", { cache: "no-store" })
@@ -125,6 +127,30 @@ export default function EditCrossingDrawer({ crossingId, onClose, onSaved }: Pro
       fallback_offset_seconds: 0, track_distance_meters: 0,
       lat: station.lat, lon: station.lon,
     }]);
+  }
+  async function calculateOsmTimingProfile() {
+    if (!selectedTrackStations.length) {
+      setProfileError("Bitte zuerst mindestens eine Station als vorher oder nachher auswählen.");
+      return;
+    }
+    setProfileCalculating(true); setProfileError("");
+    try {
+      const response = await fetch(`/api/admin/crossings/${encodeURIComponent(crossingId)}/timing-profile`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ stations: selectedTrackStations }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || "OSM-Distanzen konnten nicht berechnet werden.");
+      setCrossingRules((current) => ({
+        ...current,
+        timing: { ...(current.timing || {}), osmTimingProfile: data.profile },
+      }));
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : "OSM-Distanzen konnten nicht berechnet werden.");
+    } finally {
+      setProfileCalculating(false);
+    }
   }
   async function save() {
     setSaving(true); setError("");
@@ -223,6 +249,19 @@ export default function EditCrossingDrawer({ crossingId, onClose, onSaved }: Pro
       {selected && <select aria-label={`Fahrtrichtung für ${station.stationName}`} value={selected.direction} onChange={(event) => setSelectedTrackStations((items) => items.map((item) => item.eva === station.eva ? { ...item, direction: event.target.value as SelectedTrackStation["direction"] } : item))} style={{ ...inputStyle, width: 118, padding: "7px 8px", fontSize: 10 }}><option value="unknown">Richtung offen</option><option value="eastbound">Ost</option><option value="westbound">West</option></select>}
     </div>; })}
     {selectedTrackStations.length > 0 && <small style={{ color: "#18834d" }}>Ausgewählt: {selectedTrackStations.map((station) => `${station.stationName} (${station.side === "before" ? "vorher" : "nachher"})`).join(" · ")}</small>}
+    <div style={{ display: "grid", gap: 7, padding: 11, border: "1px solid #dbe3ed", borderRadius: 9, background: "#fbfcfe" }}>
+      <button type="button" disabled={profileCalculating || selectedTrackStations.length === 0} onClick={calculateOsmTimingProfile} style={{ border: 0, borderRadius: 8, padding: "10px 12px", background: profileCalculating ? "#64748b" : "#172b4d", color: "#fff", fontSize: 11, fontWeight: 800, cursor: profileCalculating ? "wait" : "pointer" }}>
+        {profileCalculating ? "OSM-Distanzen werden berechnet…" : "OSM-Streckendistanzen berechnen"}
+      </button>
+      <small style={{ color: "#68717d", lineHeight: 1.45 }}>Berechnet die Schienenwegdistanz im vorbereiteten OSM-Korridor. Bitte Streckenauswahl und Stationen zuerst speichern und den Dialog erneut öffnen. Die Berechnung wird danach hier separat gestartet.</small>
+      {profileError && <small style={{ color: "#b4232d" }}>{profileError}</small>}
+      {crossingRules.timing?.osmTimingProfile?.stations && <div style={{ display: "grid", gap: 5 }}>
+        <strong style={{ fontSize: 10 }}>Gespeichertes OSM-Zeitprofil</strong>
+        {crossingRules.timing.osmTimingProfile.stations.map((item: any) => <small key={item.eva} style={{ color: item.status === "confirmed" ? "#18834d" : "#9a6700" }}>
+          {item.name || item.eva} · {item.side === "before" ? "vorher" : "nachher"} · {item.ok ? `${item.distanceKm} km` : item.reason} · {item.status || "nicht berechnet"}
+        </small>)}
+      </div>}
+    </div>
   </div>}
 </section>
 <section style={{ display: "grid", gap: 9 }}>
