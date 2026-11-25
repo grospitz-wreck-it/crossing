@@ -1,4 +1,4 @@
-"use client";
+"use client";\nimport styles from "./page.module.css";
 import CampaignDrawer from "./components/CampaignDrawer";
 import CampaignGrid from "./components/CampaignGrid";
 import {
@@ -497,9 +497,9 @@ async function createCustomer() {
 }}
   style={{
     border: 0,
-    borderRadius: 18,
+    borderRadius: 8,
     padding:
-      "14px 20px",
+      "9px 13px",
     fontWeight: 600,
     cursor: "pointer",
     background:
@@ -676,8 +676,8 @@ function StatCard({
       style={{
         background:
           "#fff",
-        borderRadius: 24,
-        padding: 24,
+        borderRadius: 12,
+        padding: 14,
         boxShadow:
           "0 4px 24px rgba(0,0,0,.05)",
       }}
@@ -694,7 +694,7 @@ function StatCard({
       <div
         style={{
           marginTop: 8,
-          fontSize: 32,
+          fontSize: 22,
           fontWeight: 700,
         }}
       >
