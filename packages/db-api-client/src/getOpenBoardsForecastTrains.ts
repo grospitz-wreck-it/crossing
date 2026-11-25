@@ -1,4 +1,5 @@
 import type { OpenBoardsStationObservation } from "./openBoardsNormalizer";
+import { directionFromCrossingAnchors } from "./directionFromCrossingAnchors";
 
 function normalize(value: unknown): string {
   return String(value || "")
@@ -9,58 +10,6 @@ function normalize(value: unknown): string {
     .replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
-}
-
-function oppositeDirection(direction: "eastbound" | "westbound"): "eastbound" | "westbound" {
-  return direction === "eastbound" ? "westbound" : "eastbound";
-}
-
-/**
- * Anchor directions describe travel from the crossing toward that station.
- * An anchor before the crossing in the ordered journey implies the opposite
- * direction. Missing or conflicting evidence remains unknown.
- */
-function directionFromCrossingAnchors(crossing: any, observation: OpenBoardsStationObservation): {
-  direction: "eastbound" | "westbound" | "unknown";
-  source: "crossing-anchor-route-order" | "unknown";
-} {
-  const route = observation.routeNames.map(normalize);
-  const crossingEva = String(crossing.eva || "").trim();
-  let crossingIndex = crossingEva ? observation.routeEvas.indexOf(crossingEva) : -1;
-  if (crossingIndex < 0) {
-    const crossingName = normalize(crossing.name);
-    const matches = route.map((name, index) => ({ name, index }))
-      .filter((entry) => entry.name && crossingName &&
-        (entry.name === crossingName || entry.name.includes(crossingName) || crossingName.includes(entry.name)));
-    if (matches.length === 1) crossingIndex = matches[0].index;
-  }
-  if (crossingIndex < 0) return { direction: "unknown", source: "unknown" };
-
-  const anchors = (Array.isArray(crossing.anchorStations) ? crossing.anchorStations : [])
-    .filter((anchor: any) => anchor && (anchor.direction === "eastbound" || anchor.direction === "westbound"))
-    .flatMap((anchor: any) => {
-      const eva = String(anchor.eva || "").trim();
-      const stationName = normalize(anchor.stationName);
-      let index = eva ? observation.routeEvas.indexOf(eva) : -1;
-      if (index < 0 && stationName) {
-        const matches = route.map((name, routeIndex) => ({ name, routeIndex }))
-          .filter((entry) => entry.name && (entry.name === stationName ||
-            entry.name.includes(stationName) || stationName.includes(entry.name)));
-        if (matches.length === 1) index = matches[0].routeIndex;
-      }
-      if (index < 0 || index === crossingIndex) return [];
-      return [{
-        distance: Math.abs(index - crossingIndex),
-        direction: index > crossingIndex ? anchor.direction : oppositeDirection(anchor.direction),
-      }];
-    })
-    .sort((a: any, b: any) => a.distance - b.distance);
-
-  if (!anchors.length) return { direction: "unknown", source: "unknown" };
-  const nearest = anchors.filter((anchor: any) => anchor.distance === anchors[0].distance);
-  const directions = [...new Set(nearest.map((anchor: any) => anchor.direction))];
-  if (directions.length !== 1) return { direction: "unknown", source: "unknown" };
-  return { direction: directions[0] as "eastbound" | "westbound", source: "crossing-anchor-route-order" };
 }
 
 function lineMatches(line: string, category: string, hints: string[]): boolean {
@@ -149,7 +98,7 @@ export function getOpenBoardsForecastTrains(
     const eventAt = Date.parse(observation.eventTime);
     if (!Number.isFinite(eventAt) || eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) continue;
 
-    const routeDirection = directionFromCrossingAnchors(crossing, observation);
+    const routeDirection = directionFromCrossingAnchors(crossing, observation.routeEvas, observation.routeNames);
 
     if (primaryEvas.has(observation.evaNumber)) {
       const offsetSeconds = observation.evaNumber === String(crossing.eva || "")
