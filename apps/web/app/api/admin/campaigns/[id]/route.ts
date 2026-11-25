@@ -16,6 +16,14 @@ export async function PATCH(
   const { id } =
     await params;
 
+  if (typeof body.active === "boolean") {
+    await db.execute({
+      sql: "UPDATE campaigns SET active = ? WHERE id = ?",
+      args: [body.active ? 1 : 0, id],
+    });
+    return Response.json({ ok: true, active: body.active });
+  }
+
   await db.execute({
     sql: `
       UPDATE campaigns
