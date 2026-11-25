@@ -70,6 +70,13 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
       : [],
     configUpdatedAt: String(row.updated_at || ""),
     throughRules: sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva),
+    anchorStations: stationRows.filter((station) => station.role === "anchor").map((station) => ({
+      eva: String(station.eva || "").trim(),
+      stationName: String(station.station_name || station.eva || ""),
+      direction: station.direction === "eastbound" || station.direction === "westbound" ? station.direction : "unknown",
+      trackDistanceMeters: Number(station.track_distance_meters || 0),
+      fallbackOffsetSeconds: Number(station.fallback_offset_seconds || 0),
+    })).filter((station) => station.eva),
     diversionRules: jsonArray(row.diversion_rules), rerouteWatchRules: jsonArray(row.reroute_watch_rules), confidence: Number(row.confidence || 0.5)
   };
 }
@@ -649,6 +656,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         route: train.route,
         lineAssignment,
         observationStation: train.observationStation || train.stationName || "",
+        routeDirection: train.direction || "unknown",
         result,
       };
     }));
@@ -807,6 +815,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         ambiguous: osmShadowResults.filter((item) => item.lineAssignment.status === "ambiguous").length,
         unknown: osmShadowResults.filter((item) => item.lineAssignment.status === "unknown").length,
       },
+      anchorStations: includeOsmDetails ? (crossing.anchorStations || []) : undefined,
       results: includeOsmDetails ? osmShadowResults : undefined,
     };
 
