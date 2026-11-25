@@ -166,3 +166,19 @@
 @media(max-width:900px){.studioDrawer{width:min(100vw - 24px,1000px);height:calc(100vh - 24px)}.studioWorkspace{grid-template-columns:minmax(0,1fr) 220px}.studioWorkspace .content,.studioStepIntro{padding-left:20px;padding-right:20px}.studioEditDrawer{width:calc(100vw - 16px)!important}.studioEditDrawer>div:nth-of-type(1){padding:20px!important}}
 @media(max-width:700px){.studioBackdrop{padding:0;align-items:stretch}.studioDrawer{width:100vw;height:100dvh;max-height:100dvh;border:0;border-radius:0}.studioHero{padding:21px 18px;min-height:112px}.studioHero h2{font-size:23px}.studioHero p{font-size:11px}.studioSteps{padding:0 5px}.studioSteps button{min-height:60px;gap:4px;font-size:9px}.studioSteps button span{width:22px;height:22px}.studioWorkspace{display:flex;flex-direction:column;overflow:auto}.studioMain{overflow:visible}.studioWorkspace .content,.studioStepIntro{padding-left:14px;padding-right:14px}.studioWorkspace .content{padding-top:15px}.studioWorkspace .content section{padding:14px}.studioAside{display:grid;grid-template-columns:1fr 1fr;padding:12px 15px;border-left:0;border-top:1px solid #dce5ed}.studioAside .asideTip,.studioAside .asideTrack{display:none}.studioFooter{padding:11px 14px}.studioFooter .primary,.studioFooter .cancel{flex:1}.studioEditDrawer{width:100vw!important;height:100dvh!important;border:0;border-radius:0}.studioEditDrawer>header{padding:21px 18px!important}.studioEditDrawer>header h2{font-size:23px!important}.studioEditDrawer .studioSteps{padding:0 5px}.studioEditDrawer .studioSteps button{min-height:60px;gap:4px;font-size:9px}.studioEditDrawer .studioSteps button span{width:22px;height:22px}.studioEditDrawer>div:nth-of-type(1){padding:15px!important}.studioEditDrawer>div:nth-of-type(1)>section{padding:14px!important}.studioEditDrawer>footer{padding:11px 14px!important}.studioEditDrawer>footer>div{flex:1}.studioEditDrawer>footer .primary,.studioEditDrawer>footer .cancel{flex:1;min-width:0}}
 @media(prefers-reduced-motion:reduce){.studioFooter .primary{transition:none}}
+
+
+/* Contrast fix: light studio surfaces must not inherit the page's pale text color. */
+.studioWorkspace{color:#173653}
+.studioStepIntro>strong{color:#173653}
+.studioStepIntro>small{color:#526779}
+.infrastructureHead strong{color:#173653;font-size:14px}
+.infrastructureHead small{display:block;color:#526779;font-size:12px;line-height:1.5}
+.routeIntro>div>label{display:block;color:#173653;font-size:14px;font-weight:850}
+.routeIntro>div>small{display:block;color:#526779;font-size:12px;line-height:1.5}
+.studioWorkspace .content section{color:#edf2f8}
+.studioWorkspace .content section .infrastructureHead{color:#173653}
+.studioWorkspace .content section .infrastructureHead strong{color:#173653}
+.studioWorkspace .content section .infrastructureHead small{color:#526779}
+.studioWorkspace .content section .routeIntro>div>label{color:#173653}
+.studioWorkspace .content section .routeIntro>div>small{color:#526779}
