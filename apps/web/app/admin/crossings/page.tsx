@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import styles from "./page.module.css";
 import EditCrossingDrawer from "./EditCrossingDrawer";
 
@@ -328,19 +329,19 @@ function RouteMap({ lat, lon, candidates, selectedKey, onSelect }: { lat: number
   const project = (point: Point) => { const p = mercator(point.lat, point.lon, zoom); return { x: p.x * 256 - originX, y: p.y * 256 - originY }; };
   const marker = project({ lat, lon });
   const colors = ["#c1121f", "#0f172a", "#2563eb", "#7c3aed", "#059669", "#ea580c", "#0891b2", "#be185d"];
-  function beginPan(event: React.PointerEvent<HTMLDivElement>) {
+  function beginPan(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest("button")) return;
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
-  function movePan(event: React.PointerEvent<HTMLDivElement>) {
+  function movePan(event: ReactPointerEvent<HTMLDivElement>) {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId) return;
     const dx = event.clientX - active.x, dy = event.clientY - active.y;
     if (Math.abs(dx) + Math.abs(dy) > 4) active.moved = true;
     if (active.moved) setPan({ x: active.panX + dx, y: active.panY + dy });
   }
-  function endPan(event: React.PointerEvent<HTMLDivElement>) {
+  function endPan(event: ReactPointerEvent<HTMLDivElement>) {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return;
     suppressClick.current = drag.current.moved;
     drag.current = null;
