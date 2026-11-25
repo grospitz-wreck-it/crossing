@@ -637,14 +637,15 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     if (!mapping) return { status: "unknown", reason: "crossing-osm-mapping-missing" };
     if (mapping.crossingNodeIds.size === 0) return { status: "unknown", reason: "crossing-osm-node-missing" };
 
-    // The UI-selected physical ways and the persisted corridor must describe
-    // exactly the same infrastructure. A partial/stale selection is not a
-    // valid basis for a positive assignment.
+    // The prepared corridor is a topology/context graph and may contain
+    // additional adjacent ways. Every UI-selected physical way must exist in
+    // that corridor, but the two sets are not required to be identical.
+    // The actual train match is restricted to selectedWaySet at the crossing
+    // below, so extra corridor ways can never become eligible tracks.
     if (selectedWaySet) {
       const mappedWays = new Set(mapping.railwayWayIds.map(String));
-      const sameSelection = selectedWaySet.size === mappedWays.size &&
-        [...selectedWaySet].every((wayId) => mappedWays.has(wayId));
-      if (!sameSelection) {
+      const selectionIsInCorridor = [...selectedWaySet].every((wayId) => mappedWays.has(wayId));
+      if (!selectionIsInCorridor) {
         const selectedIds = [...selectedWaySet].sort();
         const corridorIds = [...mappedWays].sort();
         return {
