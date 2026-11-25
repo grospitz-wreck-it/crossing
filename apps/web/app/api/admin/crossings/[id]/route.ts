@@ -1,4 +1,5 @@
 import { createClient } from "@libsql/client";
+import { invalidateCrossingOsmCaches } from "../../../../lib/crossingOsmFilter";
 
 const dbUrl = process.env.TURSO_DATABASE_URL;
 const dbToken = process.env.TURSO_AUTH_TOKEN;
@@ -105,6 +106,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           WHERE crossing_id = ?`,
         args: [JSON.stringify(selectedWayIds), id],
       });
+      invalidateCrossingOsmCaches(id);
     }
 
     let observationEvas = Array.isArray(body.observationEvas) ? body.observationEvas.map(String).filter(Boolean) : null;
