@@ -63,11 +63,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       // An explicitly empty selection is meaningful: persist no selected ways
       // and make the matcher fail closed instead of falling back to every
       // indexed way attached to the OSM crossing node.
-      const rawWayIds = selectedTrackRows.map((track: any) => String(track?.wayId ?? "").trim());
+      const rawWayIds: string[] = selectedTrackRows.map((track: any): string => String(track?.wayId ?? "").trim());
       if (rawWayIds.some((wayId: string) => !/^\d+$/.test(wayId))) {
         return Response.json({ error: "Die Gleisauswahl enthält ungültige OSM-Way-IDs. Bitte Gleise erneut auswählen." }, { status: 400 });
       }
-      const selectedWayIds: string[] = [...new Set(rawWayIds)];
+      const selectedWayIds: string[] = Array.from(new Set<string>(rawWayIds));
 
       if (selectedWayIds.length > 0) {
         const latDelta = 15 / 110_000;
