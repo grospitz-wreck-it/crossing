@@ -7,7 +7,7 @@ import Button from "./ui/Button";
 type Props = {
   campaign: any;
   onEdit?: (campaign: any) => void;
-  onDelete?: (campaign: any) => void;
+  onDelete?: (campaign: any) => void;\n  onToggle?: (campaign: any) => void;
 };
 
 export default function CampaignCard({
