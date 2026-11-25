@@ -24,8 +24,8 @@ export default function CampaignGrid({
       style={{
         display: "grid",
         gridTemplateColumns:
-          "repeat(auto-fill,minmax(390px,1fr))",
-        gap: 22,
+          "repeat(auto-fill,minmax(280px,1fr))",
+        gap: 12,
       }}
     >
       {campaigns.map(
