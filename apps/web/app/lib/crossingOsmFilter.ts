@@ -20,6 +20,10 @@ export type CrossingOsmFilterResult = {
   diagnostics?: {
     routeStations?: Array<{ name: string; nodeId: string | null; snapDistanceMeters: number | null }>;
     crossingNodes?: Array<{ nodeId: string; presentInGraph: boolean; degree: number; selectedWayEdges: string[] }>;
+    selectedWayIds?: string[];
+    corridorWayIds?: string[];
+    missingFromCorridor?: string[];
+    unexpectedInCorridor?: string[];
     observationStation?: string;
     crossingBeforeObservation?: boolean;
   };
@@ -635,16 +639,16 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
       const sameSelection = selectedWaySet.size === mappedWays.size &&
         [...selectedWaySet].every((wayId) => mappedWays.has(wayId));
       if (!sameSelection) {
+        const selectedIds = [...selectedWaySet].sort();
+        const corridorIds = [...mappedWays].sort();
         return {
           status: "unknown",
           reason: "selected-track-corridor-mismatch",
           diagnostics: {
-            crossingNodes: [...mapping.crossingNodeIds].map((nodeId) => ({
-              nodeId,
-              presentInGraph: false,
-              degree: 0,
-              selectedWayEdges: [],
-            })),
+            selectedWayIds: selectedIds,
+            corridorWayIds: corridorIds,
+            missingFromCorridor: selectedIds.filter((wayId) => !mappedWays.has(wayId)),
+            unexpectedInCorridor: corridorIds.filter((wayId) => !selectedWaySet.has(wayId)),
           },
         };
       }
