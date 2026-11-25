@@ -845,7 +845,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       };
     }
 
-    await writeCrossingForecastCache(cacheKey,payload);
+    if (!includeComparisonDetails) await writeCrossingForecastCache(cacheKey,payload);
     return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
 }
