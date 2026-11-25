@@ -62,7 +62,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (selectedTrackRows && selectedTrackRows.length > 0) {
       const selectedWayIds = [...new Set(selectedTrackRows
         .map((track: any) => String(track?.wayId ?? "").trim())
-        .filter((wayId: string) => /^\\d+$/.test(wayId)))];
+        .filter((wayId: string) => /^\d+$/.test(wayId)))];
       if (!selectedWayIds.length || selectedWayIds.length !== new Set(selectedTrackRows.map((track: any) => String(track?.wayId ?? "").trim()).filter(Boolean)).size) {
         return Response.json({ error: "Die Gleisauswahl enthält ungültige OSM-Way-IDs. Bitte Gleise erneut auswählen." }, { status: 400 });
       }
