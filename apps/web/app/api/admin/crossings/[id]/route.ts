@@ -62,7 +62,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (selectedTrackRows && selectedTrackRows.length > 0) {
       const selectedWayIds = [...new Set(selectedTrackRows
         .map((track: any) => String(track?.wayId ?? "").trim())
-        .filter((wayId: string) => /^\d+$/.test(wayId)))];
+        .filter((wayId: string) => /^\\d+$/.test(wayId)))];
       if (!selectedWayIds.length || selectedWayIds.length !== new Set(selectedTrackRows.map((track: any) => String(track?.wayId ?? "").trim()).filter(Boolean)).size) {
         return Response.json({ error: "Die Gleisauswahl enthält ungültige OSM-Way-IDs. Bitte Gleise erneut auswählen." }, { status: 400 });
       }
@@ -70,15 +70,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const latDelta = 15 / 110_000;
       const lonDelta = 15 / (111_320 * Math.max(0.2, Math.cos(lat * Math.PI / 180)));
       const placeholders = selectedWayIds.map(() => "?").join(",");
-      const verifiedWays = await client.execute({
-        sql: `SELECT DISTINCT crw.railway_way_id
+      const verifiedWays = await client.execute(
+        `SELECT DISTINCT crw.railway_way_id
           FROM osm_crossings oc
           JOIN osm_crossing_rail_ways crw ON crw.crossing_osm_id = oc.osm_id
           JOIN osm_rail_ways rw ON rw.osm_id = crw.railway_way_id
           WHERE oc.lat BETWEEN ? AND ? AND oc.lon BETWEEN ? AND ?
             AND crw.railway_way_id IN (${placeholders})`,
-        args: [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta, ...selectedWayIds],
-      });
+        [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta, ...selectedWayIds],
+      );
       const verifiedIds = new Set((verifiedWays.rows as any[]).map((row) => String(row.railway_way_id)));
       const unverified = selectedWayIds.filter((wayId) => !verifiedIds.has(wayId));
       if (unverified.length) {
