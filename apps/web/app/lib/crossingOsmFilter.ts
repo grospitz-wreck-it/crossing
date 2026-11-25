@@ -829,3 +829,119 @@ export async function filterTrainByCrossingOsm(crossingId: string, route: string
     return { status: "unknown", reason: "osm-filter-exception" };
   }
 }
+
+/**
+ * Read-only, bounded diagnostic for a station EVA to a mapped crossing.
+ * Uses the already-prepared OSM corridor profile; it never expands OSM data
+ * and never writes to Turso.
+ */
+export async function diagnoseStationToCrossingDistance(crossingId: string, stationEva: string) {
+  const eva = String(stationEva || "").trim();
+  if (!eva) return { ok: false as const, reason: "station-eva-missing" };
+
+  const [mapping, corridor, stationResult] = await Promise.all([
+    loadMappingCached(crossingId),
+    loadCorridorGraph(crossingId),
+    db.execute({
+      sql: `SELECT eva, name, lat, lon
+        FROM railway_station_catalog
+        WHERE eva = ? AND lat IS NOT NULL AND lon IS NOT NULL
+        LIMIT 1`,
+      args: [eva],
+    }),
+  ]);
+
+  const station: any = stationResult.rows[0];
+  if (!station) return { ok: false as const, reason: "station-coordinate-missing", stationEva: eva };
+  if (!mapping) return { ok: false as const, reason: "crossing-osm-mapping-missing" };
+  if (!corridor) return { ok: false as const, reason: "prepared-osm-profile-missing" };
+
+  const stationPoint = { lat: Number(station.lat), lon: Number(station.lon) };
+  const stationSnap = nearestNode(corridor.graph, stationPoint, 2_000);
+  if (!stationSnap) {
+    return {
+      ok: false as const,
+      reason: "station-not-near-prepared-rail-graph",
+      station: { eva, name: String(station.name || eva), ...stationPoint },
+    };
+  }
+
+  const candidates = [...mapping.crossingNodeIds]
+    .map((nodeId) => {
+      const point = corridor.graph.nodePoints.get(nodeId);
+      return point ? { nodeId, point, snapDistanceMeters: distanceMeters(
+        { lat: mapping.crossingLat, lon: mapping.crossingLon }, point,
+      ) } : null;
+    })
+    .filter((item): item is { nodeId: string; point: GeoPoint; snapDistanceMeters: number } =>
+      Boolean(item && item.snapDistanceMeters <= 50),
+    );
+
+  if (!candidates.length) {
+    return { ok: false as const, reason: "mapped-crossing-node-not-in-prepared-graph" };
+  }
+
+  const paths = candidates
+    .map((candidate) => {
+      const path = shortestRailPath(corridor.graph, stationSnap.nodeId, candidate.nodeId, 50_000);
+      if (!path) return null;
+      const crossingIndex = path.nodes.indexOf(candidate.nodeId);
+      const adjacentWays = new Set<string>();
+      if (crossingIndex > 0) {
+        const previous = path.nodes[crossingIndex - 1];
+        for (const edge of corridor.graph.adjacency.get(previous) ?? []) {
+          if (edge.to === candidate.nodeId && mapping.railwayWayIds.includes(edge.wayId)) adjacentWays.add(edge.wayId);
+        }
+      }
+      if (crossingIndex >= 0 && crossingIndex < path.nodes.length - 1) {
+        const next = path.nodes[crossingIndex + 1];
+        for (const edge of corridor.graph.adjacency.get(candidate.nodeId) ?? []) {
+          if (edge.to === next && mapping.railwayWayIds.includes(edge.wayId)) adjacentWays.add(edge.wayId);
+        }
+      }
+      return {
+        distanceMeters: path.distance,
+        nodeId: candidate.nodeId,
+        crossingSnapDistanceMeters: candidate.snapDistanceMeters,
+        selectedWaysAtCrossing: [...adjacentWays],
+        selectedTrackConfirmed: adjacentWays.size === 1,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .sort((a, b) => a.distanceMeters - b.distanceMeters);
+
+  if (!paths.length) return { ok: false as const, reason: "no-rail-path-to-crossing-node" };
+  const best = paths[0];
+  const speedScenarios = [45, 50, 55, 60, 65, 70].map((speedKmh) => ({
+    speedKmh,
+    travelSeconds: Math.round(best.distanceMeters / (speedKmh * 1000 / 3600)),
+  }));
+
+  return {
+    ok: true as const,
+    crossingId,
+    station: {
+      eva,
+      name: String(station.name || eva),
+      lat: stationPoint.lat,
+      lon: stationPoint.lon,
+      graphSnapDistanceMeters: Math.round(stationSnap.distance),
+    },
+    crossing: {
+      lat: mapping.crossingLat,
+      lon: mapping.crossingLon,
+      osmNodeId: best.nodeId,
+      graphSnapDistanceMeters: Math.round(best.crossingSnapDistanceMeters),
+    },
+    osm: {
+      distanceMeters: Math.round(best.distanceMeters),
+      distanceKm: Number((best.distanceMeters / 1000).toFixed(3)),
+      selectedTrackConfirmed: best.selectedTrackConfirmed,
+      selectedWaysAtCrossing: best.selectedWaysAtCrossing,
+      profileWays: corridor.wayIds.size,
+      profileNodes: corridor.graph.nodePoints.size,
+    },
+    speedScenarios,
+    note: "OSM network distance from the station's nearest graph node to the mapped crossing node. Station snapping and selected-track confirmation are exposed separately.",
+  };
+}
