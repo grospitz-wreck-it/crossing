@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import studioStyles from "./page.module.css";
 
 type StationLink = { id?: string; eva: string; station_name: string; role: string; categories: string; direction: string; fallback_offset_seconds: number; track_distance_meters: number; lat?: number; lon?: number; };
@@ -371,19 +371,19 @@ function EditInfrastructureMap({ lat, lon, candidates, stations, selectedEva, se
   const project = (point: { lat: number; lon: number }) => { const p = editMapMercator(point.lat, point.lon, zoom); return { x: p.x * 256 - originX, y: p.y * 256 - originY }; };
   const crossing = project({ lat, lon });
   const colors = ["#dc2626", "#2563eb", "#7c3aed", "#059669", "#ea580c", "#0891b2"];
-  function beginPan(event: React.PointerEvent<HTMLDivElement>) {
+  function beginPan(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest("button")) return;
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
-  function movePan(event: React.PointerEvent<HTMLDivElement>) {
+  function movePan(event: ReactPointerEvent<HTMLDivElement>) {
     const active = drag.current;
     if (!active || active.pointerId !== event.pointerId) return;
     const dx = event.clientX - active.x, dy = event.clientY - active.y;
     if (Math.abs(dx) + Math.abs(dy) > 4) active.moved = true;
     if (active.moved) setPan({ x: active.panX + dx, y: active.panY + dy });
   }
-  function endPan(event: React.PointerEvent<HTMLDivElement>) {
+  function endPan(event: ReactPointerEvent<HTMLDivElement>) {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return;
     suppressClick.current = drag.current.moved;
     drag.current = null;
