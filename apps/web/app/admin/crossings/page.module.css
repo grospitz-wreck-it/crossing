@@ -43,3 +43,15 @@
 @media(max-width:900px){.studioWorkspace{grid-template-columns:minmax(0,1fr) 210px}.studioWorkspace .content,.studioStepIntro{padding-left:22px;padding-right:22px}.studioAside{padding:18px 14px}}
 @media(max-width:700px){.studioHero{padding:23px 20px}.studioHero h2{font-size:24px}.studioSteps{padding:0 8px}.studioSteps button{flex-direction:column;gap:4px;min-height:66px;font-size:9px}.studioSteps button span{width:22px;height:22px}.studioWorkspace{display:flex;flex-direction:column;overflow:auto}.studioMain{overflow:visible}.studioAside{display:grid;grid-template-columns:1fr 1fr;padding:14px 18px;border-left:0;border-top:1px solid #dce5eb}.asideTip,.asideTrack{display:none}.studioWorkspace .content,.studioStepIntro{padding-left:17px;padding-right:17px}.studioWorkspace .routeMap{height:260px}.locationFields{grid-template-columns:1fr}.reviewGrid{grid-template-columns:1fr}.studioFooter{padding:13px 17px}.studioFooter .primary,.studioFooter .cancel{flex:1}.tableHead,.row{grid-template-columns:minmax(130px,1.5fr) .7fr 36px 36px}}
 @media(prefers-reduced-motion:reduce){.studioSteps button,.editButton{transition:none}.osmSpinner,.osmProgressTrack span{animation:none}}
+
+.tableHead,.row{grid-template-columns:minmax(220px,1.5fr) .8fr 1.2fr 1fr .7fr 40px 40px}
+.studioEditBackdrop{background:rgba(9,25,39,.58)!important;backdrop-filter:blur(7px)}
+.studioEditDrawer{width:min(1120px,100vw)!important;background:#f5f8fa!important;box-shadow:-30px 0 90px rgba(4,19,32,.28)!important}
+.studioEditDrawer>header{padding:28px 34px 22px!important;background:linear-gradient(118deg,#102b45,#1c4968)!important;border-bottom:0!important;color:#fff}
+.studioEditDrawer>header h2{color:#fff!important;font-size:30px!important}
+.studioEditDrawer>header button{background:rgba(255,255,255,.12)!important;color:#fff!important;border:1px solid rgba(255,255,255,.16)!important}
+.studioEditDrawer>div:nth-of-type(1){padding:24px 34px!important;gap:18px!important}
+.studioEditDrawer>div:nth-of-type(1)>section{padding:16px!important;border:1px solid #e2eaf0!important;border-radius:14px!important;background:#fff!important;box-shadow:0 4px 14px rgba(23,54,83,.035)}
+.studioEditDrawer>footer{padding:16px 34px!important;background:#fff!important;border-top:1px solid #e2eaf0!important}
+.studioEditDrawer>footer button:last-child{background:#e10600!important;box-shadow:0 8px 18px rgba(225,6,0,.18)}
+@media(max-width:700px){.tableHead,.row{grid-template-columns:minmax(120px,1fr) 34px 34px}.studioEditDrawer>header{padding:22px 18px!important}.studioEditDrawer>div:nth-of-type(1){padding:18px!important}.studioEditDrawer>footer{padding:13px 18px!important}}
