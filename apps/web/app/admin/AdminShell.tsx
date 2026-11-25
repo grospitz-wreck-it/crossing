@@ -1,10 +1,13 @@
 "use client";
 import type {ReactNode} from "react";
-import {usePathname} from "next/navigation";\nimport {useEffect,useState} from "react";
+import {usePathname} from "next/navigation";
+import {useEffect,useState} from "react";
 import styles from "./AdminShell.module.css";
 const groups=[{label:"ÜBERSICHT",items:[["/admin","Dashboard","⌂"]]},{label:"BETRIEB",items:[["/admin/crossings","Bahnübergänge","▤"],["/admin/measurements","Messungen","◷"]]},{label:"VERMARKTUNG",items:[["/admin/ads","Werbung & Kampagnen","▧"],["/admin/campaigns","Kampagnen-Setup","＋"]]},{label:"DATEN & SYSTEM",items:[["/admin/crossings/api","DB API & Verbrauch","⌁"],["/admin/crossings/forecasts","Prognosen","⌘"]]}] as const;
 export default function AdminShell({children}:{children:ReactNode}){
- const pathname=usePathname();\n const [campaignCount,setCampaignCount]=useState<number|null>(null);\n useEffect(()=>{let alive=true;fetch("/api/admin/campaigns",{cache:"no-store"}).then(r=>r.ok?r.json():[]).then(d=>{if(alive)setCampaignCount(Array.isArray(d)?d.length:0)}).catch(()=>{if(alive)setCampaignCount(null)});return()=>{alive=false}},[]);
+ const pathname=usePathname();
+ const [campaignCount,setCampaignCount]=useState<number|null>(null);
+ useEffect(()=>{let alive=true;fetch("/api/admin/campaigns",{cache:"no-store"}).then(r=>r.ok?r.json():[]).then(d=>{if(alive)setCampaignCount(Array.isArray(d)?d.length:0)}).catch(()=>{if(alive)setCampaignCount(null)});return()=>{alive=false}},[]);
  return <div className={styles.shell}>
   <aside className={styles.sidebar}>
    <a href="/admin" className={styles.brand}><img src="/images/meineschranke_logo.webp" alt="meineschranke"/><span><b>CONTROL CENTER</b><small>Administration</small></span></a>
