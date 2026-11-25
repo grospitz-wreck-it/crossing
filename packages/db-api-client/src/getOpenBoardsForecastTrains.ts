@@ -1,5 +1,4 @@
 import type { OpenBoardsStationObservation } from "./openBoardsNormalizer";
-import { directionFromCrossingAnchors } from "./directionFromCrossingAnchors";
 
 function normalize(value: unknown): string {
   return String(value || "")
@@ -111,8 +110,6 @@ export function getOpenBoardsForecastTrains(
       continue;
     }
 
-    const routeDirection = directionFromCrossingAnchors(crossing, observation.routeEvas, observation.routeNames);
-
     if (primaryEvas.has(observation.evaNumber)) {
       const offsetSeconds = observation.evaNumber === String(crossing.eva || "")
         ? 0
@@ -131,8 +128,10 @@ export function getOpenBoardsForecastTrains(
         destination: stationNameForEva(observation.destinationEva),
         platform: observation.platform,
         isStoppingTrain: true,
-        direction: routeDirection.direction,
-        directionSource: routeDirection.source,
+        // OpenBoards via lists are explicitly partial and may not preserve a
+        // reliable stop order. Do not infer compass direction from them.
+        direction: "unknown",
+        directionSource: "unknown",
         directionLabel: stationNameForEva(observation.destinationEva) ? `Richtung ${stationNameForEva(observation.destinationEva)}` : null,
         delayMinutes: observation.timeType === "REAL" && observation.scheduledTime
           ? Math.max(0, Math.round((eventAt - Date.parse(observation.scheduledTime)) / 60_000))
@@ -200,8 +199,8 @@ export function getOpenBoardsForecastTrains(
         observationStation: String(rule.observationStation || eva),
         observationTime: observation.eventTime,
         fallbackOffsetSeconds: offset,
-        direction: rule.direction && rule.direction !== "unknown" ? rule.direction : routeDirection.direction,
-        directionSource: rule.direction && rule.direction !== "unknown" ? "configured-through-rule" : routeDirection.source,
+        direction: rule.direction || "unknown",
+        directionSource: rule.direction && rule.direction !== "unknown" ? "configured-through-rule" : "unknown",
         directionLabel: "Durchfahrt",
         delayMinutes: observation.timeType === "REAL" && observation.scheduledTime
           ? Math.max(0, Math.round((eventAt - Date.parse(observation.scheduledTime)) / 60_000))
