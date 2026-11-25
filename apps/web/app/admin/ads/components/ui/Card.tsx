@@ -10,10 +10,10 @@ export default function Card({
   return (
     <div
       style={{
-        background: "#fff",
-        borderRadius: 28,
+        background: "#111d2d",
+        borderRadius: 12,
         boxShadow:
-          "0 8px 32px rgba(0,0,0,.06)",
+          "0 8px 24px rgba(0,0,0,.16)",
         overflow: "hidden",
       }}
     >
