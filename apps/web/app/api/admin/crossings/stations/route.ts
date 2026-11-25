@@ -149,6 +149,8 @@ export async function GET(request:Request){
       const matched=direct||((named&&distanceKm(osm.lat,osm.lon,named.lat,named.lon)<=1.0)?named:null);
       // UIC/IBNR identifiers in the German 800xxxx range are usable as DB EVA station IDs.
       const osmEva=!matched&&/^8\d{6}$/.test(osm.uicRef||"")?osm.uicRef:"";
+      const stationLat=matched?.lat??osm.lat,stationLon=matched?.lon??osm.lon;
+      const trackDistanceMeters=geometryDistanceMeters({lat:stationLat,lon:stationLon},segments);
       const along=alongTrackDistance({lat:stationLat,lon:stationLon},{lat,lon},segments);
       const distance=distanceKm(lat,lon,stationLat,stationLon);
       const isStopPosition=osm.publicTransport==="stop_position"||osm.railway==="stop";
@@ -156,8 +158,8 @@ export async function GET(request:Request){
         id:osm.id,eva:matched?.eva||osmEva,stationName:osm.name,
         ril100:matched?.ril100||osm.ril100||undefined,ibnr:matched?.ibnr||osm.uicRef||undefined,
         lat:stationLat,lon:stationLon,distanceKm:distance,trackDistanceMeters,
-        alongTrackDistanceMeters:along,source:matched?"db+osm":"osm",
-        selectable:Boolean(matched),osmRailway:osm.railway,osmPublicTransport:osm.publicTransport,
+        alongTrackDistanceMeters:along,source:matched?"db+osm":osmEva?"osm-uic":"osm",
+        selectable:Boolean(matched||osmEva),
         maxTrackDistanceMeters:isStopPosition?600:2500
       };
     }).filter(s=>s.distanceKm<=80&&s.trackDistanceMeters<=s.maxTrackDistanceMeters&&s.alongTrackDistanceMeters!=null);
