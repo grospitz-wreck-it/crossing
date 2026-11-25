@@ -36,7 +36,26 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
   const linkedContextEvas = stationRows.filter(s => s.role === "context").map(s => String(s.eva || "").trim()).filter(Boolean);
   const stationNameByEva = new Map<string, string>();
   for (const station of stationRows) { const eva = String(station.eva || "").trim(); if (eva) stationNameByEva.set(eva, String(station.station_name || station.name || eva)); }
-  const throughRules = jsonArray(row.through_rules);
+  const configuredThroughRules = jsonArray(row.through_rules);
+  // Station links with role=anchor are additional journey-observation points.
+  // They must not become primary candidates, but they must be queried alongside
+  // the crossing's primary EVA so journeys observed at these stations can be
+  // matched back to the crossing through their ordered route.
+  const anchorRules = stationRows
+    .filter((station) => station.role === "anchor")
+    .map((station) => ({
+      observationEva: String(station.eva || "").trim(),
+      observationStation: stationNameByEva.get(String(station.eva || "").trim()) || String(station.station_name || station.eva || ""),
+      categories: [],
+      trackDistanceMeters: Number(station.track_distance_meters || 0),
+      fallbackOffsetSeconds: Math.max(30, Number(station.fallback_offset_seconds || 300)),
+      direction: station.direction === "eastbound" || station.direction === "westbound" ? station.direction : "unknown",
+    }))
+    .filter((rule) => rule.observationEva);
+  const throughRules = [
+    ...configuredThroughRules,
+    ...anchorRules.filter((anchor) => !configuredThroughRules.some((rule: any) => String(rule.observationEva || "").trim() === anchor.observationEva)),
+  ];
   const sourceRules = throughRules.length ? throughRules : observationEvas.map(eva => ({ observationEva: eva, observationStation: stationNameByEva.get(eva) || eva, categories: [], trackDistanceMeters: 0, fallbackOffsetSeconds: 300, direction: "unknown" }));
   return {
     id: String(row.id), name: String(row.name || row.id), eva: String(row.eva || ""), referenceStations, observationEvas,
