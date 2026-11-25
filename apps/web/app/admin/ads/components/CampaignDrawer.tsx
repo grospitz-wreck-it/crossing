@@ -156,7 +156,7 @@ onCloseCustomerDialog,
     >
       <div
         style={{
-          width: "min(760px, 100vw)",
+          width: 520,
           background: "#111d2d",
           padding: 24,
           overflowY: "auto",
