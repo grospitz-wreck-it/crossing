@@ -50,6 +50,63 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const sameName = await client.execute({ sql: `SELECT id,name FROM crossings WHERE LOWER(TRIM(name))=LOWER(TRIM(?)) AND id <> ? LIMIT 1`, args: [name, id] });
     if (sameName.rows.length) return Response.json({ error: `Dieser Name wird bereits verwendet: „${String((sameName.rows[0] as any).name)}“.` }, { status: 409 });
 
+    // Keep the admin's physical-track selection and the OSM matcher corridor in
+    // sync. Only accept ways that are already indexed and attached to an OSM
+    // level-crossing node within 15m of this crossing. Never trust Overpass UI
+    // candidates as proof of a persisted/imported mapping.
+    const selectedTrackRows = body.rules && typeof body.rules === "object" &&
+      Array.isArray(body.rules.selectedOsmTracks)
+      ? body.rules.selectedOsmTracks
+      : null;
+    if (selectedTrackRows && selectedTrackRows.length > 0) {
+      const selectedWayIds = [...new Set(selectedTrackRows
+        .map((track: any) => String(track?.wayId ?? "").trim())
+        .filter((wayId: string) => /^\\d+$/.test(wayId)))];
+      if (!selectedWayIds.length || selectedWayIds.length !== new Set(selectedTrackRows.map((track: any) => String(track?.wayId ?? "").trim()).filter(Boolean)).size) {
+        return Response.json({ error: "Die Gleisauswahl enthält ungültige OSM-Way-IDs. Bitte Gleise erneut auswählen." }, { status: 400 });
+      }
+
+      const latDelta = 15 / 110_000;
+      const lonDelta = 15 / (111_320 * Math.max(0.2, Math.cos(lat * Math.PI / 180)));
+      const placeholders = selectedWayIds.map(() => "?").join(",");
+      const verifiedWays = await client.execute({
+        sql: `SELECT DISTINCT crw.railway_way_id
+          FROM osm_crossings oc
+          JOIN osm_crossing_rail_ways crw ON crw.crossing_osm_id = oc.osm_id
+          JOIN osm_rail_ways rw ON rw.osm_id = crw.railway_way_id
+          WHERE oc.lat BETWEEN ? AND ? AND oc.lon BETWEEN ? AND ?
+            AND crw.railway_way_id IN (${placeholders})`,
+        args: [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta, ...selectedWayIds],
+      });
+      const verifiedIds = new Set((verifiedWays.rows as any[]).map((row) => String(row.railway_way_id)));
+      const unverified = selectedWayIds.filter((wayId) => !verifiedIds.has(wayId));
+      if (unverified.length) {
+        return Response.json({
+          error: "Die ausgewählten Gleise sind im importierten OSM-Datenbestand nicht eindeutig diesem Bahnübergang zugeordnet. Bitte OSM-Zuordnung prüfen, bevor gespeichert wird.",
+          code: "OSM_TRACK_SELECTION_UNVERIFIED",
+          unverifiedWayIds: unverified,
+        }, { status: 409 });
+      }
+
+      const corridor = await client.execute({
+        sql: "SELECT crossing_id FROM crossing_osm_corridors WHERE crossing_id = ? LIMIT 1",
+        args: [id],
+      });
+      if (!corridor.rows.length) {
+        return Response.json({
+          error: "Für diesen Bahnübergang fehlt der gespeicherte OSM-Korridor. Bitte zuerst die OSM-Zuordnung vorbereiten.",
+          code: "OSM_CORRIDOR_MISSING",
+        }, { status: 409 });
+      }
+      await client.execute({
+        sql: `UPDATE crossing_osm_corridors
+          SET railway_way_ids_json = ?, profile_json = NULL, profile_version = 0,
+              profile_built_at = NULL, updated_at = datetime('now')
+          WHERE crossing_id = ?`,
+        args: [JSON.stringify(selectedWayIds), id],
+      });
+    }
+
     let observationEvas = Array.isArray(body.observationEvas) ? body.observationEvas.map(String).filter(Boolean) : null;
     let contextEvas = Array.isArray(body.contextEvas) ? body.contextEvas.map(String).filter(Boolean) : null;
     let referenceStations = Array.isArray(body.referenceStations) ? body.referenceStations.map(String).map((value: string) => value.trim()).filter(Boolean) : null;
