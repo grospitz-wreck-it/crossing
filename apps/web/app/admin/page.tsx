@@ -3,20 +3,20 @@ import {useCallback,useEffect,useMemo,useState} from "react";
 import styles from "./dashboard.module.css";
 type Measurement={predictionId:string;actualClose:string|null;closeDeltaSeconds:number|null;openDeltaSeconds:number|null;trains?:Array<{line?:string;category?:string}>;flagged?:boolean};
 type Crossing={id:string;name:string;city?:string;status:string};
-type Campaign={id:string;name:string;active?:boolean;impressions?:number;clicks?:number;cpm?:number};
+type Campaign={id:string;name:string;active?:boolean};\ntype AdStat={impressions:number;clicks:number};
 type Feed={configured:boolean;activeJobs:number;failedJobs:number;observations24h:number;stations24h:number;lastObservedAt:string|null;error?:string};
 type Usage={limitPerMinute:number;currentWindow:number;remaining:number;utilizationPercent:number};
 const fmt=(n:number)=>Math.round(n).toLocaleString("de-DE");
 const avg=(a:number[])=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
 export default function AdminDashboard(){
- const[crossings,setCrossings]=useState<Crossing[]>([]),[measurements,setMeasurements]=useState<Measurement[]>([]),[campaigns,setCampaigns]=useState<Campaign[]>([]),[feed,setFeed]=useState<Feed|null>(null),[usage,setUsage]=useState<Usage|null>(null),[loading,setLoading]=useState(true),[errors,setErrors]=useState<string[]>([]);
- const load=useCallback(async()=>{const failed:string[]=[];const tasks=[["Bahnübergänge","/api/admin/crossings",setCrossings],["Messungen","/api/measurements/stats",setMeasurements],["Kampagnen","/api/admin/campaigns",setCampaigns],["Open Boards","/api/admin/open-boards/health",setFeed],["DB API","/api/admin/api-usage",setUsage]] as const;await Promise.all(tasks.map(async([label,url,setter])=>{try{const r=await fetch(url,{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error();(setter as (v:any)=>void)(d)}catch{failed.push(label)}}));setErrors(failed);setLoading(false)},[]);
+ const[crossings,setCrossings]=useState<Crossing[]>([]),[measurements,setMeasurements]=useState<Measurement[]>([]),[campaigns,setCampaigns]=useState<Campaign[]>([]),[adStats,setAdStats]=useState<AdStat[]>([]),[feed,setFeed]=useState<Feed|null>(null),[usage,setUsage]=useState<Usage|null>(null),[loading,setLoading]=useState(true),[errors,setErrors]=useState<string[]>([]);
+ const load=useCallback(async()=>{const failed:string[]=[];const tasks=[["Bahnübergänge","/api/admin/crossings",setCrossings],["Messungen","/api/measurements/stats",setMeasurements],["Kampagnen","/api/admin/campaigns",setCampaigns],["Werbestatistik","/api/admin/ads/stats",setAdStats],["Open Boards","/api/admin/open-boards/health",setFeed],["DB API","/api/admin/api-usage",setUsage]] as const;await Promise.all(tasks.map(async([label,url,setter])=>{try{const r=await fetch(url,{cache:"no-store"});const d=await r.json();if(!r.ok)throw new Error();(setter as (v:any)=>void)(d)}catch{failed.push(label)}}));setErrors(failed);setLoading(false)},[]);
  useEffect(()=>{void load();const t=window.setInterval(()=>void load(),120000);return()=>window.clearInterval(t)},[load]);
  const active=crossings.filter(c=>c.status!=="inactive").length;
  const activeCampaigns=campaigns.filter(c=>Boolean(c.active)).length;
  const recent=measurements.filter(m=>m.actualClose&&Date.now()-new Date(m.actualClose).getTime()<86400000);
  const close=avg(recent.map(m=>m.closeDeltaSeconds).filter((v):v is number=>v!==null).map(Math.abs));
- const impressions=campaigns.reduce((s,c)=>s+Number(c.impressions||0),0),clicks=campaigns.reduce((s,c)=>s+Number(c.clicks||0),0);
+ const impressions=adStats.reduce((s,c)=>s+Number(c.impressions||0),0),clicks=adStats.reduce((s,c)=>s+Number(c.clicks||0),0);
  const byLine=useMemo(()=>{const map=new Map<string,number>();recent.forEach(m=>m.trains?.forEach(t=>{const k=t.line||t.category||"Sonstige";map.set(k,(map.get(k)||0)+1)}));return [...map].sort((a,b)=>b[1]-a[1]).slice(0,5)},[recent]);
  const status=feed?.error?"warn":feed?.configured?"good":"muted";
  return <div className={styles.dashboard}>
