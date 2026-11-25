@@ -60,8 +60,40 @@ export async function getSnapshotPrimaryTrains(
       .map((eva: unknown) => String(eva).trim())
       .filter((eva: string) => Boolean(eva)),
   ));
+  const timingRules = crossing.rules && !Array.isArray(crossing.rules) ? crossing.rules.timing || {} : {};
+  const timingProfile = timingRules.osmTimingProfile;
+  const profileStations = Array.isArray(timingProfile?.stations) ? timingProfile.stations : [];
   const configuredObservationStations = (crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations) ? crossing.rules.observationStations : [])
-    .filter((station: any) => station && station.enabled !== false && station.eva && (station.side === "before" || station.side === "after") && Number.isFinite(Number(station.trackDistanceMeters)) && Number(station.trackDistanceMeters) > 0);
+    .filter((station: any) => station && station.enabled !== false && station.eva && (station.side === "before" || station.side === "after"))
+    .map((station: any) => {
+      const eva = String(station.eva).trim();
+      const configuredWayIds = Array.isArray(station.trackWayIds)
+        ? station.trackWayIds.map((value: unknown) => String(value)).filter(Boolean).sort()
+        : [];
+      // A saved OSM distance is trusted only while it still describes the exact
+      // station/side/track selection currently configured in the crossing.
+      // This prevents an old profile from silently surviving an admin edit.
+      const profile = profileStations.find((item: any) => {
+        if (!item || item.ok !== true || item.status !== "confirmed" ||
+            item.selectedTrackConfirmed !== true || item.snapQualityConfirmed !== true ||
+            String(item.eva || "").trim() !== eva || item.side !== station.side ||
+            !Number.isFinite(Number(item.distanceMeters)) || Number(item.distanceMeters) <= 0) return false;
+        const profileWayIds = Array.isArray(item.trackWayIds)
+          ? item.trackWayIds.map((value: unknown) => String(value)).filter(Boolean).sort()
+          : [];
+        if (!configuredWayIds.length || configuredWayIds.length !== profileWayIds.length ||
+            configuredWayIds.some((value: string, index: number) => value !== profileWayIds[index])) return false;
+        return !item.direction || !station.direction || item.direction === station.direction;
+      });
+      const hasConfirmedProfile = Boolean(profile);
+      return {
+        ...station,
+        trackDistanceMeters: hasConfirmedProfile ? Number(profile.distanceMeters) : Number(station.trackDistanceMeters),
+        timingDistanceSource: hasConfirmedProfile ? "confirmed-osm-profile" : "manual-config",
+        timingProfileCalculatedAt: hasConfirmedProfile ? profile.calculatedAt : undefined,
+      };
+    })
+    .filter((station: any) => Number.isFinite(Number(station.trackDistanceMeters)) && Number(station.trackDistanceMeters) > 0);
   const candidateEvas = Array.from(new Set([...primaryEvas, ...configuredObservationStations.map((station: any) => String(station.eva).trim())].filter(Boolean)));
   if (!candidateEvas.length) return [];
   const stationEvas = candidateEvas;
@@ -154,7 +186,7 @@ export async function getSnapshotPrimaryTrains(
         if (!Number.isFinite(actualAt)) return [];
         const wayIds = Array.isArray(station.trackWayIds) ? station.trackWayIds.map(Number).filter((value: number) => Number.isFinite(value) && value > 0) : [];
         if (!wayIds.length) return [];
-        return [{ eva: configuredEva, stationName: stationNames.get(configuredEva) || String(station.stationName || configuredEva), side: station.side as "before" | "after", trackWayIds: wayIds, direction: station.direction || "unknown", distanceMeters: Number(station.trackDistanceMeters), actualTime: new Date(actualAt).toISOString(), scheduledTime: String((actualDeparture && observedCall.plannedDeparture) || (actualArrival && observedCall.plannedArrival) || observedCall.planned || ""), eventType: actualDeparture ? "departure" as const : actualArrival ? "arrival" as const : "actual" as const }];
+        return [{ eva: configuredEva, stationName: stationNames.get(configuredEva) || String(station.stationName || configuredEva), side: station.side as "before" | "after", trackWayIds: wayIds, direction: station.direction || "unknown", distanceMeters: Number(station.trackDistanceMeters), distanceSource: station.timingDistanceSource || "manual-config", profileCalculatedAt: station.timingProfileCalculatedAt, actualTime: new Date(actualAt).toISOString(), scheduledTime: String((actualDeparture && observedCall.plannedDeparture) || (actualArrival && observedCall.plannedArrival) || observedCall.planned || ""), eventType: actualDeparture ? "departure" as const : actualArrival ? "arrival" as const : "actual" as const }];
       });
 
       candidates.push({
