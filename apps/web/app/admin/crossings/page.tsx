@@ -332,7 +332,6 @@ function RouteMap({ lat, lon, candidates, selectedKey, onSelect }: { lat: number
   function beginPan(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest("button")) return;
     drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false };
-    event.currentTarget.setPointerCapture(event.pointerId);
   }
   function movePan(event: ReactPointerEvent<HTMLDivElement>) {
     const active = drag.current;
@@ -350,7 +349,7 @@ function RouteMap({ lat, lon, candidates, selectedKey, onSelect }: { lat: number
     if (suppressClick.current) { suppressClick.current = false; return; }
     onSelect(candidate);
   }
-  return <div ref={mapRef} className={styles.routeMap} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onClickCapture={(event) => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}>
+  return <div ref={mapRef} className={styles.routeMap} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onPointerLeave={() => { if (drag.current?.moved) drag.current = null; }} onClickCapture={(event) => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}>
     <div className={styles.mapTiles}>{tiles.map(({ x, y }) => <img key={`${zoom}/${x}/${y}`} src={`https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`} alt="" draggable={false} style={{ left: x * 256 - originX, top: y * 256 - originY }} />)}</div>
     <svg className={styles.routeOverlay} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-label="Bahnstrecken-Auswahlkarte">
       {candidates.map((candidate, index) => { const key = routeKey(candidate), selected = selectedKey.split("|").includes(key), color = colors[index % colors.length]; return <g key={key} onClick={() => choose(candidate)} className={styles.routeHitArea}>{candidate.segments.map((segment, segmentIndex) => { const points = segment.map(project).map((point) => `${point.x},${point.y}`).join(" "); return <g key={`${key}-${segmentIndex}`}><polyline points={points} fill="none" stroke="#fff" strokeWidth={selected ? 10 : 8} strokeLinecap="round" strokeLinejoin="round" opacity=".96"/><polyline points={points} fill="none" stroke={color} strokeWidth={selected ? 6 : 4} strokeLinecap="round" strokeLinejoin="round" opacity={selected ? 1 : .82}/></g>;})}</g>; })}
