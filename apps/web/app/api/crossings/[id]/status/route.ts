@@ -668,7 +668,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
               if (crossingAt.getTime() < Date.now() - 60_000 || crossingAt.getTime() > Date.now() + 3 * 60 * 60_000) continue;
               measuredCrossingAt = crossingAt;
               measuredDirection = before.direction !== "unknown" ? before.direction : after.direction || "unknown";
-              measuredDiagnostics = { beforeEva: before.eva, afterEva: after.eva, distanceBeforeMeters: distanceBefore, distanceAfterMeters: distanceAfter, elapsedSeconds: Math.round(elapsedSeconds), measuredSpeedKmh: Math.round(speedKmh * 10) / 10, source: before.realtimeSource === "DB OpenBoards REAL" && after.realtimeSource === "DB OpenBoards REAL" ? "two-openboards-real" : "two-mobilithek-actual" };
+              measuredDiagnostics = {
+                beforeEva: before.eva,
+                afterEva: after.eva,
+                distanceBeforeMeters: distanceBefore,
+                distanceAfterMeters: distanceAfter,
+                beforeDistanceSource: before.distanceSource || "manual-config",
+                afterDistanceSource: after.distanceSource || "manual-config",
+                beforeProfileCalculatedAt: before.profileCalculatedAt || null,
+                afterProfileCalculatedAt: after.profileCalculatedAt || null,
+                elapsedSeconds: Math.round(elapsedSeconds),
+                measuredSpeedKmh: Math.round(speedKmh * 10) / 10,
+                source: before.realtimeSource === "DB OpenBoards REAL" && after.realtimeSource === "DB OpenBoards REAL" ? "two-openboards-real" : "two-mobilithek-actual",
+              };
               break;
             }
             if (measuredCrossingAt) break;
