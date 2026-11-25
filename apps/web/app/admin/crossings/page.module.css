@@ -75,3 +75,94 @@
 .studioEditDrawer .studioFooter .primary{min-width:150px;background:#ff5368;color:#111d2d}
 .studioEditDrawer .studioFooter .cancel{background:#eef2f5;color:#34495b}
 @media(max-width:700px){.studioEditDrawer .studioSteps{padding:0 8px}.studioEditDrawer .studioSteps button{flex-direction:column;gap:4px;min-height:66px;font-size:9px}.studioEditDrawer .studioFooter{padding:13px 17px}.studioEditDrawer .studioFooter>div{flex:1}.studioEditDrawer .studioFooter .primary,.studioEditDrawer .studioFooter .cancel{flex:1}}
+
+
+/* BÜ setup and edit studio — unified, high-contrast control-center styling */
+.studioBackdrop{align-items:center;padding:16px;background:rgba(2,8,18,.72);backdrop-filter:blur(8px)}
+.studioDrawer{width:min(1240px,calc(100vw - 32px));height:min(940px,calc(100vh - 32px));border:1px solid rgba(164,190,220,.2);border-radius:20px;overflow:hidden;background:#f4f7fb;box-shadow:0 32px 100px rgba(0,0,0,.48)}
+.studioHero{flex:0 0 auto;min-height:126px;box-sizing:border-box;padding:26px 34px;background:radial-gradient(circle at 82% 15%,rgba(255,83,104,.2),transparent 26%),linear-gradient(115deg,#0b1728 0%,#142b45 58%,#1c405c 100%);color:#f4f7fb}
+.studioHero:after{right:90px;bottom:-145px;border-color:rgba(255,255,255,.12)}
+.studioHero .eyebrow{color:#ff8796;font-size:9px;letter-spacing:.18em}
+.studioHero h2{color:#f5f8fc;font-size:clamp(25px,3vw,34px);line-height:1.1}
+.studioHero p{color:#b7c8d9;font-size:12px}
+.studioHero .close{display:grid;place-items:center;flex:0 0 auto;width:40px;height:40px;border:1px solid rgba(255,255,255,.18);border-radius:11px;background:rgba(255,255,255,.09);color:#fff}
+.studioHero .close:hover{background:rgba(255,255,255,.17)}
+.studioSteps{flex:0 0 auto;padding:0 26px;background:#101d2e;border-bottom:1px solid rgba(164,190,220,.12)}
+.studioSteps button{min-height:66px;color:#8fa2b8;font-size:11px}
+.studioSteps button span{width:27px;height:27px;background:#20334a;color:#aebed0}
+.studioSteps .studioStepActive{color:#fff;border-bottom-color:#ff5368}
+.studioSteps .studioStepActive span{background:#ff5368;color:#101d2e;box-shadow:0 4px 14px rgba(255,83,104,.24)}
+.studioSteps .studioStepDone{color:#7ce2b7}
+.studioSteps .studioStepDone span{background:rgba(54,217,154,.15);color:#54dca6}
+.studioWorkspace{min-height:0;background:#f3f6fa}
+.studioMain{background:#f3f6fa}
+.studioStepIntro{padding:23px 30px 0}
+.studioStepIntro>span{color:#e94d63;font-size:9px}
+.studioStepIntro>strong{color:#142a43;font-size:23px}
+.studioStepIntro>small{color:#718398;font-size:11px}
+.studioWorkspace .content{padding:19px 30px 28px;gap:14px}
+.studioWorkspace .content section{padding:18px;border:1px solid #e1e8ef;border-radius:14px;background:#fff;box-shadow:0 5px 18px rgba(19,43,68,.045)}
+.studioWorkspace .content label,.studioWorkspace .content section>strong{color:#243b54;font-size:12px;font-weight:800}
+.studioWorkspace .content small{color:#73869a;line-height:1.55}
+.studioWorkspace .content input,.studioWorkspace .content select,.studioWorkspace .content textarea{min-height:42px;border:1px solid #d9e2eb;border-radius:9px;background:#fbfcfe;color:#1c3047;padding:10px 12px;font-size:12px;box-shadow:none}
+.studioWorkspace .content input:focus,.studioWorkspace .content select:focus,.studioWorkspace .content textarea:focus{border-color:#f05a70;box-shadow:0 0 0 3px rgba(240,90,112,.12);outline:none}
+.studioWorkspace .content input::placeholder{color:#9aa9b8}
+.studioWorkspace .locationFields .field{background:#fff;border-color:#e1e8ef}
+.studioWorkspace .sourceModeSection{background:#fff;border-color:#e1e8ef}
+.studioWorkspace .routeCard{background:#fff;border-color:#dfe7ef}
+.studioWorkspace .routeCard:hover{border-color:#9db0c4}
+.studioWorkspace .routeCardSelected{background:#fff4f5;border-color:#f05a70;box-shadow:0 0 0 2px rgba(240,90,112,.1)}
+.studioWorkspace .routeCardText strong{color:#1d344d}
+.studioWorkspace .routeCardText small{color:#75889b}
+.studioWorkspace .routeCheck{background:#edf2f7;color:#667b90}
+.studioWorkspace .routeCardSelected .routeCheck{background:#ff5368;color:#111d2d}
+.studioWorkspace .routeMap{border-color:#d7e1eb;box-shadow:0 8px 24px rgba(19,43,68,.08)}
+.studioAside{background:#eaf0f5;border-left:1px solid #dce5ed;padding:22px 18px}
+.studioAside .asideStatus{color:#17324d}
+.studioAside .asideCoords{color:#718398}
+.studioAside .asideTip{background:#fff;border-color:#dce5ed}
+.studioAside .asideTip p{color:#667b8e}
+.studioAside .asideMetric{color:#718398}
+.studioAside .asideMetric strong{color:#18344f}
+.studioFooter{flex:0 0 auto;padding:14px 26px;background:#fff;border-top:1px solid #e2e9f0}
+.studioFooter .primary{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-width:142px;min-height:42px;padding:0 18px;border:0;border-radius:10px;background:#ff5368;color:#111d2d;font-size:12px;font-weight:850;box-shadow:0 7px 18px rgba(255,83,104,.18)}
+.studioFooter .primary:hover{background:#ff6a7d;transform:translateY(-1px)}
+.studioFooter .primary:disabled{opacity:.45;box-shadow:none;transform:none}
+.studioFooter .primary svg{flex:none}
+.studioFooter .cancel{min-height:42px;padding:0 16px;border:1px solid #dce4ec;border-radius:10px;background:#f5f7fa;color:#52677c;font-size:12px;font-weight:750}
+.studioFooter .cancel:hover{background:#eaf0f5}
+.studioReview{background:#fff;border-color:#dce9e2}
+.studioReview .reviewSignal>span{background:#e5f8ef;color:#159765}
+.studioReview .reviewSignal strong{color:#18344f}
+.studioReview .reviewGrid>div{background:#f2f6f9}
+.studioReview .reviewGrid small{color:#8192a3}
+.studioReview .reviewGrid strong{color:#1e3852}
+.studioEditBackdrop{background:rgba(2,8,18,.72)!important;backdrop-filter:blur(8px)}
+.studioEditDrawer{width:min(1160px,calc(100vw - 32px))!important;height:100%!important;background:#f3f6fa!important;border:1px solid rgba(164,190,220,.18);border-radius:20px 0 0 20px;overflow:hidden;box-shadow:-30px 0 100px rgba(0,0,0,.42)!important}
+.studioEditDrawer>header{flex:0 0 auto;padding:27px 34px 22px!important;background:radial-gradient(circle at 82% 15%,rgba(255,83,104,.2),transparent 26%),linear-gradient(115deg,#0b1728,#142b45 58%,#1c405c)!important;color:#f4f7fb!important}
+.studioEditDrawer>header>div>div{color:#ff8796!important;font-size:9px!important;letter-spacing:.18em!important}
+.studioEditDrawer>header h2{color:#f5f8fc!important;font-size:29px!important}
+.studioEditDrawer>header button{display:grid!important;place-items:center!important;width:40px!important;height:40px!important;border-radius:11px!important;background:rgba(255,255,255,.09)!important;color:#fff!important}
+.studioEditDrawer .studioSteps{padding:0 26px;background:#101d2e;border-bottom:1px solid rgba(164,190,220,.12)}
+.studioEditDrawer>div:nth-of-type(1){flex:1;min-height:0;padding:23px 30px!important;gap:14px!important;background:#f3f6fa;overflow:auto}
+.studioEditDrawer>div:nth-of-type(1)>section{padding:18px!important;border:1px solid #e1e8ef!important;border-radius:14px!important;background:#fff!important;box-shadow:0 5px 18px rgba(19,43,68,.045)!important}
+.studioEditDrawer>div:nth-of-type(1)>section>strong,.studioEditDrawer label span{color:#243b54!important}
+.studioEditDrawer input,.studioEditDrawer select,.studioEditDrawer textarea{min-height:42px!important;box-sizing:border-box!important;border:1px solid #d9e2eb!important;border-radius:9px!important;background:#fbfcfe!important;color:#1c3047!important;padding:10px 12px!important;font-size:12px!important}
+.studioEditDrawer input:focus,.studioEditDrawer select:focus,.studioEditDrawer textarea:focus{border-color:#f05a70!important;box-shadow:0 0 0 3px rgba(240,90,112,.12)!important;outline:none!important}
+.studioEditDrawer .routeMap{border-color:#d7e1eb;box-shadow:0 8px 24px rgba(19,43,68,.08)}
+.studioEditDrawer .routeCard{background:#fff;border-color:#dfe7ef}
+.studioEditDrawer .routeCardSelected{background:#fff4f5;border-color:#f05a70}
+.studioEditDrawer .routeCardText strong{color:#1d344d}
+.studioEditDrawer .routeCardText small{color:#75889b}
+.studioEditDrawer .routeCheck{background:#edf2f7;color:#667b90}
+.studioEditDrawer .routeCardSelected .routeCheck{background:#ff5368;color:#111d2d}
+.studioEditDrawer .studioReview{background:#fff;border-color:#dce9e2}
+.studioEditDrawer .studioReview .reviewSignal strong{color:#18344f}
+.studioEditDrawer .studioReview .reviewGrid>div{background:#f2f6f9}
+.studioEditDrawer>footer{flex:0 0 auto;padding:14px 26px!important;background:#fff!important;border-top:1px solid #e2e9f0!important}
+.studioEditDrawer>footer>div{display:flex;gap:9px}
+.studioEditDrawer>footer .primary{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-width:142px;min-height:42px;padding:0 18px;border:0;border-radius:10px;background:#ff5368!important;color:#111d2d!important;font-size:12px;font-weight:850;box-shadow:0 7px 18px rgba(255,83,104,.18)}
+.studioEditDrawer>footer .cancel{min-height:42px;padding:0 16px;border:1px solid #dce4ec;border-radius:10px;background:#f5f7fa;color:#52677c}
+@media(max-width:900px){.studioDrawer{width:min(100vw - 24px,1000px);height:calc(100vh - 24px)}.studioWorkspace{grid-template-columns:minmax(0,1fr) 220px}.studioWorkspace .content,.studioStepIntro{padding-left:20px;padding-right:20px}.studioEditDrawer{width:calc(100vw - 16px)!important}.studioEditDrawer>div:nth-of-type(1){padding:20px!important}}
+@media(max-width:700px){.studioBackdrop{padding:0;align-items:stretch}.studioDrawer{width:100vw;height:100dvh;max-height:100dvh;border:0;border-radius:0}.studioHero{padding:21px 18px;min-height:112px}.studioHero h2{font-size:23px}.studioHero p{font-size:11px}.studioSteps{padding:0 5px}.studioSteps button{min-height:60px;gap:4px;font-size:9px}.studioSteps button span{width:22px;height:22px}.studioWorkspace{display:flex;flex-direction:column;overflow:auto}.studioMain{overflow:visible}.studioWorkspace .content,.studioStepIntro{padding-left:14px;padding-right:14px}.studioWorkspace .content{padding-top:15px}.studioWorkspace .content section{padding:14px}.studioAside{display:grid;grid-template-columns:1fr 1fr;padding:12px 15px;border-left:0;border-top:1px solid #dce5ed}.studioAside .asideTip,.studioAside .asideTrack{display:none}.studioFooter{padding:11px 14px}.studioFooter .primary,.studioFooter .cancel{flex:1}.studioEditDrawer{width:100vw!important;height:100dvh!important;border:0;border-radius:0}.studioEditDrawer>header{padding:21px 18px!important}.studioEditDrawer>header h2{font-size:23px!important}.studioEditDrawer .studioSteps{padding:0 5px}.studioEditDrawer .studioSteps button{min-height:60px;gap:4px;font-size:9px}.studioEditDrawer .studioSteps button span{width:22px;height:22px}.studioEditDrawer>div:nth-of-type(1){padding:15px!important}.studioEditDrawer>div:nth-of-type(1)>section{padding:14px!important}.studioEditDrawer>footer{padding:11px 14px!important}.studioEditDrawer>footer>div{flex:1}.studioEditDrawer>footer .primary,.studioEditDrawer>footer .cancel{flex:1;min-width:0}}
+@media(prefers-reduced-motion:reduce){.studioFooter .primary{transition:none}}
