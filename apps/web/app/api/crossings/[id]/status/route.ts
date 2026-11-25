@@ -70,6 +70,13 @@ function buildCrossingFromDb(row: any, stationRows: any[]): any {
       : [],
     configUpdatedAt: String(row.updated_at || ""),
     throughRules: sourceRules.map((rule: any) => ({ ...rule, observationEva: String(rule.observationEva || "").trim(), observationStation: String(rule.observationStation || stationNameByEva.get(String(rule.observationEva || "")) || rule.observationEva || ""), categories: Array.isArray(rule.categories) ? rule.categories : [], trackDistanceMeters: Number(rule.trackDistanceMeters || 0), fallbackOffsetSeconds: Number(rule.fallbackOffsetSeconds || 300), direction: rule.direction || "unknown" })).filter((rule: any) => rule.observationEva),
+    anchorStations: stationRows.filter((station) => station.role === "anchor").map((station) => ({
+      eva: String(station.eva || "").trim(),
+      stationName: String(station.station_name || station.eva || ""),
+      direction: station.direction === "eastbound" || station.direction === "westbound" ? station.direction : "unknown",
+      trackDistanceMeters: Number(station.track_distance_meters || 0),
+      fallbackOffsetSeconds: Number(station.fallback_offset_seconds || 0),
+    })).filter((station) => station.eva),
     diversionRules: jsonArray(row.diversion_rules), rerouteWatchRules: jsonArray(row.reroute_watch_rules), confidence: Number(row.confidence || 0.5)
   };
 }
@@ -77,7 +84,7 @@ async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
       db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,updated_at,observation_evas,reference_stations,context_evas,required_route_stops,rules,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
-      db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] })
+      db.execute({ sql: `SELECT eva,station_name,role,direction,fallback_offset_seconds,track_distance_meters FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] })
     ]);
     const row: any = result.rows[0]; return row ? buildCrossingFromDb(row, stations.rows as any[]) : null;
   } catch (error) { console.error("[STATUS] loadCrossing failed:", error); return null; }
@@ -495,7 +502,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         observationTime:liveTime,
         observationPoints,
         fallbackOffsetSeconds:offsetSeconds,
-        direction:getCrossingDirection([]),
+        direction: train.direction && train.direction !== "unknown" ? train.direction : getCrossingDirection([]),
+        directionSource: train.direction && train.direction !== "unknown" ? "mobilithek-snapshot" : "unknown",
         directionLabel:train.destination?`Richtung ${train.destination}`:null,
         delayMinutes:realtime
           ? Math.round((Date.parse(realtime.eventTime) - Date.parse(realtime.scheduledTime || train.scheduledTime)) / 60000)
@@ -548,7 +556,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // OpenBoards is now a first-class fallback/source, not only a realtime
     // enrichment layer. It can supply explicit primary-stop rows even when the
     // Mobilithek snapshot is empty. Through-runs require route anchors.
-    const openBoardsTrains = getOpenBoardsForecastTrains(crossing, realtimeObservations, hasSelectedOsmTracks ? [] : lineHints);
+    const openBoardsTrains = getOpenBoardsForecastTrains(
+      crossing,
+      realtimeObservations,
+      hasSelectedOsmTracks ? [] : lineHints,
+    );
     const combined = [...trains];
     for (const candidate of openBoardsTrains) {
       const duplicateIndex = combined.findIndex((existing) =>
@@ -589,9 +601,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     ).values());
     const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
     const selectedOsmTracks = selectedOsmTracksForCrossing(crossing);
+    const configuredObservationStations = crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations)
+      ? crossing.rules.observationStations.map((station: any) => ({
+          eva: String(station.eva || "").trim(),
+          stationName: String(station.stationName || station.name || ""),
+          enabled: station.enabled !== false,
+          side: station.side || "unknown",
+          direction: station.direction || "unknown",
+          trackWayIds: Array.isArray(station.trackWayIds) ? station.trackWayIds.map((value: unknown) => String(value)) : [],
+          trackDistanceMeters: Number(station.trackDistanceMeters || 0),
+          fallbackOffsetSeconds: Number(station.fallbackOffsetSeconds || 0),
+        })).filter((station: any) => station.eva)
+      : [];
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => {
       const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
-      const lineAssignment = assignTrainToOsmTrack({
+      const rawLineAssignment = assignTrainToOsmTrack({
         line: train.line,
         category: train.category,
         route: train.route,
@@ -604,10 +628,46 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         train.observationStation || train.stationName || undefined,
       );
 
-      // The prepared OSM line relations are the authoritative assignment
-      // between a service and the physical tracks selected for this crossing.
-      // The route graph may enrich that assignment with a directed distance,
-      // but an incomplete/ambiguous graph must not veto a unique line match.
+      // If several OSM ways carry the same forward line relation, use the
+      // prepared crossing topology as the final physical discriminator. Only
+      // ways that are direct edges at a mapped crossing node can represent
+      // the track that actually traverses this level crossing. Adjacent route
+      // continuation ways remain useful corridor context, but are not crossing
+      // tracks merely because they share the same line relation.
+      const crossingTopologyWayIds = [...new Set(
+        (graphResult.diagnostics?.crossingNodes || [])
+          .flatMap((node) => node.selectedWayEdges || [])
+          .map(String)
+          .filter(Boolean),
+      )];
+      const forwardLineCandidates = rawLineAssignment.candidates.filter(
+        (candidate) => candidate.direction === "from-to",
+      );
+      const topologyMatchedCandidates = forwardLineCandidates.filter(
+        (candidate) => crossingTopologyWayIds.includes(String(candidate.wayId)),
+      );
+      const topologyMatchedWayIds = [...new Set(
+        topologyMatchedCandidates.map((candidate) => String(candidate.wayId)),
+      )];
+      const topologyCandidate = topologyMatchedCandidates[0];
+      const lineAssignment = rawLineAssignment.status === "ambiguous" &&
+        rawLineAssignment.reason === "multiple-tracks-match-train-direction" &&
+        topologyMatchedWayIds.length === 1 &&
+        topologyCandidate
+        ? {
+            ...rawLineAssignment,
+            status: "matched" as const,
+            wayId: topologyMatchedWayIds[0],
+            relationId: topologyCandidate.relationId,
+            lineRef: topologyCandidate.lineRef,
+            direction: "from-to" as const,
+            reason: "unique-crossing-node-topology-match",
+          }
+        : rawLineAssignment;
+
+      // The prepared OSM line relations establish service and travel direction.
+      // Direct crossing-node topology now resolves otherwise ambiguous ways;
+      // the route graph remains an optional source of directed-distance detail.
       const assignedWayId = lineAssignment.wayId == null ? "" : String(lineAssignment.wayId);
       const assignmentIsSelected = Boolean(
         lineAssignment.status === "matched" &&
@@ -621,7 +681,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
             status: "matched" as const,
             score: 1,
             railwayWayId: assignedWayId,
-            reason: "matched-by-osm-line-relation",
+            reason: lineAssignment.reason === "unique-crossing-node-topology-match"
+              ? "matched-by-crossing-node-topology"
+              : "matched-by-osm-line-relation",
             directionLabel: Array.isArray(train.route) && train.route.length
               ? `Richtung ${train.route[train.route.length - 1]}`
               : undefined,
@@ -631,6 +693,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
                 lineRef: lineAssignment.lineRef,
                 direction: lineAssignment.direction,
                 reason: lineAssignment.reason,
+              },
+              crossingTopology: {
+                directCrossingWayIds: crossingTopologyWayIds,
+                forwardCandidateWayIds: [...new Set(forwardLineCandidates.map((candidate) => String(candidate.wayId)))],
+                matchedCandidateWayIds: topologyMatchedWayIds,
               },
               graphResult: {
                 status: graphResult.status,
@@ -648,7 +715,27 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         journeyNumber: train.journeyNumber,
         route: train.route,
         lineAssignment,
+        lineAssignmentBeforeTopology: rawLineAssignment.status === "ambiguous" ? rawLineAssignment : undefined,
+        crossingTopology: {
+          directCrossingWayIds: crossingTopologyWayIds,
+          forwardCandidateWayIds: [...new Set(forwardLineCandidates.map((candidate) => String(candidate.wayId)))],
+          matchedCandidateWayIds: topologyMatchedWayIds,
+        },
         observationStation: train.observationStation || train.stationName || "",
+        routeDirection: train.direction || "unknown",
+        routeDirectionSource: train.directionSource || (train.direction && train.direction !== "unknown" ? "source-direction" : "unknown"),
+        observationPoints: Array.isArray(train.observationPoints) ? train.observationPoints.map((point: any) => ({
+          eva: String(point.eva || ""),
+          stationName: String(point.stationName || ""),
+          side: point.side || "unknown",
+          trackWayIds: Array.isArray(point.trackWayIds) ? point.trackWayIds.map((value: unknown) => String(value)) : [],
+          direction: point.direction || "unknown",
+          distanceMeters: Number(point.distanceMeters || 0),
+          distanceSource: point.distanceSource || "unknown",
+          actualTime: point.actualTime || null,
+          realtimeSource: point.realtimeSource || null,
+          eventType: point.eventType || "unknown",
+        })) : [],
         result,
       };
     }));
@@ -807,6 +894,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         ambiguous: osmShadowResults.filter((item) => item.lineAssignment.status === "ambiguous").length,
         unknown: osmShadowResults.filter((item) => item.lineAssignment.status === "unknown").length,
       },
+      anchorStations: includeOsmDetails ? (crossing.anchorStations || []) : undefined,
+      observationStations: includeOsmDetails ? configuredObservationStations : undefined,
       results: includeOsmDetails ? osmShadowResults : undefined,
     };
 

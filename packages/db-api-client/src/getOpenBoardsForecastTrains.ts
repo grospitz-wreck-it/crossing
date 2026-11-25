@@ -84,6 +84,11 @@ export function getOpenBoardsForecastTrains(
   const now = Date.now();
   const primaryEvas = new Set<string>((crossing.referenceStations || []).map(String));
   const rules = Array.isArray(crossing.throughRules) ? crossing.throughRules : [];
+  const hasSelectedOsmTracks = Boolean(
+    crossing.rules && !Array.isArray(crossing.rules) &&
+    Array.isArray(crossing.rules.selectedOsmTracks) &&
+    crossing.rules.selectedOsmTracks.some((track: any) => track && track.wayId != null)
+  );
   const candidates: any[] = [];
 
   for (const observation of observations) {
@@ -115,7 +120,10 @@ export function getOpenBoardsForecastTrains(
         destination: stationNameForEva(observation.destinationEva),
         platform: observation.platform,
         isStoppingTrain: true,
+        // OpenBoards via lists are explicitly partial and may not preserve a
+        // reliable stop order. Do not infer compass direction from them.
         direction: "unknown",
+        directionSource: "unknown",
         directionLabel: stationNameForEva(observation.destinationEva) ? `Richtung ${stationNameForEva(observation.destinationEva)}` : null,
         delayMinutes: observation.timeType === "REAL" && observation.scheduledTime
           ? Math.max(0, Math.round((eventAt - Date.parse(observation.scheduledTime)) / 60_000))
@@ -131,17 +139,28 @@ export function getOpenBoardsForecastTrains(
     for (const rule of rules) {
       const eva = String(rule.observationEva || "").trim();
       if (!eva || observation.evaNumber !== eva) continue;
-      if (!lineMatches(observation.line, observation.category, [
+      // When physical OSM tracks are explicitly selected, do not let legacy
+      // line/category allowlists hide a train before the selected-track matcher
+      // can evaluate its actual route and crossing topology.
+      const ruleLineMatches = hasSelectedOsmTracks || lineMatches(observation.line, observation.category, [
         ...(Array.isArray(rule.lineHints) ? rule.lineHints : []),
         ...(Array.isArray(rule.categories) ? rule.categories : []),
         ...lineHints,
-      ])) continue;
-      if (!routeHasStation(observation, eva, String(rule.observationStation || ""))) continue;
+      ]);
+      if (!ruleLineMatches) continue;
+      const stationPresent = routeHasStation(observation, eva, String(rule.observationStation || ""));
+      if (!stationPresent) continue;
       const configuredAnchors = Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : [];
       const relationPairs = lineRouteAnchorPairs(crossing, observation.line);
-      const hasRouteEvidence = configuredAnchors.length >= 2
-        ? hasOrderedRouteAnchors(observation, configuredAnchors)
-        : relationPairs.some((pair) => hasOrderedRouteAnchors(observation, pair));
+      // OpenBoards routes are partial. Prefer the configured corridor anchors
+      // when they are present, but do not let an incomplete configured list
+      // suppress stronger endpoint evidence from the matching OSM line relation.
+      const hasConfiguredRouteEvidence = configuredAnchors.length >= 2 &&
+        hasOrderedRouteAnchors(observation, configuredAnchors);
+      const hasRelationRouteEvidence = relationPairs.some((pair) =>
+        hasOrderedRouteAnchors(observation, pair)
+      );
+      const hasRouteEvidence = hasConfiguredRouteEvidence || hasRelationRouteEvidence;
       if (!hasRouteEvidence) continue;
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
@@ -163,6 +182,7 @@ export function getOpenBoardsForecastTrains(
         observationTime: observation.eventTime,
         fallbackOffsetSeconds: offset,
         direction: rule.direction || "unknown",
+        directionSource: rule.direction && rule.direction !== "unknown" ? "configured-through-rule" : "unknown",
         directionLabel: "Durchfahrt",
         delayMinutes: observation.timeType === "REAL" && observation.scheduledTime
           ? Math.max(0, Math.round((eventAt - Date.parse(observation.scheduledTime)) / 60_000))

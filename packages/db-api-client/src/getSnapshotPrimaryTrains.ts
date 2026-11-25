@@ -1,3 +1,5 @@
+import { directionFromCrossingAnchors } from "./directionFromCrossingAnchors";
+
 export type SnapshotPrimaryTrain = {
   line: string;
   category: string;
@@ -13,11 +15,20 @@ export type SnapshotPrimaryTrain = {
   arrival: string;
   scheduledTime: string;
   route: string[];
+  direction: "eastbound" | "westbound" | "unknown";
+  directionSource?: "mobilithek-snapshot" | "crossing-anchor-route-order" | "unknown";
   observationPoints?: Array<{ eva: string; stationName: string; side: "before" | "after"; trackWayIds: number[]; direction: "eastbound" | "westbound" | "unknown"; distanceMeters: number; distanceSource?: "confirmed-osm-profile" | "manual-config"; profileCalculatedAt?: string; actualTime: string; scheduledTime?: string; eventType: "arrival" | "departure" | "actual" }>;
 };
 
 function parseJson(value: unknown, fallback: any) {
   try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; }
+}
+
+function normalizeSnapshotDirection(value: unknown): "eastbound" | "westbound" | "unknown" {
+  const direction = String(value ?? "").trim().toLowerCase();
+  if (/^(eastbound|east|e|ost|osten|ostwaerts|ostwärts)$/.test(direction)) return "eastbound";
+  if (/^(westbound|west|w|westen|westwaerts|westwärts)$/.test(direction)) return "westbound";
+  return "unknown";
 }
 
 function normalizeStation(value: string) {
@@ -191,6 +202,20 @@ export async function getSnapshotPrimaryTrains(
         return [{ eva: configuredEva, stationName: stationNames.get(configuredEva) || String(station.stationName || configuredEva), side: station.side as "before" | "after", trackWayIds: wayIds, direction: station.direction || "unknown", distanceMeters: Number(station.trackDistanceMeters), distanceSource: station.timingDistanceSource || "manual-config", profileCalculatedAt: station.timingProfileCalculatedAt, actualTime: new Date(actualAt).toISOString(), scheduledTime: String((actualDeparture && observedCall.plannedDeparture) || (actualArrival && observedCall.plannedArrival) || observedCall.planned || ""), eventType: actualDeparture ? "departure" as const : actualArrival ? "arrival" as const : "actual" as const }];
       });
 
+      const route = calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean).length >= 2
+        ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean)
+        : parseJson(row.route_json, []).map(String).filter(Boolean);
+      const routeEvas = calls.map((item: any) => {
+        const ref = String(item?.stopPointRef || item?.stopPlaceRef || "");
+        return ref.match(/(?:^|\D)(\d{7})(?:\D|$)/)?.[1] || "";
+      });
+      const snapshotDirection = normalizeSnapshotDirection(row.direction);
+      const anchorDirection = directionFromCrossingAnchors(crossing, routeEvas, route);
+      const resolvedDirection = snapshotDirection !== "unknown" ? snapshotDirection : anchorDirection.direction;
+      const directionSource = snapshotDirection !== "unknown"
+        ? "mobilithek-snapshot" as const
+        : anchorDirection.source;
+
       candidates.push({
         line: String(row.line || ""),
         category: String(row.category || ""),
@@ -208,9 +233,9 @@ export async function getSnapshotPrimaryTrains(
         arrival: parsedTime.toISOString(),
         scheduledTime: String(scheduledStationTime),
         // Mobilithek calls preserve the ordered journey path needed by OSM matching.
-        route: (Array.isArray(calls) ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean) : []).length >= 2
-          ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean)
-          : parseJson(row.route_json, []).map(String).filter(Boolean),
+        route,
+        direction: resolvedDirection,
+        directionSource,
         observationPoints,
       });
       break;
