@@ -638,9 +638,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
               },
             },
           }
-        : graphConfirmsSameWay
-          ? graphResult
-          : graphResult;
+        : graphResult;
 
       return {
         journeyRef: train.journeyRef || null,
