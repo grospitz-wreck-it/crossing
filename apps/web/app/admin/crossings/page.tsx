@@ -299,5 +299,69 @@ function getLineChips(candidate: RailwayCandidate) {
   });
 }
 function mercator(lat: number, lon: number, zoom: number) { const n = 2 ** zoom; const x = ((lon + 180) / 360) * n; const rad = (lat * Math.PI) / 180; const y = ((1 - Math.asinh(Math.tan(rad)) / Math.PI) / 2) * n; return { x, y }; }
-function RouteMap({ lat, lon, candidates, selectedKey, onSelect }: { lat: number; lon: number; candidates: RailwayCandidate[]; selectedKey: string; onSelect: (candidate: RailwayCandidate) => void }) { const [zoom, setZoom] = useState(15); const [pan, setPan] = useState({x:0,y:0}); const drag = useRef<{x:number;y:number;panX:number;panY:number}|null>(null); const width = 620, height = 310, center = mercator(lat, lon, zoom), tileX = Math.floor(center.x), tileY = Math.floor(center.y), originX = center.x * 256 - width / 2 - pan.x, originY = center.y * 256 - height / 2 - pan.y, colors = ["#c1121f", "#0f172a", "#2563eb", "#7c3aed", "#059669", "#ea580c", "#0891b2", "#be185d"], project = (point: Point) => { const p = mercator(point.lat, point.lon, zoom); return { x: p.x * 256 - originX, y: p.y * 256 - originY }; }, marker = project({ lat, lon }); return <div className={styles.routeMap} onPointerDown={(event)=>{if((event.target as HTMLElement).closest("button")||(event.target as HTMLElement).closest("svg g"))return; drag.current={x:event.clientX,y:event.clientY,panX:pan.x,panY:pan.y}; (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);}} onPointerMove={(event)=>{if(!drag.current)return;setPan({x:drag.current.panX+(event.clientX-drag.current.x),y:drag.current.panY+(event.clientY-drag.current.y)});}} onPointerUp={()=>{drag.current=null;}} onPointerCancel={()=>{drag.current=null;}}><div className={styles.mapTiles}>{[-1, 0, 1, 2].flatMap((dx) => [-1, 0, 1, 2].map((dy) => { const x = tileX + dx, y = tileY + dy; return <img key={`${x}-${y}`} src={`https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`} alt="" draggable={false} style={{ left: `${x * 256 - originX}px`, top: `${y * 256 - originY}px` }} />; }))}</div><svg className={styles.routeOverlay} preserveAspectRatio="none" viewBox={`0 0 ${width} ${height}`} aria-label="Bahnstrecken-Auswahlkarte">{candidates.map((candidate, index) => { const key = routeKey(candidate), selected = selectedKey.split("|").includes(key), color = colors[index % colors.length]; return <g key={key} onClick={() => onSelect(candidate)} className={styles.routeHitArea}>{candidate.segments.map((segment, segmentIndex) => { const points = segment.map(project).map((p) => `${p.x},${p.y}`).join(" "); return <polyline key={`${key}-halo-${segmentIndex}`} points={points} fill="none" stroke="#ffffff" strokeWidth={selected ? 10 : 8} strokeLinecap="round" strokeLinejoin="round" opacity={.95}/>; }).concat(candidate.segments.map((segment, segmentIndex) => { const points = segment.map(project).map((p) => `${p.x},${p.y}`).join(" "); return <polyline key={`${key}-line-${segmentIndex}`} points={points} fill="none" stroke={color} strokeWidth={selected ? 6 : 4} strokeLinecap="round" strokeLinejoin="round" opacity={selected ? 1 : .8}/>; }))}</g>; })}<circle cx={marker.x} cy={marker.y} r="9" fill="#c1121f" stroke="#fff" strokeWidth="4"/><circle cx={marker.x} cy={marker.y} r="3" fill="#fff"/></svg><div style={{position:"absolute",right:10,top:10,zIndex:5,display:"grid",gap:4}}><button type="button" aria-label="Karte vergrößern" onClick={()=>setZoom(v=>Math.min(19,v+1))} style={{width:34,height:34,border:"1px solid #d1d5db",borderRadius:7,background:"#fff",fontSize:20,fontWeight:800,cursor:"pointer"}}>+</button><button type="button" aria-label="Karte nach links verschieben" onClick={()=>setPan(v=>({x:v.x-80,y:v.y}))}>←</button><button type="button" aria-label="Karte nach rechts verschieben" onClick={()=>setPan(v=>({x:v.x+80,y:v.y}))}>→</button><button type="button" aria-label="Karte nach oben verschieben" onClick={()=>setPan(v=>({x:v.x,y:v.y-80}))}>↑</button><button type="button" aria-label="Karte nach unten verschieben" onClick={()=>setPan(v=>({x:v.x,y:v.y+80}))}>↓</button><button type="button" aria-label="Karte verkleinern" onClick={()=>setZoom(v=>Math.max(9,v-1))} style={{width:34,height:34,border:"1px solid #d1d5db",borderRadius:7,background:"#fff",fontSize:20,fontWeight:800,cursor:"pointer"}}>−</button></div><div className={styles.mapLegend}><span>📍 Übergang</span>{candidates.slice(0, 4).map((c, i) => <button type="button" key={routeKey(c)} onClick={() => onSelect(c)}><i style={{ background: colors[i % colors.length] }} />{c.ref ? `Strecke ${c.ref}` : "Gleis"}</button>)}</div></div>; }
+function RouteMap({ lat, lon, candidates, selectedKey, onSelect }: { lat: number; lon: number; candidates: RailwayCandidate[]; selectedKey: string; onSelect: (candidate: RailwayCandidate) => void }) {
+  const [zoom, setZoom] = useState(15);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState({ width: 620, height: 340 });
+  const mapRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  useEffect(() => {
+    const element = mapRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) setSize({ width, height });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const width = size.width, height = size.height;
+  const center = mercator(lat, lon, zoom);
+  const originX = center.x * 256 - width / 2 - pan.x;
+  const originY = center.y * 256 - height / 2 - pan.y;
+  const tileX = Math.floor(originX / 256), tileY = Math.floor(originY / 256);
+  const minX = tileX, maxX = Math.floor((originX + width) / 256);
+  const minY = tileY, maxY = Math.floor((originY + height) / 256);
+  const tiles = [];
+  for (let x = minX; x <= maxX; x++) for (let y = minY; y <= maxY; y++) tiles.push({ x, y });
+  const project = (point: Point) => { const p = mercator(point.lat, point.lon, zoom); return { x: p.x * 256 - originX, y: p.y * 256 - originY }; };
+  const marker = project({ lat, lon });
+  const colors = ["#c1121f", "#0f172a", "#2563eb", "#7c3aed", "#059669", "#ea580c", "#0891b2", "#be185d"];
+  function beginPan(event: React.PointerEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("button")) return;
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function movePan(event: React.PointerEvent<HTMLDivElement>) {
+    const active = drag.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    const dx = event.clientX - active.x, dy = event.clientY - active.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) active.moved = true;
+    if (active.moved) setPan({ x: active.panX + dx, y: active.panY + dy });
+  }
+  function endPan(event: React.PointerEvent<HTMLDivElement>) {
+    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+    suppressClick.current = drag.current.moved;
+    drag.current = null;
+  }
+  function choose(candidate: RailwayCandidate) {
+    if (suppressClick.current) { suppressClick.current = false; return; }
+    onSelect(candidate);
+  }
+  return <div ref={mapRef} className={styles.routeMap} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onClickCapture={(event) => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}>
+    <div className={styles.mapTiles}>{tiles.map(({ x, y }) => <img key={`${zoom}/${x}/${y}`} src={`https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`} alt="" draggable={false} style={{ left: x * 256 - originX, top: y * 256 - originY }} />)}</div>
+    <svg className={styles.routeOverlay} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-label="Bahnstrecken-Auswahlkarte">
+      {candidates.map((candidate, index) => { const key = routeKey(candidate), selected = selectedKey.split("|").includes(key), color = colors[index % colors.length]; return <g key={key} onClick={() => choose(candidate)} className={styles.routeHitArea}>{candidate.segments.map((segment, segmentIndex) => { const points = segment.map(project).map((point) => `${point.x},${point.y}`).join(" "); return <g key={`${key}-${segmentIndex}`}><polyline points={points} fill="none" stroke="#fff" strokeWidth={selected ? 10 : 8} strokeLinecap="round" strokeLinejoin="round" opacity=".96"/><polyline points={points} fill="none" stroke={color} strokeWidth={selected ? 6 : 4} strokeLinecap="round" strokeLinejoin="round" opacity={selected ? 1 : .82}/></g>;})}</g>; })}
+      <circle cx={marker.x} cy={marker.y} r="9" fill="#c1121f" stroke="#fff" strokeWidth="4"/><circle cx={marker.x} cy={marker.y} r="3" fill="#fff"/>
+    </svg>
+    <div style={{ position: "absolute", right: 10, top: 10, zIndex: 5, display: "grid", gap: 4 }}>
+      <button type="button" aria-label="Karte vergrößern" onClick={() => setZoom((value) => Math.min(19, value + 1))}>+</button>
+      <button type="button" aria-label="Karte verkleinern" onClick={() => setZoom((value) => Math.max(9, value - 1))}>−</button>
+      <button type="button" aria-label="Ausschnitt zentrieren" onClick={() => setPan({ x: 0, y: 0 })}>⌖</button>
+    </div>
+    <div className={styles.mapLegend}><span>📍 Übergang</span>{candidates.slice(0, 4).map((candidate, index) => <button type="button" key={routeKey(candidate)} onClick={() => onSelect(candidate)}><i style={{ background: colors[index % colors.length] }} />{candidate.ref ? `Strecke ${candidate.ref}` : "Gleis"}</button>)}</div>
+    <div className={styles.mapAttribution}>© OpenStreetMap · Ziehen zum Verschieben</div>
+  </div>;
+}
 function Field({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder?: string }) { return <label className={styles.field}><span>{label}</span><input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}/></label>; }
