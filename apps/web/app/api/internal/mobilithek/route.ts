@@ -487,11 +487,16 @@ export async function POST(request: Request) {
               ? `${error.name}: ${error.message}`
               : String(error);
 
-          console.error("[Mobilithek Relay stream]", error);
+          console.error("[Mobilithek Relay stream]", {
+            subscriptionId,
+            message,
+            stack: error instanceof Error ? error.stack : undefined,
+          });
 
           controller.enqueue(
             encodeLine({
-              error: "Mobilithek relay stream failed",
+              __error: "mobilithek-relay-error",
+              subscriptionId,
               message,
             }),
           );
