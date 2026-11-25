@@ -17,6 +17,9 @@ const groups: NavGroup[] = [
 
 export default function AdminShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const activeItem = groups.flatMap((group) => group.items)
+    .filter(([href]) => pathname === href || (href !== "/admin" && pathname.startsWith(href + "/")))
+    .sort(([a], [b]) => b.length - a.length)[0];
   const [campaignCount, setCampaignCount] = useState<number | null>(null);
   useEffect(() => {
     let alive = true;
@@ -37,7 +40,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
         {groups.map((group) => <div className={styles.group} key={group.label}>
           <div className={styles.label}>{group.label}</div>
           {group.items.map(([href, label, icon]) => <a key={href} href={href}
-            className={pathname === href || (href !== "/admin" && pathname.startsWith(href + "/")) ? styles.active : styles.link}>
+            className={activeItem?.[0] === href ? styles.active : styles.link}>
             <AdminIcon name={icon} className={styles.navIcon} size={17} />
             <span>{label}</span>
             {href === "/admin/ads" && campaignCount !== null && <em>{campaignCount}</em>}
@@ -49,9 +52,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     <div className={styles.workspace}>
       <header className={styles.topbar}>
         <div><span>MEINESCHRANKE</span><b>/</b><strong>
-          {groups.flatMap((group) => group.items).find(([href]) =>
-            pathname === href || (href !== "/admin" && pathname.startsWith(href + "/"))
-          )?.[1] || "Administration"}
+          {activeItem?.[1] || "Administration"}
         </strong></div>
         <a href="/admin">Zur Übersicht <AdminIcon name="arrow-up-right" size={13} /></a>
       </header>
