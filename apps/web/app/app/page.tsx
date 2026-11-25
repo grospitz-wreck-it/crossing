@@ -864,15 +864,7 @@ return (
         ?.line
     }
 
-    <span className="trainNumberInline">
 
-  {
-    data.phase
-      ?.trains?.[0]
-      ?.journeyNumber
-  }
-
-</span>
 
   </div>
 
