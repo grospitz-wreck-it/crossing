@@ -86,6 +86,11 @@ export function getOpenBoardsForecastTrains(
   const now = Date.now();
   const primaryEvas = new Set<string>((crossing.referenceStations || []).map(String));
   const rules = Array.isArray(crossing.throughRules) ? crossing.throughRules : [];
+  const hasSelectedOsmTracks = Boolean(
+    crossing.rules && !Array.isArray(crossing.rules) &&
+    Array.isArray(crossing.rules.selectedOsmTracks) &&
+    crossing.rules.selectedOsmTracks.some((track: any) => track && track.wayId != null)
+  );
   const candidates: any[] = [];
 
   for (const observation of observations) {
@@ -143,7 +148,10 @@ export function getOpenBoardsForecastTrains(
     for (const rule of rules) {
       const eva = String(rule.observationEva || "").trim();
       if (!eva || observation.evaNumber !== eva) continue;
-      const ruleLineMatches = lineMatches(observation.line, observation.category, [
+      // When physical OSM tracks are explicitly selected, do not let legacy
+      // line/category allowlists hide a train before the selected-track matcher
+      // can evaluate its actual route and crossing topology.
+      const ruleLineMatches = hasSelectedOsmTracks || lineMatches(observation.line, observation.category, [
         ...(Array.isArray(rule.lineHints) ? rule.lineHints : []),
         ...(Array.isArray(rule.categories) ? rule.categories : []),
         ...lineHints,
