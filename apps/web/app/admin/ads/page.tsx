@@ -435,13 +435,7 @@ async function createCustomer() {
     }, [campaigns]);
 
   return (
-    <main
-      style={{
-        maxWidth: 1400,
-        margin: "0 auto",
-        padding: 32,
-      }}
-    >
+    <main className={styles.page}>
       <h1
         style={{
           marginBottom: 24,
