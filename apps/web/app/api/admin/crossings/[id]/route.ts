@@ -77,7 +77,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           JOIN osm_rail_ways rw ON rw.osm_id = crw.railway_way_id
           WHERE oc.lat BETWEEN ? AND ? AND oc.lon BETWEEN ? AND ?
             AND crw.railway_way_id IN (${placeholders})`,
-        [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta, ...selectedWayIds],
+        [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta, ...selectedWayIds.map((wayId) => String(wayId))],
       );
       const verifiedIds = new Set((verifiedWays.rows as any[]).map((row) => String(row.railway_way_id)));
       const unverified = selectedWayIds.filter((wayId) => !verifiedIds.has(wayId));
