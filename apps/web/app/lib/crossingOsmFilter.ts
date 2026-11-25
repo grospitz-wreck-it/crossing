@@ -45,10 +45,14 @@ type CorridorGraph = {
   complete: true;
 };
 
-const CACHE_TTL_MS = 300_000;
+// These caches are process-local. Admin writes can invalidate only the
+// instance that handled the PATCH, while status requests may hit another
+// serverless instance. Keep mutable crossing/matcher state short-lived so a
+// newly saved OSM selection and invalidated profile become visible promptly.
+const CACHE_TTL_MS = 10_000;
 const STATION_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
-const RESULT_CACHE_TTL_MS = 300_000;
-const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 15_000;
+const RESULT_CACHE_TTL_MS = 10_000;
+const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 5_000;
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
