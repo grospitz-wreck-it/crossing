@@ -77,7 +77,7 @@ async function loadCrossing(id: string): Promise<any | null> {
   try {
     const [result, stations] = await Promise.all([
       db.execute({ sql: `SELECT id,name,eva,lat,lon,close_offset_seconds,open_offset_seconds,confidence,status,updated_at,observation_evas,reference_stations,context_evas,required_route_stops,rules,through_rules,diversion_rules,reroute_watch_rules FROM crossings WHERE id = ? LIMIT 1`, args: [id] }),
-      db.execute({ sql: `SELECT eva,station_name,role FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] })
+      db.execute({ sql: `SELECT eva,station_name,role,direction,fallback_offset_seconds,track_distance_meters FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] })
     ]);
     const row: any = result.rows[0]; return row ? buildCrossingFromDb(row, stations.rows as any[]) : null;
   } catch (error) { console.error("[STATUS] loadCrossing failed:", error); return null; }
