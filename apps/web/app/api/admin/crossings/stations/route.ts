@@ -116,8 +116,9 @@ async function loadOsmStations(bbox:{south:number;west:number;north:number;east:
   }
   return [];
 }
-function normalizeStationName(value:string){return value.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").replace(/\\b(hbf|bahnhof|haltepunkt|s-bahn)\\b/g,"").replace(/[^a-z0-9]+/g," ").trim();}
-\nexport async function GET(request:Request){
+function normalizeStationName(value:string){return value.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g,"").replace(/\b(hbf|bahnhof|haltepunkt|s-bahn)\b/g,"").replace(/[^a-z0-9]+/g," ").trim();}
+
+export async function GET(request:Request){
   const {searchParams}=new URL(request.url);
   const lat=Number(searchParams.get("lat")),lon=Number(searchParams.get("lon")),wayIds=(searchParams.get("wayIds")||String(searchParams.get("wayId")||"")).split(",").map((value)=>Number(value)).filter((value)=>Number.isFinite(value)&&value>0);
   if(!Number.isFinite(lat)||!Number.isFinite(lon)||!wayIds.length){
