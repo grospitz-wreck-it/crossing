@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import studioStyles from "./page.module.css";
 
@@ -345,23 +345,67 @@ function editMapMercator(lat: number, lon: number, zoom: number) {
 }
 function EditInfrastructureMap({ lat, lon, candidates, stations, selectedEva, selectedWayIds, onSelectStation, onToggleTrack }: { lat: number; lon: number; candidates: InfrastructureCandidate[]; stations: NearbyStation[]; selectedEva: string; selectedWayIds: number[]; onSelectStation: (station: NearbyStation) => void; onToggleTrack: (wayId: number) => void }) {
   const [zoom, setZoom] = useState(13);
-  const width = 700, height = 280;
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState({ width: 700, height: 280 });
+  const mapRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  useEffect(() => {
+    const element = mapRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) setSize({ width, height });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return <div style={{ padding: 16, color: "#68717d" }}>Bitte gültige Koordinaten eingeben.</div>;
-  const center = editMapMercator(lat, lon, zoom), originX = center.x * 256 - width / 2, originY = center.y * 256 - height / 2;
-  const tileX = Math.floor(center.x), tileY = Math.floor(center.y);
-  const project = (point: {lat:number;lon:number}) => { const p = editMapMercator(point.lat, point.lon, zoom); return { x: p.x * 256 - originX, y: p.y * 256 - originY }; };
+  const { width, height } = size;
+  const center = editMapMercator(lat, lon, zoom);
+  const originX = center.x * 256 - width / 2 - pan.x, originY = center.y * 256 - height / 2 - pan.y;
+  const minX = Math.floor(originX / 256), maxX = Math.floor((originX + width) / 256);
+  const minY = Math.floor(originY / 256), maxY = Math.floor((originY + height) / 256);
+  const tiles: { x: number; y: number }[] = [];
+  for (let x = minX; x <= maxX; x++) for (let y = minY; y <= maxY; y++) tiles.push({ x, y });
+  const project = (point: { lat: number; lon: number }) => { const p = editMapMercator(point.lat, point.lon, zoom); return { x: p.x * 256 - originX, y: p.y * 256 - originY }; };
   const crossing = project({ lat, lon });
   const colors = ["#dc2626", "#2563eb", "#7c3aed", "#059669", "#ea580c", "#0891b2"];
-  const tiles = [-1,0,1,2,3].flatMap(dx => [-1,0,1,2].map(dy => ({x:tileX+dx,y:tileY+dy})));
-  return <div style={{ position:"relative",height:280,overflow:"hidden",borderRadius:13,border:"1px solid #dfe3e8",background:"#e8edf0" }}>
-    {tiles.map(({x,y})=><img key={`${x}/${y}`} src={`https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`} alt="" draggable={false} style={{position:"absolute",width:256,height:256,left:x*256-originX,top:y*256-originY}} />)}
-    <svg viewBox={`0 0 ${width} ${height}`} style={{position:"absolute",inset:0,width:"100%",height:"100%"}} aria-label="OSM-Gleise und DB-Bahnhöfe">
-      {candidates.map((candidate,index)=>{const selected=selectedWayIds.includes(candidate.wayId),color=selected?"#18834d":colors[index%colors.length];return <g key={`${candidate.wayId}-${index}`} onClick={()=>onToggleTrack(candidate.wayId)} style={{cursor:"pointer"}}>{candidate.segments.map((segment,j)=>{const points=segment.map(project).map(p=>`${p.x},${p.y}`).join(" ");return <g key={j}><polyline points={points} fill="none" stroke="#fff" strokeWidth={selected?11:8} strokeLinecap="round" strokeLinejoin="round"/><polyline points={points} fill="none" stroke={color} strokeWidth={selected?7:4.5} strokeLinecap="round" strokeLinejoin="round"/></g>;})}</g>;})}
-      {stations.map(station=>{const p=project({lat:station.lat,lon:station.lon});const active=station.eva===selectedEva;return <g key={station.eva} transform={`translate(${p.x} ${p.y})`}><circle r={active?9:7} fill={active?"#2563eb":"#fff"} stroke="#1d4ed8" strokeWidth="3"/><circle r="2.5" fill={active?"#fff":"#1d4ed8"}/></g>;})}
-      <circle cx={crossing.x} cy={crossing.y} r="12" fill="#dc2626" stroke="#fff" strokeWidth="4"/><circle cx={crossing.x} cy={crossing.y} r="4" fill="#fff"/>
+  function beginPan(event: React.PointerEvent<HTMLDivElement>) {
+    if ((event.target as HTMLElement).closest("button")) return;
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y, moved: false };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function movePan(event: React.PointerEvent<HTMLDivElement>) {
+    const active = drag.current;
+    if (!active || active.pointerId !== event.pointerId) return;
+    const dx = event.clientX - active.x, dy = event.clientY - active.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) active.moved = true;
+    if (active.moved) setPan({ x: active.panX + dx, y: active.panY + dy });
+  }
+  function endPan(event: React.PointerEvent<HTMLDivElement>) {
+    if (!drag.current || drag.current.pointerId !== event.pointerId) return;
+    suppressClick.current = drag.current.moved;
+    drag.current = null;
+  }
+  function toggleTrack(wayId: number) {
+    if (suppressClick.current) { suppressClick.current = false; return; }
+    onToggleTrack(wayId);
+  }
+  return <div ref={mapRef} onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan} onClickCapture={(event) => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }} style={{ position: "relative", height: 280, overflow: "hidden", borderRadius: 13, border: "1px solid #dfe3e8", background: "#e8edf0", touchAction: "none", cursor: drag.current?.moved ? "grabbing" : "grab", userSelect: "none" }}>
+    {tiles.map(({ x, y }) => <img key={`${zoom}/${x}/${y}`} src={`https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`} alt="" draggable={false} style={{ position: "absolute", width: 256, height: 256, maxWidth: "none", pointerEvents: "none", left: x * 256 - originX, top: y * 256 - originY }} />)}
+    <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", overflow: "hidden" }} aria-label="OSM-Gleise und DB-Bahnhöfe">
+      {candidates.map((candidate, index) => { const selected = selectedWayIds.includes(candidate.wayId), color = selected ? "#18834d" : colors[index % colors.length]; return <g key={`${candidate.wayId}-${index}`} onClick={() => toggleTrack(candidate.wayId)} style={{ cursor: "pointer", pointerEvents: "stroke" }}>{candidate.segments.map((segment, j) => { const points = segment.map(project).map((point) => `${point.x},${point.y}`).join(" "); return <g key={j}><polyline points={points} fill="none" stroke="#fff" strokeWidth={selected ? 11 : 8} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke"/><polyline points={points} fill="none" stroke={color} strokeWidth={selected ? 7 : 4.5} strokeLinecap="round" strokeLinejoin="round" pointerEvents="stroke"/></g>; })}</g>; })}
+      {stations.map((station) => { const point = project({ lat: station.lat, lon: station.lon }), active = station.eva === selectedEva; return <g key={station.eva} transform={`translate(${point.x} ${point.y})`} pointerEvents="none"><circle r={active ? 9 : 7} fill={active ? "#2563eb" : "#fff"} stroke="#1d4ed8" strokeWidth="3"/><circle r="2.5" fill={active ? "#fff" : "#1d4ed8"}/></g>; })}
+      <circle cx={crossing.x} cy={crossing.y} r="12" fill="#dc2626" stroke="#fff" strokeWidth="4" pointerEvents="none"/><circle cx={crossing.x} cy={crossing.y} r="4" fill="#fff" pointerEvents="none"/>
     </svg>
-    {stations.map(station=>{const p=project({lat:station.lat,lon:station.lon});return <button key={station.eva} type="button" title={station.name} aria-label={`${station.name} auf Karte auswählen`} onClick={()=>onSelectStation(station)} style={{position:"absolute",left:`${p.x/width*100}%`,top:`${p.y/height*100}%`,transform:"translate(-50%,-50%)",width:28,height:28,border:0,background:"transparent",cursor:"pointer"}}/>;})}
-    <div style={{position:"absolute",right:10,top:10,zIndex:5,display:"grid",gap:4}}><button type="button" aria-label="Karte vergrößern" onClick={()=>setZoom(v=>Math.min(19,v+1))} style={{width:34,height:34,border:"1px solid #d1d5db",borderRadius:7,background:"#fff",fontSize:20,fontWeight:800,cursor:"pointer"}}>+</button><button type="button" aria-label="Karte verkleinern" onClick={()=>setZoom(v=>Math.max(9,v-1))} style={{width:34,height:34,border:"1px solid #d1d5db",borderRadius:7,background:"#fff",fontSize:20,fontWeight:800,cursor:"pointer"}}>−</button></div><div style={{position:"absolute",left:10,bottom:10,display:"flex",gap:10,flexWrap:"wrap",padding:"6px 9px",borderRadius:8,background:"rgba(255,255,255,.94)",fontSize:10,fontWeight:700,pointerEvents:"none"}}><span>🔴 BÜ</span><span>🔵 DB-Bahnhof</span><span style={{color:"#b91c1c"}}>━ OSM-Gleis</span></div>
-    <div style={{position:"absolute",right:8,top:8,background:"rgba(255,255,255,.94)",padding:"5px 8px",borderRadius:7,fontSize:10,pointerEvents:"none"}}>© OpenStreetMap</div>
+    {stations.map((station) => { const point = project({ lat: station.lat, lon: station.lon }); return <button key={station.eva} type="button" title={station.name} aria-label={`${station.name} auf Karte auswählen`} onClick={() => onSelectStation(station)} style={{ position: "absolute", left: point.x, top: point.y, transform: "translate(-50%,-50%)", width: 28, height: 28, border: 0, background: "transparent", cursor: "pointer", zIndex: 2 }} />; })}
+    <div style={{ position: "absolute", right: 10, top: 10, zIndex: 5, display: "grid", gap: 4 }}>
+      <button type="button" aria-label="Karte vergrößern" onClick={() => setZoom((value) => Math.min(19, value + 1))} style={{ width: 34, height: 34, border: "1px solid #d1d5db", borderRadius: 7, background: "#fff", fontSize: 20, fontWeight: 800, cursor: "pointer" }}>+</button>
+      <button type="button" aria-label="Karte verkleinern" onClick={() => setZoom((value) => Math.max(9, value - 1))} style={{ width: 34, height: 34, border: "1px solid #d1d5db", borderRadius: 7, background: "#fff", fontSize: 20, fontWeight: 800, cursor: "pointer" }}>−</button>
+      <button type="button" aria-label="Ausschnitt zentrieren" onClick={() => setPan({ x: 0, y: 0 })} style={{ width: 34, height: 34, border: "1px solid #d1d5db", borderRadius: 7, background: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}>⌖</button>
+    </div>
+    <div style={{ position: "absolute", left: 10, bottom: 10, display: "flex", gap: 10, flexWrap: "wrap", padding: "6px 9px", borderRadius: 8, background: "rgba(255,255,255,.94)", fontSize: 10, fontWeight: 700, pointerEvents: "none", zIndex: 3 }}><span>🔴 BÜ</span><span>🔵 DB-Bahnhof</span><span style={{ color: "#b91c1c" }}>━ OSM-Gleis</span></div>
+    <div style={{ position: "absolute", right: 8, bottom: 8, background: "rgba(255,255,255,.94)", padding: "5px 8px", borderRadius: 7, fontSize: 10, pointerEvents: "none", zIndex: 3 }}>© OpenStreetMap · Ziehen zum Verschieben</div>
   </div>;
 }
