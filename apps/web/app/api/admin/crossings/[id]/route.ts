@@ -73,17 +73,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const selectedWayIds: string[] = Array.from(new Set<string>(rawWayIds));
 
       if (selectedWayIds.length > 0) {
-        const latDelta = 15 / 110_000;
-        const lonDelta = 15 / (111_320 * Math.max(0.2, Math.cos(lat * Math.PI / 180)));
         const placeholders = selectedWayIds.map(() => "?").join(",");
+        // Resolve the crossing through its persisted OSM identity instead of
+        // re-matching it by a tiny coordinate box. The 15m coordinate check
+        // rejected valid links when the imported OSM node and admin pin differ.
+        // Anchor/observation stations are managed separately via stationLinks
+        // and are intentionally not constrained by the crossing-node distance.
         const verifiedWays = await client.execute(
           `SELECT DISTINCT crw.railway_way_id
-            FROM osm_crossings oc
-            JOIN osm_crossing_rail_ways crw ON crw.crossing_osm_id = oc.osm_id
+            FROM crossing_osm_links col
+            JOIN osm_crossing_rail_ways crw ON crw.crossing_osm_id = col.osm_crossing_id
             JOIN osm_rail_ways rw ON rw.osm_id = crw.railway_way_id
-            WHERE oc.lat BETWEEN ? AND ? AND oc.lon BETWEEN ? AND ?
+            WHERE col.crossing_id = ?
               AND crw.railway_way_id IN (${placeholders})`,
-          [lat - latDelta, lat + latDelta, lon - lonDelta, lon + lonDelta, ...selectedWayIds],
+          [id, ...selectedWayIds],
         );
         const verifiedIds = new Set((verifiedWays.rows as any[]).map((row) => String(row.railway_way_id)));
         const unverified = selectedWayIds.filter((wayId) => !verifiedIds.has(wayId));

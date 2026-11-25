@@ -1,4 +1,5 @@
 "use client";
+import styles from "./page.module.css";
 
 import {
   useEffect,
@@ -156,13 +157,7 @@ const [endDate, setEndDate] =
 }
 
   return (
-    <main
-      style={{
-        maxWidth: 1000,
-        margin: "0 auto",
-        padding: 40,
-      }}
-    >
+    <main className={styles.page}>
       <h1>
         Kampagnen
       </h1>

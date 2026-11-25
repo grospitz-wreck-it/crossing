@@ -1,4 +1,5 @@
 "use client";
+import styles from "./page.module.css";
 import CampaignDrawer from "./components/CampaignDrawer";
 import CampaignGrid from "./components/CampaignGrid";
 import {
@@ -320,6 +321,19 @@ setShowDrawer(false);
 await load();
 }
 
+async function toggleCampaign(campaign: any) {
+  const response = await fetch(`/api/admin/campaigns/${campaign.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ active: !campaign.active }),
+  });
+  if (!response.ok) {
+    alert("Kampagnenstatus konnte nicht geändert werden.");
+    return;
+  }
+  await load();
+}
+
 async function deleteCampaign(id: string) {
   const ok = window.confirm(
     "Kampagne wirklich löschen?"
@@ -435,13 +449,7 @@ async function createCustomer() {
     }, [campaigns]);
 
   return (
-    <main
-      style={{
-        maxWidth: 1400,
-        margin: "0 auto",
-        padding: 32,
-      }}
-    >
+    <main className={`${styles.page} admin:font-admin admin:text-admin-text`}>
       <h1
         style={{
           marginBottom: 24,
@@ -497,9 +505,9 @@ async function createCustomer() {
 }}
   style={{
     border: 0,
-    borderRadius: 18,
+    borderRadius: 8,
     padding:
-      "14px 20px",
+      "9px 13px",
     fontWeight: 600,
     cursor: "pointer",
     background:
@@ -519,6 +527,7 @@ async function createCustomer() {
 
       <CampaignGrid
   campaigns={campaigns}
+  onToggle={toggleCampaign}
 
   onEdit={(campaign) => {
     setEditingCampaign(
@@ -675,11 +684,11 @@ function StatCard({
     <div
       style={{
         background:
-          "#fff",
-        borderRadius: 24,
-        padding: 24,
-        boxShadow:
-          "0 4px 24px rgba(0,0,0,.05)",
+          "#111d2d",
+        borderRadius: 12,
+        padding: 14,
+        border: "1px solid rgba(164,190,220,.13)",
+        color: "#edf2f8",
       }}
     >
       <div
@@ -694,7 +703,7 @@ function StatCard({
       <div
         style={{
           marginTop: 8,
-          fontSize: 32,
+          fontSize: 22,
           fontWeight: 700,
         }}
       >

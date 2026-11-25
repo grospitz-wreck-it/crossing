@@ -16,26 +16,26 @@ export default function Button({
     <button
       {...props}
       style={{
-        height: 52,
-        padding: "0 22px",
-        borderRadius: 16,
+        height: 36,
+        padding: "0 13px",
+        borderRadius: 8,
         fontWeight: 600,
         cursor: "pointer",
 
         border:
           variant === "secondary"
-            ? "1px solid #e7ebf0"
+            ? "1px solid rgba(164,190,220,.18)"
             : "none",
 
         background:
           variant === "primary"
-            ? "#4f637b"
-            : "#fff",
+            ? "#e82f49"
+            : "#17263a",
 
         color:
           variant === "primary"
             ? "#fff"
-            : "#334155",
+            : "#e5edf6",
 
         transition:
           ".2s",

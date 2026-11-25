@@ -10,10 +10,10 @@ export default function Chip({
   return (
     <div
       style={{
-        padding: "6px 10px",
-        borderRadius: 999,
-        background: "#f3f5f8",
-        fontSize: 13,
+        padding: "4px 8px",
+        borderRadius: 6,
+        background: "#1b2a3e",
+        fontSize: 10,
         display: "inline-flex",
         alignItems: "center",
         gap: 6,

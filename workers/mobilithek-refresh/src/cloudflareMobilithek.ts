@@ -224,36 +224,49 @@ export async function fetchRelayEvents(
   const consumeLine = async (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    const value = JSON.parse(trimmed) as
-      | { subscriptionId: string; event: MobilithekTrainEvent }
-      | {
-          __meta: "mobilithek-demand-debug";
-          subscriptionId: string;
-          parsedJourneys: number;
-          debugScopeViolations: number;
-          fromNormalFilter: number;
-          fromRawFallback: number;
-        };
+    const value = JSON.parse(trimmed) as Record<string, unknown>;
 
-    if ("__meta" in value && value.__meta === "mobilithek-demand-debug") {
+    // Relay failures are sent as NDJSON because the upstream stream may already
+    // have emitted data. Never interpret an error envelope as a train event.
+    if (value.__error === "mobilithek-relay-error" || value.error === "Mobilithek relay stream failed") {
+      const message = typeof value.message === "string" ? value.message : "Unbekannter Relay-Fehler";
+      const failedSubscription = typeof value.subscriptionId === "string"
+        ? value.subscriptionId
+        : subscriptionId;
+      throw new Error(`Mobilithek Relay ${failedSubscription}: ${message}`);
+    }
+
+    if (value.__meta === "mobilithek-demand-debug") {
       console.log("[Mobilithek DEBUG] demand metrics", value);
       debug = {
-        parsedJourneys: value.parsedJourneys,
-        scopeViolations: value.debugScopeViolations,
-        fromNormalFilter: value.fromNormalFilter,
-        fromRawFallback: value.fromRawFallback,
+        parsedJourneys: Number(value.parsedJourneys) || 0,
+        scopeViolations: Number(value.debugScopeViolations) || 0,
+        fromNormalFilter: Number(value.fromNormalFilter) || 0,
+        fromRawFallback: Number(value.fromRawFallback) || 0,
       };
       return;
     }
 
+    const event = value.event as MobilithekTrainEvent | undefined;
+    if (!event || typeof event !== "object") {
+      throw new Error(
+        `Mobilithek Relay ${subscriptionId}: ungültige NDJSON-Zeile (event fehlt; keys=${Object.keys(value).join(",")})`,
+      );
+    }
+    if (!event.actualTime || !event.scheduledTime) {
+      throw new Error(
+        `Mobilithek Relay ${subscriptionId}: Zugereignis ohne actualTime/scheduledTime (journeyRef=${String(event.journeyRef || "unbekannt")})`,
+      );
+    }
+
     parsedEvents++;
     batch.push({
-      subscriptionId: value.subscriptionId,
+      subscriptionId: typeof value.subscriptionId === "string" ? value.subscriptionId : subscriptionId,
       event: {
-        ...value.event,
-        actualTime: new Date(value.event.actualTime),
-        scheduledTime: new Date(value.event.scheduledTime),
-        calls: (value.event.calls || []).map((call) => ({
+        ...event,
+        actualTime: new Date(event.actualTime),
+        scheduledTime: new Date(event.scheduledTime),
+        calls: (event.calls || []).map((call) => ({
           ...call,
           planned: call.planned ? new Date(call.planned) : undefined,
           actual: call.actual ? new Date(call.actual) : undefined,

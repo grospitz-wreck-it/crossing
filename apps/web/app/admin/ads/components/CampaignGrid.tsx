@@ -12,20 +12,22 @@ type Props = {
   onDelete?: (
     campaign: any
   ) => void;
+  onToggle?: (campaign: any) => void;
 };
 
 export default function CampaignGrid({
   campaigns,
   onEdit,
   onDelete,
+  onToggle,
 }: Props) {
   return (
     <div
       style={{
         display: "grid",
         gridTemplateColumns:
-          "repeat(auto-fill,minmax(390px,1fr))",
-        gap: 22,
+          "repeat(auto-fill,minmax(280px,1fr))",
+        gap: 12,
       }}
     >
       {campaigns.map(
@@ -45,6 +47,7 @@ export default function CampaignGrid({
             onDelete={
               onDelete
             }
+            onToggle={onToggle}
           />
         )
       )}
