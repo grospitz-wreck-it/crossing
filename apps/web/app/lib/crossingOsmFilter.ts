@@ -55,6 +55,18 @@ const mappingCache = new Map<string, { expiresAt: number; value: Mapping | null 
 const mappingPromises = new Map<string, Promise<Mapping | null>>();
 const corridorGraphPromises = new Map<string, Promise<CorridorGraph | null>>();
 
+/** Clear process-local OSM state after an admin changes the authoritative track set. */
+export function invalidateCrossingOsmCaches(crossingId: string) {
+  const id = String(crossingId || "").trim();
+  if (!id) return;
+  mappingCache.delete(id);
+  corridorGraphCache.delete(id);
+  corridorGraphPromises.delete(id);
+  for (const key of resultCache.keys()) {
+    if (key.startsWith(`${id}|`)) resultCache.delete(key);
+  }
+}
+
 function normalizeStationName(value: string) {
   return String(value || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/\([^)]*\)/g, " ").replace(/hauptbahnhof|hbf|bahnhof|westf\.?|westfalen/gi, " ").replace(/[^a-z0-9]+/g, "").trim();
 }
