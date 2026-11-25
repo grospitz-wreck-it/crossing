@@ -23,11 +23,13 @@ function categories(value: unknown, depth = 0): string[] {
   return text.split(/[\s,;]+/).map((item) => item.trim().replace(/^["'\[]+|["'\]]+$/g, "")).filter((item) => /^(ICE|IC|EC|RE|RB|S|U|TGV|RJ|NJ|EN|D|IR|FLX)$/i.test(item));
 }
 function requireDb() { if (!db) throw new Error("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN fehlen."); return db; }
+async function ensureCrossingLocations(client: ReturnType<typeof requireDb>) { await client.execute(`CREATE TABLE IF NOT EXISTS crossing_locations (crossing_id TEXT PRIMARY KEY,state TEXT NOT NULL DEFAULT '',city TEXT NOT NULL DEFAULT '',postal_code TEXT,created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')),FOREIGN KEY (crossing_id) REFERENCES crossings(id))`); }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
     const client = requireDb();
+    await ensureCrossingLocations(client);
     const result = await client.execute({ sql: `SELECT c.id,c.name,c.eva,c.lat,c.lon,c.confidence,c.status,c.source,c.train_source_mode,c.observation_evas,c.context_evas,c.required_route_stops,c.close_offset_seconds,c.open_offset_seconds,c.rules,c.through_rules,c.diversion_rules,c.reroute_watch_rules,c.created_at,c.updated_at,cl.postal_code,cl.city,cl.state FROM crossings c LEFT JOIN crossing_locations cl ON cl.crossing_id=c.id WHERE c.id = ? LIMIT 1`, args: [id] });
     const crossing: any = result.rows[0];
     if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
@@ -42,6 +44,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const client = requireDb();
     const body = await request.json();
+    await ensureCrossingLocations(client);
     const existing = await client.execute({ sql: `SELECT id FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
     if (!existing.rows.length) return Response.json({ error: "Crossing not found" }, { status: 404 });
     const name = String(body.name ?? "").trim(), eva = String(body.eva ?? "").trim(), lat = Number(body.lat), lon = Number(body.lon), closeOffset = Number(body.closeOffsetSeconds), openOffset = Number(body.openOffsetSeconds), confidence = Number(body.confidence), status = body.status === "inactive" ? "inactive" : "active", trainSourceMode = ["openboards","mobilithek","hybrid"].includes(String(body.trainSourceMode)) ? String(body.trainSourceMode) : "hybrid";
