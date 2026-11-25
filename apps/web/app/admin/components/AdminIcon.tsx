@@ -4,7 +4,7 @@ export type AdminIconName =
   | "home" | "railway" | "clock" | "megaphone" | "users"
   | "activity" | "chart" | "trash" | "pencil" | "pause"
   | "play" | "plus" | "x" | "arrow-up-right" | "arrow-right"
-  | "arrow-up-down" | "arrow-up" | "arrow-down";
+  | "arrow-up-down" | "arrow-up" | "arrow-down" | "check";
 
 type Props = SVGProps<SVGSVGElement> & { name: AdminIconName; size?: number };
 
@@ -28,6 +28,7 @@ export default function AdminIcon({ name, size = 18, ...props }: Props) {
     "arrow-up-down": <><path d="m8 7 4-4 4 4M12 3v18m-4-4 4 4 4-4" /></>,
     "arrow-up": <><path d="m7 14 5-5 5 5" /></>,
     "arrow-down": <><path d="m7 10 5 5 5-5" /></>,
+    check: <><path d="m5 12 4 4L19 6" /></>,
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
