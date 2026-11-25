@@ -138,7 +138,7 @@ async function loadManualTrackSelection(crossingId) {
   }
   return [...new Set(rules.selectedOsmTracks
     .map((track) => String(track?.wayId ?? "").trim())
-    .filter((wayId) => /^\\d+$/.test(wayId)))];
+    .filter((wayId) => /^\d+$/.test(wayId)))];
 }
 
 async function linkCandidate(crossing, anchor, group) {
