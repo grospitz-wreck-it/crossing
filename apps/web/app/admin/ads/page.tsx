@@ -449,7 +449,7 @@ async function createCustomer() {
     }, [campaigns]);
 
   return (
-    <main className={styles.page}>
+    <main className={`${styles.page} admin:font-admin admin:text-admin-text`}>
       <h1
         style={{
           marginBottom: 24,
@@ -527,6 +527,7 @@ async function createCustomer() {
 
       <CampaignGrid
   campaigns={campaigns}
+  onToggle={toggleCampaign}
 
   onEdit={(campaign) => {
     setEditingCampaign(
@@ -683,11 +684,11 @@ function StatCard({
     <div
       style={{
         background:
-          "#fff",
+          "#111d2d",
         borderRadius: 12,
         padding: 14,
-        boxShadow:
-          "0 4px 24px rgba(0,0,0,.05)",
+        border: "1px solid rgba(164,190,220,.13)",
+        color: "#edf2f8",
       }}
     >
       <div

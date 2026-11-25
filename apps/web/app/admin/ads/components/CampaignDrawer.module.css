@@ -1,0 +1,3 @@
+.overlay{position:fixed;inset:0;z-index:1000;display:flex;justify-content:flex-end;background:rgba(2,8,18,.72);backdrop-filter:blur(6px)}
+.drawer{width:min(760px,94vw);min-width:0;height:100%;overflow-y:auto;padding:28px clamp(20px,3vw,36px) 36px;color:#edf2f8;background:#111d2d;border-left:1px solid rgba(164,190,220,.16);border-radius:16px 0 0 16px;box-shadow:0 24px 80px rgba(0,0,0,.45)}
+@media(max-width:640px){.drawer{width:100%;padding:22px 18px 28px;border-radius:0;border-left:0}}

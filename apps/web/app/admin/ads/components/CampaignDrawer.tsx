@@ -3,6 +3,7 @@
 import Button from "./ui/Button";
 import Field from "./ui/Field";
 import Section from "./ui/Section";
+import styles from "./CampaignDrawer.module.css";
 
 type Props = {
   editing: boolean;
@@ -141,30 +142,10 @@ onCloseCustomerDialog,
 
   return (
     <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        background:
-          "rgba(2,8,18,.72)",
-        backdropFilter:
-          "blur(6px)",
-        display: "flex",
-        justifyContent:
-          "flex-end",
-        zIndex: 1000,
-      }}
+      className={styles.overlay}
     >
       <div
-        style={{
-          width: 520,
-          background: "#111d2d",
-          padding: 24,
-          overflowY: "auto",
-          borderTopLeftRadius: 14,
-          borderBottomLeftRadius: 14,
-          boxShadow:
-            "0 24px 80px rgba(0,0,0,.45)",
-        }}
+        className={styles.drawer}
       >
         <h2
           style={{

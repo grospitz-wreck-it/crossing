@@ -15,6 +15,7 @@ export default function CampaignCard({
   campaign,
   onEdit,
   onDelete,
+  onToggle,
 }: Props) {
   return (
     <Card>
@@ -177,6 +178,7 @@ export default function CampaignCard({
             style={{
               flex: 1,
             }}
+          onClick={() => onToggle?.(campaign)}
           >
             {campaign.active
               ? "⏸ Pause"

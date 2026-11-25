@@ -12,12 +12,14 @@ type Props = {
   onDelete?: (
     campaign: any
   ) => void;
+  onToggle?: (campaign: any) => void;
 };
 
 export default function CampaignGrid({
   campaigns,
   onEdit,
   onDelete,
+  onToggle,
 }: Props) {
   return (
     <div
@@ -45,6 +47,7 @@ export default function CampaignGrid({
             onDelete={
               onDelete
             }
+            onToggle={onToggle}
           />
         )
       )}
