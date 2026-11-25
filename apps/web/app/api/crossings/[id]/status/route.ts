@@ -381,11 +381,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // OSM track/rule edit must never keep serving a forecast computed from old rules.
   // Keep verbose OSM diagnostics in a separate cache entry so normal app requests
   // never pay the response-size or cache-storage cost of per-journey route details.
-  const includeOsmDetails = new URL(request.url).searchParams.get("debug") === "osm";
+  const debugMode = new URL(request.url).searchParams.get("debug");
+  const includeOsmDetails = debugMode === "osm";
+  const includeComparisonDetails = debugMode === "compare";
   const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds);
   const timingConfigKey = JSON.stringify(crossing.rules && !Array.isArray(crossing.rules) ? crossing.rules.timing || {} : {});
   const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}:global-${globalTimingCorrectionSeconds}:timing-${timingConfigKey}${includeOsmDetails ? ":osm-debug" : ""}`;
-  const cached=await readCrossingForecastCache<any>(cacheKey,30_000);
+  const cached=includeComparisonDetails ? null : await readCrossingForecastCache<any>(cacheKey,30_000);
   if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   // Keep a short-lived previous forecast as a safety net when one snapshot poll
   // temporarily loses a journey. Explicit OSM rejections are never resurrected.
@@ -779,6 +781,70 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     };
     (payload as any).osmTrackFilter = { selectedWayIds: selectedOsmWayIds, evaluated: osmShadowResults.length, matched: osmShadow.matched, rejected: osmShadow.rejected, unknown: osmShadow.unknown, removedTrainCount: enrichedTrains.length - osmFilteredTrains.length };
     (payload as any).osmShadow = osmShadow;
+
+    // Read-only reconciliation for DB.info comparisons. Reuses the exact
+    // OpenBoards rows already fetched for the forecast; no additional Turso
+    // query, table, write, or cache entry is created.
+    if (includeComparisonDetails) {
+      const primaryEvaSet = new Set(primaryEvas.map(String));
+      const finalByJourney = new Map(
+        forecastTrains.map((train: any) => [String(train.journeyRef || ""), train]),
+      );
+      const candidateByJourney = new Map(
+        openBoardsTrains.map((train: any) => [String(train.journeyRef || ""), train]),
+      );
+      const primaryDepartures = realtimeObservations
+        .filter((observation: any) =>
+          primaryEvaSet.has(String(observation.evaNumber)) &&
+          observation.direction === "departures" &&
+          !observation.cancelled
+        )
+        .map((observation: any) => {
+          const journeyRef = String(observation.journeyId || "");
+          const candidate = candidateByJourney.get(journeyRef);
+          const forecast = finalByJourney.get(journeyRef);
+          const matchingClosure = forecast
+            ? (payload as any).closures?.find((closure: any) =>
+                closure.trains?.some((train: any) => String(train.journeyRef || "") === journeyRef)
+              )
+            : null;
+          return {
+            journeyRef,
+            stationEva: String(observation.evaNumber),
+            line: String(observation.line || ""),
+            category: String(observation.category || ""),
+            journeyNumber: Number(observation.journeyNumber || 0),
+            destinationEva: observation.destinationEva || null,
+            route: Array.isArray(observation.routeNames) ? observation.routeNames : [],
+            platform: observation.platform || null,
+            scheduledTime: observation.scheduledTime || null,
+            eventTime: observation.eventTime || null,
+            timeType: observation.timeType || "UNKNOWN",
+            status: forecast ? "forecasted" : candidate ? "candidate-not-in-forecast" : "not-a-forecast-candidate",
+            forecastCrossingTime: forecast?.crossingTime || null,
+            barrierCloseAt: matchingClosure?.start || null,
+            barrierOpenAt: matchingClosure?.end || null,
+          };
+        })
+        .sort((a: any, b: any) => Date.parse(String(a.eventTime || "")) - Date.parse(String(b.eventTime || "")));
+
+      (payload as any).dbInfoComparison = {
+        mode: "read-only-existing-openboards-rows",
+        primaryEvas: [...primaryEvaSet],
+        window: {
+          from: new Date(Date.now() - 5 * 60_000).toISOString(),
+          to: new Date(Date.now() + 3 * 60 * 60_000).toISOString(),
+        },
+        counts: {
+          primaryDepartures: primaryDepartures.length,
+          forecasted: primaryDepartures.filter((item: any) => item.status === "forecasted").length,
+          candidateNotInForecast: primaryDepartures.filter((item: any) => item.status === "candidate-not-in-forecast").length,
+          notForecastCandidates: primaryDepartures.filter((item: any) => item.status === "not-a-forecast-candidate").length,
+        },
+        departures: primaryDepartures,
+      };
+    }
+
     await writeCrossingForecastCache(cacheKey,payload);
     return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
