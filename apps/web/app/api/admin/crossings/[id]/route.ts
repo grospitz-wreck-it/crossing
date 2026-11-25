@@ -153,6 +153,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (observationEvas) args.push(JSON.stringify(observationEvas)); if (contextEvas) args.push(JSON.stringify(contextEvas)); if (referenceStations) args.push(JSON.stringify(referenceStations)); if (requiredRouteStops) args.push(JSON.stringify(requiredRouteStops)); if (body.rules !== undefined) args.push(JSON.stringify(body.rules ?? [])); if (body.throughRules !== undefined) args.push(JSON.stringify(body.throughRules ?? [])); if (body.diversionRules !== undefined) args.push(JSON.stringify(body.diversionRules ?? [])); if (body.rerouteWatchRules !== undefined) args.push(JSON.stringify(body.rerouteWatchRules ?? [])); args.push(id);
     await client.execute({ sql: `UPDATE crossings SET ${fields.join(", ")} WHERE id = ?`, args });
 
+    // The status endpoint also persists forecasts in crossing_forecast_cache.
+    // Its cache key includes updated_at (second precision), so a save in the
+    // same second can otherwise keep serving a stale OSM selection for 30s.
+    // Delete every status variant for this crossing after the config write.
+    await client.execute({
+      sql: "DELETE FROM crossing_forecast_cache WHERE crossing_id LIKE ?",
+      args: [`status:${id}:%`],
+    }).catch((cacheError) => {
+      console.warn("Failed to invalidate persisted crossing forecast cache:", cacheError);
+    });
+
     if (Array.isArray(body.stationLinks)) {
       for (const link of body.stationLinks) { const linkEva = String(link.eva || "").trim(); if (!linkEva) continue; await client.execute({ sql: `INSERT OR IGNORE INTO railway_stations (eva,name,lat,lon,source) VALUES (?,?,?,?,?)`, args: [linkEva,String(link.station_name || link.stationName || linkEva),Number.isFinite(Number(link.lat)) ? Number(link.lat) : null,Number.isFinite(Number(link.lon)) ? Number(link.lon) : null,"catalog"] }); }
       await client.execute({ sql: `DELETE FROM crossing_station_links WHERE crossing_id = ?`, args: [id] }).catch(() => undefined);
