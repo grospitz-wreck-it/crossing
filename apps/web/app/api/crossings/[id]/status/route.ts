@@ -502,7 +502,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         observationTime:liveTime,
         observationPoints,
         fallbackOffsetSeconds:offsetSeconds,
-        direction:getCrossingDirection([]),
+        direction: train.direction && train.direction !== "unknown" ? train.direction : getCrossingDirection([]),
+        directionSource: train.direction && train.direction !== "unknown" ? "mobilithek-snapshot" : "unknown",
         directionLabel:train.destination?`Richtung ${train.destination}`:null,
         delayMinutes:realtime
           ? Math.round((Date.parse(realtime.eventTime) - Date.parse(realtime.scheduledTime || train.scheduledTime)) / 60000)
@@ -718,6 +719,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         },
         observationStation: train.observationStation || train.stationName || "",
         routeDirection: train.direction || "unknown",
+        routeDirectionSource: train.directionSource || (train.direction && train.direction !== "unknown" ? "source-direction" : "unknown"),
         observationPoints: Array.isArray(train.observationPoints) ? train.observationPoints.map((point: any) => ({
           eva: String(point.eva || ""),
           stationName: String(point.stationName || ""),
