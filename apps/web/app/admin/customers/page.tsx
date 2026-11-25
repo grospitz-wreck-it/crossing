@@ -1,9 +1,7 @@
 "use client";
 
-import {
-  useEffect,
-  useState,
-} from "react";
+import { useEffect, useState } from "react";
+import styles from "./page.module.css";
 
 export default function CustomersPage() {
   const [rows, setRows] =
@@ -50,22 +48,10 @@ export default function CustomersPage() {
   }
 
   return (
-    <main
-      style={{
-        maxWidth: 900,
-        margin: "0 auto",
-        padding: 40,
-      }}
-    >
+    <main className={styles.page}>
       <h1>Kunden</h1>
 
-      <div
-        style={{
-          display: "flex",
-          gap: 12,
-          marginTop: 20,
-        }}
-      >
+      <div className={styles.create}>
         <input
           value={name}
           onChange={(e) =>
@@ -83,12 +69,7 @@ export default function CustomersPage() {
         </button>
       </div>
 
-      <table
-        style={{
-          width: "100%",
-          marginTop: 24,
-        }}
-      >
+      <table className={styles.table}>
         <tbody>
           {rows.map(
             (row) => (

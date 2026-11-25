@@ -5,7 +5,7 @@ import {useEffect,useState} from "react";
 import styles from "./AdminShell.module.css";
 type NavItem=[string,string,string];
 type NavGroup={label:string;items:NavItem[]};
-const groups:NavGroup[]=[{label:"ÜBERSICHT",items:[["/admin","Dashboard","⌂"]]},{label:"BETRIEB",items:[["/admin/crossings","Bahnübergänge","▤"],["/admin/measurements","Messungen","◷"]]},{label:"VERMARKTUNG",items:[["/admin/ads","Werbung & Kampagnen","▧"],["/admin/campaigns","Kampagnen-Setup","＋"]]},{label:"DATEN & SYSTEM",items:[["/admin/crossings/api","DB API & Verbrauch","⌁"],["/admin/crossings/forecasts","Prognosen","⌘"]]} ];
+const groups:NavGroup[]=[{label:"ÜBERSICHT",items:[["/admin","Dashboard","⌂"]]},{label:"BETRIEB",items:[["/admin/crossings","Bahnübergänge","▤"],["/admin/measurements","Messungen","◷"]]},{label:"VERMARKTUNG",items:[["/admin/ads","Werbung & Kampagnen","▧"],["/admin/customers","Kunden","♙"]]},{label:"DATEN & SYSTEM",items:[["/admin/crossings/api","DB API & Verbrauch","⌁"],["/admin/crossings/forecasts","Prognosen","⌘"]]} ];
 export default function AdminShell({children}:{children:ReactNode}){
  const pathname=usePathname();
  const [campaignCount,setCampaignCount]=useState<number|null>(null);
