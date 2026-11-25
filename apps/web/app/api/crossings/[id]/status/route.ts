@@ -91,6 +91,30 @@ function normalizeTrainKey(value: unknown): string {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+// OpenBoards can place its internal journey number into the line label
+// (for example "RB 989638" with category "RB" and journeyNumber 989638).
+// Keep the DB-style product label in the UI, but only strip an exact match;
+// real line designations such as RB71 and RE62 remain unchanged.
+function displayLineForTrain(train: any): string {
+  const line = String(train?.line || "").trim();
+  const category = String(train?.category || "").trim();
+  const journeyNumber = String(train?.journeyNumber || "").trim();
+  const categoryKey = normalizeTrainKey(category);
+  const lineKey = normalizeTrainKey(line);
+  const numberKey = normalizeTrainKey(journeyNumber);
+  const regionalCategories = new Set(["RB", "RE", "S", "R", "IRE"]);
+  if (
+    line &&
+    categoryKey &&
+    numberKey &&
+    regionalCategories.has(categoryKey) &&
+    lineKey === categoryKey + numberKey
+  ) {
+    return category;
+  }
+  return line;
+}
+
 async function addStationNames(db: any, trains: any[]) {
   const evas = Array.from(new Set(
     trains.flatMap((train) => [train.destination, train.origin])
@@ -737,7 +761,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       })),
       ...retainedFromPrevious,
     ];
-    const payload=toPayload(crossing,forecastTrains,lineHints,globalTimingCorrectionSeconds);
+    const dbDisplayTrains = forecastTrains.map((train: any) => ({
+      ...train,
+      line: displayLineForTrain(train),
+    }));
+    const payload=toPayload(crossing,dbDisplayTrains,lineHints,globalTimingCorrectionSeconds);
     (payload as any).forecastDiagnostics = {
       snapshotRows: snapshotRows.length,
       primaryCandidates: primarySnapshot.length,
