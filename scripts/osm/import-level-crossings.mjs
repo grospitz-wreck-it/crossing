@@ -320,16 +320,38 @@ async function importByBbox(bbox, depth = 0) {
 }
 
 
+async function loadManualTrackSelection(crossingId) {
+  const result = await db.execute({
+    sql: "SELECT rules FROM crossings WHERE id = ? LIMIT 1",
+    args: [String(crossingId)],
+  });
+  const rawRules = result.rows[0]?.rules;
+  let rules = rawRules;
+  if (typeof rawRules === "string") {
+    try { rules = JSON.parse(rawRules); } catch { rules = null; }
+  }
+  if (!rules || typeof rules !== "object" || !Array.isArray(rules.selectedOsmTracks)) {
+    return null;
+  }
+  return [...new Set(rules.selectedOsmTracks
+    .map((track) => String(track?.wayId ?? "").trim())
+    .filter((wayId) => /^\\d+$/.test(wayId)))];
+}
+
 async function saveCrossingCorridor(crossingId, osmCrossingId, ways) {
-  const wayIds = [
+  const importedWayIds = [
     ...new Set(
       ways
         .map((way) => Number(way.id))
-        .filter((id) => Number.isFinite(id)),
+        .filter((id) => Number.isSafeInteger(id) && id > 0),
     ),
   ];
+  const manualWayIds = await loadManualTrackSelection(crossingId);
+  // crossings.rules.selectedOsmTracks is the admin's explicit physical-track
+  // selection. It remains authoritative even when it is intentionally [].
+  const wayIds = manualWayIds ?? importedWayIds;
 
-  if (!wayIds.length) {
+  if (!wayIds.length && manualWayIds === null) {
     console.warn(`No railway corridor ways for ${crossingId}`);
     return [];
   }
