@@ -556,7 +556,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // OpenBoards is now a first-class fallback/source, not only a realtime
     // enrichment layer. It can supply explicit primary-stop rows even when the
     // Mobilithek snapshot is empty. Through-runs require route anchors.
-    const openBoardsTrains = getOpenBoardsForecastTrains(crossing, realtimeObservations, hasSelectedOsmTracks ? [] : lineHints);
+    const openBoardsCandidateDiagnostics: any[] = [];
+    const openBoardsTrains = getOpenBoardsForecastTrains(
+      crossing,
+      realtimeObservations,
+      hasSelectedOsmTracks ? [] : lineHints,
+      includeOsmDetails ? openBoardsCandidateDiagnostics : undefined,
+    );
     const combined = [...trains];
     for (const candidate of openBoardsTrains) {
       const duplicateIndex = combined.findIndex((existing) =>
@@ -893,6 +899,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       anchorStations: includeOsmDetails ? (crossing.anchorStations || []) : undefined,
       observationStations: includeOsmDetails ? configuredObservationStations : undefined,
       results: includeOsmDetails ? osmShadowResults : undefined,
+      openBoardsCandidateDiagnostics: includeOsmDetails ? openBoardsCandidateDiagnostics : undefined,
     };
 
     const journeyKeyForRetention = (train: any) => String(train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`);
