@@ -123,13 +123,34 @@ async function loadCandidates(crossing) {
     .sort((a, b) => a.distance - b.distance);
 }
 
+async function loadManualTrackSelection(crossingId) {
+  const result = await db.execute({
+    sql: "SELECT rules FROM crossings WHERE id = ? LIMIT 1",
+    args: [String(crossingId)],
+  });
+  const rawRules = result.rows[0]?.rules;
+  let rules = rawRules;
+  if (typeof rawRules === "string") {
+    try { rules = JSON.parse(rawRules); } catch { rules = null; }
+  }
+  if (!rules || typeof rules !== "object" || !Array.isArray(rules.selectedOsmTracks)) {
+    return null;
+  }
+  return [...new Set(rules.selectedOsmTracks
+    .map((track) => String(track?.wayId ?? "").trim())
+    .filter((wayId) => /^\\d+$/.test(wayId)))];
+}
+
 async function linkCandidate(crossing, anchor, group) {
   const osmIds = group.map((candidate) => candidate.id);
-  const wayIds = [...new Set(group.flatMap((candidate) =>
+  const importedWayIds = [...new Set(group.flatMap((candidate) =>
     candidate.ways.map((way) => way.id),
   ))];
+  const manualWayIds = await loadManualTrackSelection(crossing.id);
+  // Preserve an explicit admin selection, including an intentional empty set.
+  const wayIds = manualWayIds ?? importedWayIds;
 
-  if (!wayIds.length) {
+  if (!importedWayIds.length) {
     throw new Error("Selected OSM crossing group has no associated railway ways");
   }
 
