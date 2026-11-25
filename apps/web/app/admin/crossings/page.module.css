@@ -57,3 +57,21 @@
 @media(max-width:700px){.tableHead,.row{grid-template-columns:minmax(120px,1fr) 34px 34px}.studioEditDrawer>header{padding:22px 18px!important}.studioEditDrawer>div:nth-of-type(1){padding:18px!important}.studioEditDrawer>footer{padding:13px 18px!important}}
 
 .studioDrawer{width:min(1120px,100vw)}
+
+/* Responsive map viewport: tiles and SVG share one live pixel coordinate space */
+.routeMap{touch-action:none;cursor:grab;user-select:none}
+.routeMap:active{cursor:grabbing}
+.mapTiles,.routeOverlay{pointer-events:none}
+.routeOverlay .routeHitArea{pointer-events:stroke;cursor:pointer}
+.routeOverlay .routeHitArea polyline{pointer-events:stroke}
+.routeMap>div[style*="grid"] button{width:34px;height:34px;border:1px solid #d1d9df;border-radius:8px;background:#fff;color:#173653;font-size:20px;font-weight:850;cursor:pointer;box-shadow:0 2px 8px rgba(23,54,83,.12)}
+.routeMap>div[style*="grid"] button:hover{border-color:#e10600;color:#e10600}
+.mapAttribution{position:absolute;right:10px;bottom:10px;z-index:4;padding:5px 8px;border:1px solid rgba(23,54,83,.08);border-radius:7px;background:rgba(255,255,255,.92);color:#667b8b;font-size:9px;pointer-events:none}
+.studioEditDrawer{width:min(1120px,100vw)!important}
+.studioEditDrawer .studioSteps{flex:0 0 auto}
+.studioEditDrawer .studioFooter{flex:0 0 auto}
+.studioEditDrawer>div:nth-of-type(1){min-height:0;overflow:auto}
+.studioEditDrawer .studioFooter{padding:16px 30px;background:#fff;border-top:1px solid #e2eaf0}
+.studioEditDrawer .studioFooter .primary{min-width:150px;background:#e10600;color:#fff}
+.studioEditDrawer .studioFooter .cancel{background:#eef2f5;color:#34495b}
+@media(max-width:700px){.studioEditDrawer .studioSteps{padding:0 8px}.studioEditDrawer .studioSteps button{flex-direction:column;gap:4px;min-height:66px;font-size:9px}.studioEditDrawer .studioFooter{padding:13px 17px}.studioEditDrawer .studioFooter>div{flex:1}.studioEditDrawer .studioFooter .primary,.studioEditDrawer .studioFooter .cancel{flex:1}}
