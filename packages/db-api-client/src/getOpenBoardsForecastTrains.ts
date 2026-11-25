@@ -80,7 +80,6 @@ export function getOpenBoardsForecastTrains(
   crossing: any,
   observations: OpenBoardsStationObservation[],
   lineHints: string[] = [],
-  diagnostics?: any[],
 ): any[] {
   const now = Date.now();
   const primaryEvas = new Set<string>((crossing.referenceStations || []).map(String));
@@ -99,16 +98,9 @@ export function getOpenBoardsForecastTrains(
       const name = index >= 0 ? observation.routeNames[index] : undefined;
       return name && !/^\\d{6,7}$/.test(name) ? name : eva;
     };
-    const inspectJourney = Number(observation.journeyNumber) === 20374 && /RB61/i.test(observation.line);
-    if (observation.cancelled || !lineMatches(observation.line, observation.category, lineHints)) {
-      if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva: observation.evaNumber, skip: observation.cancelled ? "cancelled" : "line-filtered" });
-      continue;
-    }
+    if (observation.cancelled || !lineMatches(observation.line, observation.category, lineHints)) continue;
     const eventAt = Date.parse(observation.eventTime);
-    if (!Number.isFinite(eventAt) || eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) {
-      if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva: observation.evaNumber, skip: "outside-time-window", eventTime: observation.eventTime });
-      continue;
-    }
+    if (!Number.isFinite(eventAt) || eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) continue;
 
     if (primaryEvas.has(observation.evaNumber)) {
       const offsetSeconds = observation.evaNumber === String(crossing.eva || "")
@@ -155,15 +147,9 @@ export function getOpenBoardsForecastTrains(
         ...(Array.isArray(rule.categories) ? rule.categories : []),
         ...lineHints,
       ]);
-      if (!ruleLineMatches) {
-        if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva, skip: "rule-line-filtered" });
-        continue;
-      }
+      if (!ruleLineMatches) continue;
       const stationPresent = routeHasStation(observation, eva, String(rule.observationStation || ""));
-      if (!stationPresent) {
-        if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva, skip: "observation-station-not-in-route", routeEvas: observation.routeEvas, routeNames: observation.routeNames });
-        continue;
-      }
+      if (!stationPresent) continue;
       const configuredAnchors = Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : [];
       const relationPairs = lineRouteAnchorPairs(crossing, observation.line);
       // OpenBoards routes are partial. Prefer the configured corridor anchors
@@ -175,11 +161,7 @@ export function getOpenBoardsForecastTrains(
         hasOrderedRouteAnchors(observation, pair)
       );
       const hasRouteEvidence = hasConfiguredRouteEvidence || hasRelationRouteEvidence;
-      if (!hasRouteEvidence) {
-        if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva, skip: "route-evidence-missing", configuredAnchors, relationPairs, routeEvas: observation.routeEvas, routeNames: observation.routeNames });
-        continue;
-      }
-      if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva, accepted: true, configuredAnchors, relationPairs, routeEvas: observation.routeEvas, routeNames: observation.routeNames });
+      if (!hasRouteEvidence) continue;
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
       const crossingTime = new Date(eventAt + offset * 1000);
