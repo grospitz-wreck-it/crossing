@@ -13,11 +13,19 @@ export type SnapshotPrimaryTrain = {
   arrival: string;
   scheduledTime: string;
   route: string[];
+  direction: "eastbound" | "westbound" | "unknown";
   observationPoints?: Array<{ eva: string; stationName: string; side: "before" | "after"; trackWayIds: number[]; direction: "eastbound" | "westbound" | "unknown"; distanceMeters: number; distanceSource?: "confirmed-osm-profile" | "manual-config"; profileCalculatedAt?: string; actualTime: string; scheduledTime?: string; eventType: "arrival" | "departure" | "actual" }>;
 };
 
 function parseJson(value: unknown, fallback: any) {
   try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; }
+}
+
+function normalizeSnapshotDirection(value: unknown): "eastbound" | "westbound" | "unknown" {
+  const direction = String(value ?? "").trim().toLowerCase();
+  if (/^(eastbound|east|e|ost|osten|ostwaerts|ostwärts)$/.test(direction)) return "eastbound";
+  if (/^(westbound|west|w|westen|westwaerts|westwärts)$/.test(direction)) return "westbound";
+  return "unknown";
 }
 
 function normalizeStation(value: string) {
@@ -211,6 +219,7 @@ export async function getSnapshotPrimaryTrains(
         route: (Array.isArray(calls) ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean) : []).length >= 2
           ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean)
           : parseJson(row.route_json, []).map(String).filter(Boolean),
+        direction: normalizeSnapshotDirection(row.direction),
         observationPoints,
       });
       break;
