@@ -239,10 +239,10 @@ export async function fetchRelayEvents(
     if (value.__meta === "mobilithek-demand-debug") {
       console.log("[Mobilithek DEBUG] demand metrics", value);
       debug = {
-        parsedJourneys: value.parsedJourneys,
-        scopeViolations: value.debugScopeViolations,
-        fromNormalFilter: value.fromNormalFilter,
-        fromRawFallback: value.fromRawFallback,
+        parsedJourneys: Number(value.parsedJourneys) || 0,
+        scopeViolations: Number(value.debugScopeViolations) || 0,
+        fromNormalFilter: Number(value.fromNormalFilter) || 0,
+        fromRawFallback: Number(value.fromRawFallback) || 0,
       };
       return;
     }
