@@ -95,7 +95,29 @@ async function loadRoute(wayIds:number[]){
   return [];
 }
 
-export async function GET(request:Request){
+
+type OsmStation = { id: string; name: string; lat: number; lon: number; uicRef?: string; ril100?: string; railway: string; publicTransport?: string };
+async function loadOsmStations(bbox:{south:number;west:number;north:number;east:number}):Promise<OsmStation[]>{
+  const box=`${bbox.south},${bbox.west},${bbox.north},${bbox.east}`;
+  const query=`[out:json][timeout:15];(node["railway"~"^(station|halt|stop)$"](${box});way["railway"~"^(station|halt)$"](${box});relation["railway"~"^(station|halt)$"](${box});node["public_transport"~"^(station|stop_position)$"](${box});way["public_transport"="station"](${box});relation["public_transport"="station"](${box}););out center tags;`;
+  for(const endpoint of ["https://overpass.private.coffee/api/interpreter","https://ovp.dresel.systems/api/interpreter"]){
+    try{
+      const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),16000);
+      try{
+        const response=await fetch(endpoint,{method:"POST",cache:"no-store",signal:controller.signal,headers:{accept:"application/json","content-type":"application/x-www-form-urlencoded;charset=UTF-8","user-agent":"Crossings/1.0 (meineschranke.com)"},body:new URLSearchParams({data:query}).toString()});
+        if(!response.ok)continue;
+        const data=await response.json();
+        return (data?.elements||[]).map((item:any)=>{
+          const tags=item.tags||{},lat=Number(item.lat??item.center?.lat),lon=Number(item.lon??item.center?.lon);
+          return {id:`osm:${item.type}:${item.id}`,name:String(tags.name||tags["name:de"]||tags.ref||"Unbenannter Halt"),lat,lon,uicRef:String(tags.uic_ref||tags["uic_ref:DB"]||""),ril100:String(tags["railway:ref"]||tags["ref:DB"]||""),railway:String(tags.railway||""),publicTransport:String(tags.public_transport||"")};
+        }).filter((s:OsmStation)=>s.name&&Number.isFinite(s.lat)&&Number.isFinite(s.lon));
+      }finally{clearTimeout(timeout);}
+    }catch{}
+  }
+  return [];
+}
+function normalizeStationName(value:string){return value.toLowerCase().normalize("NFKD").replace(/[\\u0300-\\u036f]/g,"").replace(/\\b(hbf|bahnhof|haltepunkt|s-bahn)\\b/g,"").replace(/[^a-z0-9]+/g," ").trim();}
+\nexport async function GET(request:Request){
   const {searchParams}=new URL(request.url);
   const lat=Number(searchParams.get("lat")),lon=Number(searchParams.get("lon")),wayIds=(searchParams.get("wayIds")||String(searchParams.get("wayId")||"")).split(",").map((value)=>Number(value)).filter((value)=>Number.isFinite(value)&&value>0);
   if(!Number.isFinite(lat)||!Number.isFinite(lon)||!wayIds.length){
@@ -105,30 +127,51 @@ export async function GET(request:Request){
   if(!segments.length) return NextResponse.json({status:"ROUTE_UNAVAILABLE",stations:[]},{status:502});
   const bbox=routeBBox(segments,lat,lon,80);
   try{
-    const result=await db.execute({
-      sql:`SELECT eva,name,lat,lon,ril100,ibnr
-            FROM railway_station_catalog
-            WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`,
-      args:[bbox.south,bbox.north,bbox.west,bbox.east]
-    });
-    const stations=(result.rows as any[])
-      .map(row=>{
-        const stationLat=Number(row.lat),stationLon=Number(row.lon);
-        return {
-          eva:String(row.eva||""),
-          stationName:String(row.name||row.eva||""),
-          ril100:row.ril100?String(row.ril100):undefined,
-          ibnr:row.ibnr?String(row.ibnr):undefined,
-          lat:stationLat,lon:stationLon,
-          distanceKm:distanceKm(lat,lon,stationLat,stationLon),
-          trackDistanceMeters:geometryDistanceMeters({lat:stationLat,lon:stationLon},segments),
-          alongTrackDistanceMeters:alongTrackDistance({lat:stationLat,lon:stationLon},{lat,lon},segments)
-        } as StationCandidate;
-      })
-      .filter(s=>s.eva&&Number.isFinite(s.lat)&&Number.isFinite(s.lon)&&s.distanceKm<=80&&s.trackDistanceMeters<=2500&&s.alongTrackDistanceMeters!=null)
-      .sort((a,b)=>a.distanceKm-b.distanceKm)
-      .slice(0,20);
-    return NextResponse.json({status:"OK",stations});
+    const [result,osmStations]=await Promise.all([
+      db.execute({
+        sql:`SELECT eva,name,lat,lon,ril100,ibnr
+              FROM railway_station_catalog
+              WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`,
+        args:[bbox.south,bbox.north,bbox.west,bbox.east]
+      }),
+      loadOsmStations(bbox)
+    ]);
+    const catalog=(result.rows as any[]).map(row=>({
+      eva:String(row.eva||""),stationName:String(row.name||row.eva||""),
+      ril100:String(row.ril100||""),ibnr:String(row.ibnr||""),
+      lat:Number(row.lat),lon:Number(row.lon)
+    })).filter(s=>s.eva&&Number.isFinite(s.lat)&&Number.isFinite(s.lon));
+    const osmCandidates=osmStations.map(osm=>{
+      const direct=catalog.find(dbStation=>(osm.uicRef&&(osm.uicRef===dbStation.ibnr||osm.uicRef===dbStation.eva))||(osm.ril100&&osm.ril100===dbStation.ril100));
+      const named=catalog.filter(dbStation=>normalizeStationName(dbStation.stationName)===normalizeStationName(osm.name))
+        .sort((x,y)=>distanceKm(osm.lat,osm.lon,x.lat,x.lon)-distanceKm(osm.lat,osm.lon,y.lat,y.lon))[0];
+      const matched=direct||((named&&distanceKm(osm.lat,osm.lon,named.lat,named.lon)<=1.0)?named:null);
+      const stationLat=matched?.lat??osm.lat,stationLon=matched?.lon??osm.lon;
+      const trackDistanceMeters=geometryDistanceMeters({lat:stationLat,lon:stationLon},segments);
+      const along=alongTrackDistance({lat:stationLat,lon:stationLon},{lat,lon},segments);
+      const distance=distanceKm(lat,lon,stationLat,stationLon);
+      const isStopPosition=osm.publicTransport==="stop_position"||osm.railway==="stop";
+      return {
+        id:osm.id,eva:matched?.eva||"",stationName:osm.name,
+        ril100:matched?.ril100||osm.ril100||undefined,ibnr:matched?.ibnr||osm.uicRef||undefined,
+        lat:stationLat,lon:stationLon,distanceKm:distance,trackDistanceMeters,
+        alongTrackDistanceMeters:along,source:matched?"db+osm":"osm",
+        selectable:Boolean(matched),osmRailway:osm.railway,osmPublicTransport:osm.publicTransport,
+        maxTrackDistanceMeters:isStopPosition?600:2500
+      };
+    }).filter(s=>s.distanceKm<=80&&s.trackDistanceMeters<=s.maxTrackDistanceMeters&&s.alongTrackDistanceMeters!=null);
+    const catalogOnly=catalog.map(station=>{
+      const stationLat=station.lat,stationLon=station.lon;
+      return {id:`db:${station.eva}`,eva:station.eva,stationName:station.stationName,ril100:station.ril100||undefined,ibnr:station.ibnr||undefined,lat:stationLat,lon:stationLon,distanceKm:distanceKm(lat,lon,stationLat,stationLon),trackDistanceMeters:geometryDistanceMeters({lat:stationLat,lon:stationLon},segments),alongTrackDistanceMeters:alongTrackDistance({lat:stationLat,lon:stationLon},{lat,lon},segments),source:"db",selectable:true};
+    }).filter(s=>s.distanceKm<=80&&s.trackDistanceMeters<=2500&&s.alongTrackDistanceMeters!=null);
+    const byEva=new Map<string,any>();
+    for(const station of [...catalogOnly,...osmCandidates])if(station.eva){
+      const previous=byEva.get(station.eva);
+      if(!previous||station.source==="db+osm")byEva.set(station.eva,station);
+    }
+    const unmatchedOsm=osmCandidates.filter(s=>!s.eva);
+    const stations=[...byEva.values(),...unmatchedOsm].sort((x,y)=>x.distanceKm-y.distanceKm).slice(0,40);
+    return NextResponse.json({status:"OK",stations,counts:{db:catalogOnly.length,osm:osmCandidates.length,unmatchedOsm:unmatchedOsm.length}});
   }catch(error){
     return NextResponse.json({status:"DB_ERROR",error:error instanceof Error?error.message:String(error),stations:[]},{status:500});
   }
