@@ -143,9 +143,15 @@ export function getOpenBoardsForecastTrains(
       if (!routeHasStation(observation, eva, String(rule.observationStation || ""))) continue;
       const configuredAnchors = Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : [];
       const relationPairs = lineRouteAnchorPairs(crossing, observation.line);
-      const hasRouteEvidence = configuredAnchors.length >= 2
-        ? hasOrderedRouteAnchors(observation, configuredAnchors)
-        : relationPairs.some((pair) => hasOrderedRouteAnchors(observation, pair));
+      // OpenBoards routes are partial. Prefer the configured corridor anchors
+      // when they are present, but do not let an incomplete configured list
+      // suppress stronger endpoint evidence from the matching OSM line relation.
+      const hasConfiguredRouteEvidence = configuredAnchors.length >= 2 &&
+        hasOrderedRouteAnchors(observation, configuredAnchors);
+      const hasRelationRouteEvidence = relationPairs.some((pair) =>
+        hasOrderedRouteAnchors(observation, pair)
+      );
+      const hasRouteEvidence = hasConfiguredRouteEvidence || hasRelationRouteEvidence;
       if (!hasRouteEvidence) continue;
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
