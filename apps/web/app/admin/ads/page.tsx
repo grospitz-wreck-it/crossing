@@ -321,6 +321,19 @@ setShowDrawer(false);
 await load();
 }
 
+async function toggleCampaign(campaign: any) {
+  const response = await fetch(`/api/admin/campaigns/${campaign.id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ active: !campaign.active }),
+  });
+  if (!response.ok) {
+    alert("Kampagnenstatus konnte nicht geändert werden.");
+    return;
+  }
+  await load();
+}
+
 async function deleteCampaign(id: string) {
   const ok = window.confirm(
     "Kampagne wirklich löschen?"
