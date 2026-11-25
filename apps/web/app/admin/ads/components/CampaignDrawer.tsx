@@ -145,7 +145,7 @@ onCloseCustomerDialog,
         position: "fixed",
         inset: 0,
         background:
-          "rgba(15,23,42,.25)",
+          "rgba(2,8,18,.72)",
         backdropFilter:
           "blur(6px)",
         display: "flex",
@@ -156,20 +156,20 @@ onCloseCustomerDialog,
     >
       <div
         style={{
-          width: 560,
-          background: "#fff",
-          padding: 36,
+          width: 520,
+          background: "#111d2d",
+          padding: 24,
           overflowY: "auto",
-          borderTopLeftRadius: 32,
-          borderBottomLeftRadius: 32,
+          borderTopLeftRadius: 14,
+          borderBottomLeftRadius: 14,
           boxShadow:
-            "0 24px 80px rgba(15,23,42,.18)",
+            "0 24px 80px rgba(0,0,0,.45)",
         }}
       >
         <h2
           style={{
             margin: 0,
-            fontSize: 32,
+            fontSize: 22,
             fontWeight: 700,
           }}
         >
@@ -418,11 +418,11 @@ onCloseCustomerDialog,
           <div
             style={{
               width: 420,
-              background: "#fff",
+              background: "#111d2d",
               borderRadius: 24,
               padding: 28,
               boxShadow:
-                "0 24px 80px rgba(15,23,42,.18)",
+                "0 24px 80px rgba(0,0,0,.45)",
             }}
           >
             <h3
