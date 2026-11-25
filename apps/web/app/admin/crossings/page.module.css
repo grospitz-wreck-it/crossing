@@ -55,3 +55,5 @@
 .studioEditDrawer>footer{padding:16px 34px!important;background:#fff!important;border-top:1px solid #e2eaf0!important}
 .studioEditDrawer>footer button:last-child{background:#e10600!important;box-shadow:0 8px 18px rgba(225,6,0,.18)}
 @media(max-width:700px){.tableHead,.row{grid-template-columns:minmax(120px,1fr) 34px 34px}.studioEditDrawer>header{padding:22px 18px!important}.studioEditDrawer>div:nth-of-type(1){padding:18px!important}.studioEditDrawer>footer{padding:13px 18px!important}}
+
+.studioDrawer{width:min(1120px,100vw)}
