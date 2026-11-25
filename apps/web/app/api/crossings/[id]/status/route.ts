@@ -596,6 +596,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     ).values());
     const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
     const selectedOsmTracks = selectedOsmTracksForCrossing(crossing);
+    const configuredObservationStations = crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations)
+      ? crossing.rules.observationStations.map((station: any) => ({
+          eva: String(station.eva || "").trim(),
+          stationName: String(station.stationName || station.name || ""),
+          enabled: station.enabled !== false,
+          side: station.side || "unknown",
+          direction: station.direction || "unknown",
+          trackWayIds: Array.isArray(station.trackWayIds) ? station.trackWayIds.map((value: unknown) => String(value)) : [],
+          trackDistanceMeters: Number(station.trackDistanceMeters || 0),
+          fallbackOffsetSeconds: Number(station.fallbackOffsetSeconds || 0),
+        })).filter((station: any) => station.eva)
+      : [];
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => {
       const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
       const lineAssignment = assignTrainToOsmTrack({
@@ -657,6 +669,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         lineAssignment,
         observationStation: train.observationStation || train.stationName || "",
         routeDirection: train.direction || "unknown",
+        observationPoints: Array.isArray(train.observationPoints) ? train.observationPoints.map((point: any) => ({
+          eva: String(point.eva || ""),
+          stationName: String(point.stationName || ""),
+          side: point.side || "unknown",
+          trackWayIds: Array.isArray(point.trackWayIds) ? point.trackWayIds.map((value: unknown) => String(value)) : [],
+          direction: point.direction || "unknown",
+          distanceMeters: Number(point.distanceMeters || 0),
+          distanceSource: point.distanceSource || "unknown",
+          actualTime: point.actualTime || null,
+          realtimeSource: point.realtimeSource || null,
+          eventType: point.eventType || "unknown",
+        })) : [],
         result,
       };
     }));
@@ -816,6 +840,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         unknown: osmShadowResults.filter((item) => item.lineAssignment.status === "unknown").length,
       },
       anchorStations: includeOsmDetails ? (crossing.anchorStations || []) : undefined,
+      observationStations: includeOsmDetails ? configuredObservationStations : undefined,
       results: includeOsmDetails ? osmShadowResults : undefined,
     };
 
