@@ -694,10 +694,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
             const isRegional = /^(RB|RE|R|S)/.test(line) || /REGIONAL|S-BAHN/.test(category);
             const isStopping = train.isStoppingTrain === true;
             // Conservative corridor-average speeds, not a claim about live speed.
-            const speedKmh = /ICE|IC|EC|INTERCITY/.test(category) ? 90
-              : isRegional ? (isStopping ? 45 : 65)
-              : /GÜTER|FREIGHT/.test(category) ? 40
-              : 50;
+            const configuredSpeeds = crossing.rules?.timing?.speedKmh || {};
+            const validSpeed = (value: any, fallback: number) => Number.isFinite(Number(value)) && Number(value) >= 10 && Number(value) <= 200 ? Number(value) : fallback;
+            const speedKmh = /ICE|IC|EC|INTERCITY/.test(category) ? validSpeed(configuredSpeeds.intercity, 90)
+              : /GÜTER|FREIGHT/.test(category) ? validSpeed(configuredSpeeds.freight, 40)
+              : isRegional ? (isStopping ? validSpeed(configuredSpeeds.stoppingRegional, 45) : validSpeed(configuredSpeeds.regional, 65))
+              : validSpeed(configuredSpeeds.unknown, 50);
             const travelSeconds = Math.max(0, Math.round(Math.abs(distanceMeters) / (speedKmh / 3.6)));
             if (Number.isFinite(observationAt) && Number.isFinite(distanceMeters)) {
               const signedTravelSeconds = Math.sign(distanceMeters) * travelSeconds;
