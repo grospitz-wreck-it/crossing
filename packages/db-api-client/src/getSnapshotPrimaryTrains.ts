@@ -207,7 +207,7 @@ export async function getSnapshotPrimaryTrains(
         : parseJson(row.route_json, []).map(String).filter(Boolean);
       const routeEvas = calls.map((item: any) => {
         const ref = String(item?.stopPointRef || item?.stopPlaceRef || "");
-        return ref.match(/(?:^|\\D)(\\d{7})(?:\\D|$)/)?.[1] || "";
+        return ref.match(/(?:^|\D)(\d{7})(?:\D|$)/)?.[1] || "";
       });
       const snapshotDirection = normalizeSnapshotDirection(row.direction);
       const anchorDirection = directionFromCrossingAnchors(crossing, routeEvas, route);
