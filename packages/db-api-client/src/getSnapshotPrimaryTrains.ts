@@ -13,7 +13,7 @@ export type SnapshotPrimaryTrain = {
   arrival: string;
   scheduledTime: string;
   route: string[];
-  observationPoints?: Array<{ eva: string; stationName: string; side: "before" | "after"; trackWayIds: number[]; direction: "eastbound" | "westbound" | "unknown"; distanceMeters: number; actualTime: string; scheduledTime?: string; eventType: "arrival" | "departure" | "actual" }>;
+  observationPoints?: Array<{ eva: string; stationName: string; side: "before" | "after"; trackWayIds: number[]; direction: "eastbound" | "westbound" | "unknown"; distanceMeters: number; distanceSource?: "confirmed-osm-profile" | "manual-config"; profileCalculatedAt?: string; actualTime: string; scheduledTime?: string; eventType: "arrival" | "departure" | "actual" }>;
 };
 
 function parseJson(value: unknown, fallback: any) {
@@ -62,7 +62,9 @@ export async function getSnapshotPrimaryTrains(
   ));
   const timingRules = crossing.rules && !Array.isArray(crossing.rules) ? crossing.rules.timing || {} : {};
   const timingProfile = timingRules.osmTimingProfile;
-  const profileStations = Array.isArray(timingProfile?.stations) ? timingProfile.stations : [];
+  const profileStations = timingProfile?.version === 1 && timingProfile?.source === "prepared-osm-rail-graph" && Array.isArray(timingProfile.stations)
+    ? timingProfile.stations
+    : [];
   const configuredObservationStations = (crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations) ? crossing.rules.observationStations : [])
     .filter((station: any) => station && station.enabled !== false && station.eva && (station.side === "before" || station.side === "after"))
     .map((station: any) => {
@@ -83,7 +85,7 @@ export async function getSnapshotPrimaryTrains(
           : [];
         if (!configuredWayIds.length || configuredWayIds.length !== profileWayIds.length ||
             configuredWayIds.some((value: string, index: number) => value !== profileWayIds[index])) return false;
-        return !item.direction || !station.direction || item.direction === station.direction;
+        return !item.direction || item.direction === "unknown" || !station.direction || station.direction === "unknown" || item.direction === station.direction;
       });
       const hasConfirmedProfile = Boolean(profile);
       return {
