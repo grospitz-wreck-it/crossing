@@ -33,7 +33,8 @@ export default function Admin(){
  const max=Math.max(1,...days.map(d=>d.value||0)),points=days.map((d,i)=>({x:35+i*112,y:155-(d.value??max*.7)/max*105}));
  const path=points.map((p,i)=>(i?"L":"M")+" "+p.x+" "+p.y).join(" "),area=path+" L 707 172 L 35 172";
  const pct=Math.min(100,Math.max(0,usage?.utilizationPercent||0));
- const geo=crossings.filter(c=>Number.isFinite(c.lat)&&Number.isFinite(c.lon));\n const searchResults=search.trim()?crossings.filter(c=>(c.name+" "+(c.city||"")).toLowerCase().includes(search.trim().toLowerCase())).slice(0,6):[];
+ const geo=crossings.filter(c=>Number.isFinite(c.lat)&&Number.isFinite(c.lon));
+ const searchResults=search.trim()?crossings.filter(c=>(c.name+" "+(c.city||"")).toLowerCase().includes(search.trim().toLowerCase())).slice(0,6):[];
  const markers=geo.map(c=>({x:25+(Number(c.lon)-5.5)/10*205,y:20+(55.2-Number(c.lat))/8.2*250,c}));
  const state=feed?.error?"warn":feed?.configured&&feed.activeJobs>0?"good":"muted";
  return <main className={styles.shell}>
