@@ -23,12 +23,14 @@ function categories(value: unknown, depth = 0): string[] {
   return text.split(/[\s,;]+/).map((item) => item.trim().replace(/^["'\[]+|["'\]]+$/g, "")).filter((item) => /^(ICE|IC|EC|RE|RB|S|U|TGV|RJ|NJ|EN|D|IR|FLX)$/i.test(item));
 }
 function requireDb() { if (!db) throw new Error("TURSO_DATABASE_URL / TURSO_AUTH_TOKEN fehlen."); return db; }
+async function ensureCrossingLocations(client: ReturnType<typeof requireDb>) { await client.execute(`CREATE TABLE IF NOT EXISTS crossing_locations (crossing_id TEXT PRIMARY KEY,state TEXT NOT NULL DEFAULT '',city TEXT NOT NULL DEFAULT '',postal_code TEXT,created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')),FOREIGN KEY (crossing_id) REFERENCES crossings(id))`); }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   try {
     const client = requireDb();
-    const result = await client.execute({ sql: `SELECT id,name,eva,lat,lon,confidence,status,source,train_source_mode,observation_evas,context_evas,required_route_stops,close_offset_seconds,open_offset_seconds,rules,through_rules,diversion_rules,reroute_watch_rules,created_at,updated_at FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
+    await ensureCrossingLocations(client);
+    const result = await client.execute({ sql: `SELECT c.id,c.name,c.eva,c.lat,c.lon,c.confidence,c.status,c.source,c.train_source_mode,c.observation_evas,c.context_evas,c.required_route_stops,c.close_offset_seconds,c.open_offset_seconds,c.rules,c.through_rules,c.diversion_rules,c.reroute_watch_rules,c.created_at,c.updated_at,cl.postal_code,cl.city,cl.state FROM crossings c LEFT JOIN crossing_locations cl ON cl.crossing_id=c.id WHERE c.id = ? LIMIT 1`, args: [id] });
     const crossing: any = result.rows[0];
     if (!crossing) return Response.json({ error: "Crossing not found" }, { status: 404 });
     const links = await client.execute({ sql: `SELECT id,eva,station_name,role,categories,direction,fallback_offset_seconds,track_distance_meters,sort_order FROM crossing_station_links WHERE crossing_id = ? ORDER BY sort_order ASC`, args: [id] }).catch(() => ({ rows: [] as any[] }));
@@ -42,6 +44,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   try {
     const client = requireDb();
     const body = await request.json();
+    await ensureCrossingLocations(client);
     const existing = await client.execute({ sql: `SELECT id FROM crossings WHERE id = ? LIMIT 1`, args: [id] });
     if (!existing.rows.length) return Response.json({ error: "Crossing not found" }, { status: 404 });
     const name = String(body.name ?? "").trim(), eva = String(body.eva ?? "").trim(), lat = Number(body.lat), lon = Number(body.lon), closeOffset = Number(body.closeOffsetSeconds), openOffset = Number(body.openOffsetSeconds), confidence = Number(body.confidence), status = body.status === "inactive" ? "inactive" : "active", trainSourceMode = ["openboards","mobilithek","hybrid"].includes(String(body.trainSourceMode)) ? String(body.trainSourceMode) : "hybrid";
@@ -142,6 +145,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     let contextEvas = Array.isArray(body.contextEvas) ? body.contextEvas.map(String).filter(Boolean) : null;
     let referenceStations = Array.isArray(body.referenceStations) ? body.referenceStations.map(String).map((value: string) => value.trim()).filter(Boolean) : null;
     const requiredRouteStops = Array.isArray(body.requiredRouteStops) ? body.requiredRouteStops.map(String).filter(Boolean) : null;
+    const postalCode=String(body.postalCode??"").trim(),city=String(body.city??"").trim(),state=String(body.state??"").trim();
+    if(postalCode||city||state){await client.execute({sql:`INSERT INTO crossing_locations (crossing_id,state,city,postal_code) VALUES (?,?,?,?) ON CONFLICT(crossing_id) DO UPDATE SET state=excluded.state,city=excluded.city,postal_code=excluded.postal_code,updated_at=CURRENT_TIMESTAMP`,args:[id,state,city,postalCode]});}else{await client.execute({sql:"DELETE FROM crossing_locations WHERE crossing_id = ?",args:[id]}).catch(()=>undefined);}
     if (Array.isArray(body.stationLinks)) {
       const normalizedLinks = body.stationLinks.map((link: any) => ({ eva: String(link.eva || "").trim(), role: String(link.role || "observation") })).filter((link: any) => link.eva);
       observationEvas = normalizedLinks.filter((link: any) => link.role === "primary" || link.role === "observation").map((link: any) => link.eva);
