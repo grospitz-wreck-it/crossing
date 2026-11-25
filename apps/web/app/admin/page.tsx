@@ -33,7 +33,7 @@ export default function Admin(){
  const max=Math.max(1,...days.map(d=>d.value||0)),points=days.map((d,i)=>({x:35+i*112,y:155-(d.value??max*.7)/max*105}));
  const path=points.map((p,i)=>(i?"L":"M")+" "+p.x+" "+p.y).join(" "),area=path+" L 707 172 L 35 172";
  const pct=Math.min(100,Math.max(0,usage?.utilizationPercent||0));
- const geo=crossings.filter(c=>Number.isFinite(c.lat)&&Number.isFinite(c.lon));
+ const geo=crossings.filter(c=>Number.isFinite(c.lat)&&Number.isFinite(c.lon));\n const searchResults=search.trim()?crossings.filter(c=>(c.name+" "+(c.city||"")).toLowerCase().includes(search.trim().toLowerCase())).slice(0,6):[];
  const markers=geo.map(c=>({x:25+(Number(c.lon)-5.5)/10*205,y:20+(55.2-Number(c.lat))/8.2*250,c}));
  const state=feed?.error?"warn":feed?.configured&&feed.activeJobs>0?"good":"muted";
  return <main className={styles.shell}>
@@ -49,7 +49,7 @@ export default function Admin(){
    <div className={styles.sidebarBottom}><i/><span><b>{errors.length?"Teilweise eingeschränkt":"Systemübersicht"}</b><small>{errors.length?errors.length+" Datenquellen nicht erreichbar":"Live-Daten · 2-Minuten-Refresh"}</small></span></div>
   </aside>
   <section className={styles.main}>
-   <header className={styles.topbar}><div className={styles.breadcrumb}>MEINESCHRANKE <span>/</span> CONTROL CENTER</div><div className={styles.topActions}><label className={styles.search}><Icon name="search"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Bahnübergang suchen…"/><kbd>⌘ K</kbd></label><button className={styles.iconButton} onClick={()=>void load()} aria-label="Aktualisieren"><Icon name="refresh"/></button><span className={styles.avatar}>MS</span></div></header>
+   <header className={styles.topbar}><div className={styles.breadcrumb}>MEINESCHRANKE <span>/</span> CONTROL CENTER</div><div className={styles.topActions}><div className={styles.searchWrap}><label className={styles.search}><Icon name="search"/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Bahnübergang suchen…"/><kbd>⌘ K</kbd></label>{search.trim()&&<div className={styles.searchResults}>{searchResults.length?searchResults.map(c=><a key={c.id} href="/admin/crossings"><b>{c.name}</b><small>{c.city||"Bahnübergang verwalten"}</small></a>):<span>Kein Treffer</span>}</div>}</div><button className={styles.iconButton} onClick={()=>void load()} aria-label="Aktualisieren"><Icon name="refresh"/></button><span className={styles.avatar}>MS</span></div></header>
    <div className={styles.content}>
     <div className={styles.heading}><div><div className={styles.eyebrow}>CROSSINGS · CONTROL CENTER</div><h1>Dashboard<span>.</span></h1><p>Alles im Blick. Jede Schranke. Jede Prognose. Jeder Datenstrom.</p></div><div className={styles.updated}><i/>{loading?"Aktualisiere…":updated?"Aktualisiert "+time(updated.toISOString()):"Noch keine Aktualisierung"}<button onClick={()=>void load()}>↻</button></div></div>
     {errors.length>0&&<div className={styles.warning}><Icon name="alert"/>Datenquellen nicht erreichbar: {errors.join(", ")}. Verfügbare Kennzahlen bleiben sichtbar.</div>}
