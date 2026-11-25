@@ -146,7 +146,7 @@ export async function GET(request:Request){
       const direct=catalog.find(dbStation=>(osm.uicRef&&(osm.uicRef===dbStation.ibnr||osm.uicRef===dbStation.eva))||(osm.ril100&&osm.ril100===dbStation.ril100));
       const named=catalog.filter(dbStation=>normalizeStationName(dbStation.stationName)===normalizeStationName(osm.name))
         .sort((x,y)=>distanceKm(osm.lat,osm.lon,x.lat,x.lon)-distanceKm(osm.lat,osm.lon,y.lat,y.lon))[0];
-      const matched=direct||((named&&distanceKm(osm.lat,osm.lon,named.lat,named.lon)<=1.0)?named:null);\n      // German UIC/IBNR station numbers (800xxxx) are also the EVA identifiers used by DB timetable APIs.\n      const osmEva=!matched&&/^8\\d{6}$/.test(osm.uicRef||"")?osm.uicRef:"";
+      const matched=direct||((named&&distanceKm(osm.lat,osm.lon,named.lat,named.lon)<=1.0)?named:null);\n      // German UIC/IBNR station numbers in the 800xxxx range can be used as EVA identifiers for DB timetable lookups.\n      const osmEva=!matched&&/^8\\d{6}$/.test(osm.uicRef||"")?osm.uicRef:"";
       const stationLat=matched?.lat??osm.lat,stationLon=matched?.lon??osm.lon;
       const trackDistanceMeters=geometryDistanceMeters({lat:stationLat,lon:stationLon},segments);
       const along=alongTrackDistance({lat:stationLat,lon:stationLon},{lat,lon},segments);
