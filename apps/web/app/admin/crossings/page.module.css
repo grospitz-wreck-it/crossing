@@ -144,7 +144,7 @@
 .studioEditDrawer>header h2{color:#f5f8fc!important;font-size:29px!important}
 .studioEditDrawer>header button{display:grid!important;place-items:center!important;width:40px!important;height:40px!important;border-radius:11px!important;background:rgba(255,255,255,.09)!important;color:#fff!important}
 .studioEditDrawer .studioSteps{padding:0 26px;background:#101d2e;border-bottom:1px solid rgba(164,190,220,.12)}
-.studioEditDrawer>div:nth-of-type(1){flex:1;min-height:0;padding:23px 30px!important;gap:14px!important;background:#f3f6fa;overflow:auto}
+.studioEditDrawer>div:nth-of-type(1){flex:1;min-height:0;padding:23px 30px!important;gap:14px!important;background:#f3f6fa;overflow:auto;align-content:start;grid-auto-rows:max-content}
 .studioEditDrawer>div:nth-of-type(1)>section{padding:18px!important;border:1px solid #e1e8ef!important;border-radius:14px!important;background:#fff!important;box-shadow:0 5px 18px rgba(19,43,68,.045)!important}
 .studioEditDrawer>div:nth-of-type(1)>section>strong,.studioEditDrawer label span{color:#243b54!important}
 .studioEditDrawer input,.studioEditDrawer select,.studioEditDrawer textarea{min-height:42px!important;box-sizing:border-box!important;border:1px solid #d9e2eb!important;border-radius:9px!important;background:#fbfcfe!important;color:#1c3047!important;padding:10px 12px!important;font-size:12px!important}
