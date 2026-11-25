@@ -21,7 +21,7 @@ export default function CampaignCard({
         style={{
           aspectRatio: "16/8",
           overflow: "hidden",
-          background: "#f3f5f8",
+          background: "#17263a",
         }}
       >
         {campaign.creative
@@ -46,7 +46,7 @@ export default function CampaignCard({
               alignItems: "center",
               justifyContent:
                 "center",
-              color: "#7a8796",
+              color: "#91a1b7",
             }}
           >
             Kein Banner
@@ -56,7 +56,7 @@ export default function CampaignCard({
 
       <div
         style={{
-          padding: 24,
+          padding: 15,
         }}
       >
         <div
@@ -71,7 +71,7 @@ export default function CampaignCard({
         <div
           style={{
             marginTop: 4,
-            fontSize: 24,
+            fontSize: 17,
             fontWeight: 700,
           }}
         >
@@ -88,8 +88,8 @@ export default function CampaignCard({
         >
           <Chip>
             {campaign.active
-              ? "🟢 Aktiv"
-              : "⚪ Pausiert"}
+              ? "Aktiv"
+              : "Pausiert"}
           </Chip>
 
           <Chip>
@@ -119,7 +119,7 @@ export default function CampaignCard({
           style={{
             marginTop: 18,
             color: "#7a8796",
-            fontSize: 14,
+            fontSize: 10,
           }}
         >
           {campaign.start_date}
@@ -154,7 +154,7 @@ export default function CampaignCard({
           style={{
             display: "flex",
             gap: 10,
-            marginTop: 24,
+            marginTop: 14,
           }}
         >
           <Button
