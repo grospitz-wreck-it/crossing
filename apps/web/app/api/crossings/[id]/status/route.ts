@@ -589,29 +589,71 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     ).values());
     const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
     const selectedOsmTracks = selectedOsmTracksForCrossing(crossing);
-    const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => ({
-      journeyRef: train.journeyRef || null,
-      journeyKey: train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`,
-      line: train.line,
-      category: train.category,
-      journeyNumber: train.journeyNumber,
-      route: train.route,
-      // Independent, conservative line-plan assignment. This is diagnostic only
-      // until real-world examples prove that OSM relation membership is unique.
-      lineAssignment: assignTrainToOsmTrack({
+    const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => {
+      const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
+      const lineAssignment = assignTrainToOsmTrack({
         line: train.line,
         category: train.category,
         route: train.route,
         selectedTracks: selectedOsmTracks,
-      }),
-      observationStation: train.observationStation || train.stationName || "",
-      result: await filterTrainByCrossingOsm(
+      });
+      const graphResult = await filterTrainByCrossingOsm(
         crossing.id,
         train.route,
         selectedOsmWayIds.length ? selectedOsmWayIds : undefined,
         train.observationStation || train.stationName || undefined,
-      ),
-    })));
+      );
+
+      // The prepared OSM line relations are the authoritative assignment
+      // between a service and the physical tracks selected for this crossing.
+      // The route graph may enrich that assignment with a directed distance,
+      // but an incomplete/ambiguous graph must not veto a unique line match.
+      const assignedWayId = lineAssignment.wayId == null ? "" : String(lineAssignment.wayId);
+      const assignmentIsSelected = Boolean(
+        lineAssignment.status === "matched" &&
+        assignedWayId &&
+        selectedOsmWayIds.includes(assignedWayId),
+      );
+      const graphConfirmsSameWay = graphResult.status === "matched" &&
+        String(graphResult.railwayWayId || "") === assignedWayId;
+      const result = assignmentIsSelected && !graphConfirmsSameWay
+        ? {
+            status: "matched" as const,
+            score: 1,
+            railwayWayId: assignedWayId,
+            reason: "matched-by-osm-line-relation",
+            directionLabel: Array.isArray(train.route) && train.route.length
+              ? `Richtung ${train.route[train.route.length - 1]}`
+              : undefined,
+            diagnostics: {
+              lineAssignment: {
+                relationId: lineAssignment.relationId,
+                lineRef: lineAssignment.lineRef,
+                direction: lineAssignment.direction,
+                reason: lineAssignment.reason,
+              },
+              graphResult: {
+                status: graphResult.status,
+                reason: graphResult.reason,
+              },
+            },
+          }
+        : graphConfirmsSameWay
+          ? graphResult
+          : graphResult;
+
+      return {
+        journeyRef: train.journeyRef || null,
+        journeyKey,
+        line: train.line,
+        category: train.category,
+        journeyNumber: train.journeyNumber,
+        route: train.route,
+        lineAssignment,
+        observationStation: train.observationStation || train.stationName || "",
+        result,
+      };
+    }));
     const osmReasonCounts = osmShadowResults.reduce((counts: Record<string, number>, item: any) => {
       const key = item.result.reason || item.result.status;
       counts[key] = (counts[key] || 0) + 1;
@@ -637,12 +679,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     });
 
     // A selected OSM track is a hard physical assignment boundary.
-    // Only a positive route through the selected crossing node on the selected
-    // physical way may release a train into the forecast. OSM line relations are
-    // useful diagnostics, but they describe a line's planned infrastructure
-    // membership and do not prove that this particular journey traverses this
-    // crossing. In particular, never promote an unknown graph result to matched
-    // merely because a line relation points at one of the selected ways.
+    // A unique line-relation assignment to one of those selected ways is a
+    // positive physical-track match. The route graph is an optional enrichment
+    // for directed distance; it is not allowed to veto that OSM assignment.
+    // Ambiguous or unknown line assignments still require a positive graph match.
     const rejectedJourneyRefs = new Set(osmShadowResults
       .filter((item) => item.journeyKey && item.result.status === "rejected")
       .map((item) => String(item.journeyKey)));
