@@ -81,6 +81,7 @@ export function getOpenBoardsForecastTrains(
   crossing: any,
   observations: OpenBoardsStationObservation[],
   lineHints: string[] = [],
+  diagnostics?: any[],
 ): any[] {
   const now = Date.now();
   const primaryEvas = new Set<string>((crossing.referenceStations || []).map(String));
@@ -94,9 +95,16 @@ export function getOpenBoardsForecastTrains(
       const name = index >= 0 ? observation.routeNames[index] : undefined;
       return name && !/^\\d{6,7}$/.test(name) ? name : eva;
     };
-    if (observation.cancelled || !lineMatches(observation.line, observation.category, lineHints)) continue;
+    const inspectJourney = Number(observation.journeyNumber) === 20374 && /RB61/i.test(observation.line);
+    if (observation.cancelled || !lineMatches(observation.line, observation.category, lineHints)) {
+      if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva: observation.evaNumber, skip: observation.cancelled ? "cancelled" : "line-filtered" });
+      continue;
+    }
     const eventAt = Date.parse(observation.eventTime);
-    if (!Number.isFinite(eventAt) || eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) continue;
+    if (!Number.isFinite(eventAt) || eventAt < now - 60_000 || eventAt > now + 3 * 60 * 60_000) {
+      if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva: observation.evaNumber, skip: "outside-time-window", eventTime: observation.eventTime });
+      continue;
+    }
 
     const routeDirection = directionFromCrossingAnchors(crossing, observation.routeEvas, observation.routeNames);
 
@@ -135,12 +143,20 @@ export function getOpenBoardsForecastTrains(
     for (const rule of rules) {
       const eva = String(rule.observationEva || "").trim();
       if (!eva || observation.evaNumber !== eva) continue;
-      if (!lineMatches(observation.line, observation.category, [
+      const ruleLineMatches = lineMatches(observation.line, observation.category, [
         ...(Array.isArray(rule.lineHints) ? rule.lineHints : []),
         ...(Array.isArray(rule.categories) ? rule.categories : []),
         ...lineHints,
-      ])) continue;
-      if (!routeHasStation(observation, eva, String(rule.observationStation || ""))) continue;
+      ]);
+      if (!ruleLineMatches) {
+        if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva, skip: "rule-line-filtered" });
+        continue;
+      }
+      const stationPresent = routeHasStation(observation, eva, String(rule.observationStation || ""));
+      if (!stationPresent) {
+        if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva, skip: "observation-station-not-in-route", routeEvas: observation.routeEvas, routeNames: observation.routeNames });
+        continue;
+      }
       const configuredAnchors = Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : [];
       const relationPairs = lineRouteAnchorPairs(crossing, observation.line);
       // OpenBoards routes are partial. Prefer the configured corridor anchors
@@ -152,7 +168,11 @@ export function getOpenBoardsForecastTrains(
         hasOrderedRouteAnchors(observation, pair)
       );
       const hasRouteEvidence = hasConfiguredRouteEvidence || hasRelationRouteEvidence;
-      if (!hasRouteEvidence) continue;
+      if (!hasRouteEvidence) {
+        if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva, skip: "route-evidence-missing", configuredAnchors, relationPairs, routeEvas: observation.routeEvas, routeNames: observation.routeNames });
+        continue;
+      }
+      if (inspectJourney) diagnostics?.push({ journeyNumber: observation.journeyNumber, eva, accepted: true, configuredAnchors, relationPairs, routeEvas: observation.routeEvas, routeNames: observation.routeNames });
 
       const offset = Math.max(30, Number(rule.fallbackOffsetSeconds || 300));
       const crossingTime = new Date(eventAt + offset * 1000);
