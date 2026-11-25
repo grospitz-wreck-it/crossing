@@ -3,7 +3,7 @@ import type {ReactNode} from "react";
 import {usePathname} from "next/navigation";
 import {useEffect,useState} from "react";
 import styles from "./AdminShell.module.css";
-const groups=[{label:"ÜBERSICHT",items:[["/admin","Dashboard","⌂"]]},{label:"BETRIEB",items:[["/admin/crossings","Bahnübergänge","▤"],["/admin/measurements","Messungen","◷"]]},{label:"VERMARKTUNG",items:[["/admin/ads","Werbung & Kampagnen","▧"],["/admin/campaigns","Kampagnen-Setup","＋"]]},{label:"DATEN & SYSTEM",items:[["/admin/crossings/api","DB API & Verbrauch","⌁"],["/admin/crossings/forecasts","Prognosen","⌘"]]}] as const;
+type NavItem=[string,string,string];\ntype NavGroup={label:string;items:NavItem[]};\nconst groups:NavGroup[]=[{label:"ÜBERSICHT",items:[["/admin","Dashboard","⌂"]]},{label:"BETRIEB",items:[["/admin/crossings","Bahnübergänge","▤"],["/admin/measurements","Messungen","◷"]]},{label:"VERMARKTUNG",items:[["/admin/ads","Werbung & Kampagnen","▧"],["/admin/campaigns","Kampagnen-Setup","＋"]]},{label:"DATEN & SYSTEM",items:[["/admin/crossings/api","DB API & Verbrauch","⌁"],["/admin/crossings/forecasts","Prognosen","⌘"]]} ];
 export default function AdminShell({children}:{children:ReactNode}){
  const pathname=usePathname();
  const [campaignCount,setCampaignCount]=useState<number|null>(null);
