@@ -1,4 +1,5 @@
-"use client";\nimport styles from "./page.module.css";
+"use client";
+import styles from "./page.module.css";
 import CampaignDrawer from "./components/CampaignDrawer";
 import CampaignGrid from "./components/CampaignGrid";
 import {
