@@ -79,6 +79,7 @@ async function fetchDirectFeed(
 
 export async function fetchRelayPing(
   env: MobilithekEnv,
+  demand: DemandCrossing[],
 ): Promise<Record<string, unknown>> {
   const relayUrl = env.MOBILITHEK_RELAY_URL?.trim();
   const relayToken = env.MOBILITHEK_RELAY_TOKEN?.trim();
@@ -98,7 +99,7 @@ export async function fetchRelayPing(
       accept: "application/json",
       "x-mobilithek-ping": "1",
     },
-    body: "{}",
+    body: JSON.stringify({ demand }),
   });
 
   const body = await response.text();
@@ -218,8 +219,6 @@ export async function fetchRelayEvents(
     if (!batch.length) return;
     const items = batch.splice(0, batch.length);
     if (onEvents) await onEvents(items);
-    const items = batch.splice(0, batch.length);
-    await onEvents(items);
   };
   const consumeLine = async (line: string) => {
     const trimmed = line.trim();

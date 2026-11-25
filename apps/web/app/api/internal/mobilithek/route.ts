@@ -290,6 +290,27 @@ export async function POST(request: Request) {
       return Response.json({ error: "Demand is required" }, { status: 400 });
     }
 
+    const ping =
+      request.headers.get("x-mobilithek-ping") === "1" ||
+      new URL(request.url).searchParams.get("ping") === "1";
+
+    if (ping) {
+      return Response.json(
+        {
+          status: "ok",
+          mode: "read-only-ping",
+          demandCount: demand.length,
+        },
+        {
+          status: 200,
+          headers: {
+            "Cache-Control": "no-store",
+            "X-Mobilithek-Diagnostic": "1",
+          },
+        },
+      );
+    }
+
     const diagnostic =
       body?.mode === "diagnostic" ||
       request.headers.get("x-mobilithek-diagnostic") === "1" ||

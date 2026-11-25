@@ -252,7 +252,7 @@ export default {
           const startedAt = Date.now();
 
           try {
-            const result = await fetchRelayPing(env);
+            const result = await fetchRelayPing(env, demand);
 
             return Response.json({
               status: "ok",
