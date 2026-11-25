@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { diagnoseStationToCrossingDistance } from "../../../../../lib/crossingOsmFilter";
 import { db } from "../../../../../lib/db";
-import { crossings as staticCrossings } from "../../../../../../../packages/crossing-model/src/crossings";
+import { crossings as staticCrossings } from "../../../../../../../../packages/crossing-model/src/crossings";
 
 /**
  * Read-only diagnostic: OSM rail-network distance from one station EVA to
