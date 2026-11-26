@@ -129,6 +129,7 @@ const [data, setData] =
   useState<any>(null);
   const [ads, setAds] =
     useState<any[]>([]);
+  const [contentItems, setContentItems] = useState<any[]>([]);
 
   const [currentAdIndex, setCurrentAdIndex] =
     useState(0);
@@ -185,6 +186,7 @@ activeIdRef.current = activeId;
 const statusCacheRef = useRef<Map<string, any>>(new Map());
 const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
 const adCacheRef = useRef<Map<string, any[]>>(new Map());
+const contentCacheRef = useRef<Map<string, any[]>>(new Map());
 
 async function load(crossingId: string | null = activeIdRef.current, force = false) {
   if (!crossingId) return;
@@ -194,6 +196,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
     if (activeIdRef.current === crossingId) {
       setData(cached);
       setAds(adCacheRef.current.get(crossingId) || []);
+      setContentItems(contentCacheRef.current.get(crossingId) || []);
     }
     return;
   }
@@ -203,9 +206,10 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
 
   const request = (async () => {
     try {
-      const [statusRes, adRes] = await Promise.all([
+      const [statusRes, adRes, contentRes] = await Promise.all([
         fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }),
         fetch(`/api/ads/${crossingId}`, { cache: "no-store" }),
+        fetch(`/api/content/${crossingId}`, { cache: "no-store" }),
       ]);
       if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
 
@@ -218,10 +222,17 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
         adList = Array.isArray(list) ? list : [];
       }
       adCacheRef.current.set(crossingId, adList);
+      let editorialItems: any[] = [];
+      if (contentRes.ok) {
+        const list = await contentRes.json();
+        editorialItems = Array.isArray(list) ? list : [];
+      }
+      contentCacheRef.current.set(crossingId, editorialItems);
 
       if (activeIdRef.current === crossingId) {
         setData(json);
         setAds(adList);
+        setContentItems(editorialItems);
         setCurrentAdIndex(0);
       }
     } catch (error) {
@@ -229,6 +240,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
       if (activeIdRef.current === crossingId) {
         setData({ error: true, state: "UNKNOWN", phase: null, closures: [], trains: [], trainCount: 0 });
         setAds([]);
+        setContentItems([]);
       }
     } finally {
       if (statusInFlightRef.current.get(crossingId) === request) {
@@ -349,6 +361,7 @@ const wakeLockRef =
   if (!activeId) {
     setData(null);
     setAds([]);
+    setContentItems([]);
     setCurrentAdIndex(0);
     return;
   }
@@ -356,6 +369,7 @@ const wakeLockRef =
   const cached = statusCacheRef.current.get(activeId);
   setData(cached || null);
   setAds(adCacheRef.current.get(activeId) || []);
+  setContentItems([]);
   setCurrentAdIndex(0);
   setShowMoreTrains(false);
   setPendingEvent(null);
@@ -777,6 +791,31 @@ return (
       </button>
     )}
   </section>
+
+
+  {contentItems.length > 0 && (
+    <section className="editorialContent" aria-label="Aktuelle Informationen">
+      {contentItems.map((item: any) => {
+        const card = (
+          <>
+            <div className="editorialContentTop">
+              <span className="editorialContentIcon" style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}>{item.icon || "✨"}</span>
+              <span className="editorialContentType">{item.content_type === "local_news" ? "Lokal informiert" : item.content_type === "event" ? "Veranstaltung" : item.content_type === "partner" ? "Partner" : item.content_type === "onboarding" ? "Gut zu wissen" : "Tipp"}</span>
+            </div>
+            {item.image_url && <img className="editorialContentImage" src={item.image_url} alt="" loading="lazy" />}
+            <h2>{item.title}</h2>
+            {item.summary && <p>{item.summary}</p>}
+            {item.action_type === "open_url" && item.action_url && <span className="editorialContentAction">Mehr erfahren <span aria-hidden="true">↗</span></span>}
+          </>
+        );
+        return item.action_type === "open_url" && item.action_url ? (
+          <a className="editorialContentCard" key={item.id} href={item.action_url} target="_blank" rel="noopener noreferrer" style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</a>
+        ) : (
+          <article className="editorialContentCard" key={item.id} style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</article>
+        );
+      })}
+    </section>
+  )}
 
 {message && (
   <div
