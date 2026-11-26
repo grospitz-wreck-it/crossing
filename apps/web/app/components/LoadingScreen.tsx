@@ -2,7 +2,9 @@
 
 import styles from "./LoadingScreen.module.css";
 
-export default function LoadingScreen() {
+type LoadingScreenProps = { message?: string; detail?: string };
+
+export default function LoadingScreen({ message, detail }: LoadingScreenProps) {
   return (
     <main className={styles.loadingScreen}>
       <div className={styles.loadingOverlay} />
@@ -11,6 +13,8 @@ export default function LoadingScreen() {
         alt="Meine Schranke"
         className={styles.loadingLogo}
       />
+      {message && <p className={styles.loadingMessage}>{message}</p>}
+      {detail && <p className={styles.loadingDetail}>{detail}</p>}
       <div className={styles.loadingBar}>
         <div className={styles.loadingBarFill} />
       </div>
