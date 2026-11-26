@@ -11,7 +11,7 @@ type NavGroup = { label: string; items: NavItem[] };
 const groups: NavGroup[] = [
   { label: "ÜBERSICHT", items: [["/admin", "Dashboard", "home"]] },
   { label: "BETRIEB", items: [["/admin/crossings", "Bahnübergänge", "railway"], ["/admin/measurements", "Messungen", "clock"]] },
-  { label: "VERMARKTUNG", items: [["/admin/ads", "Werbung & Kampagnen", "megaphone"], ["/admin/customers", "Kunden", "users"]] },
+  { label: "VERMARKTUNG", items: [["/admin/ads", "Werbung & Kampagnen", "megaphone"], ["/admin/content", "Content-Studio", "pencil"], ["/admin/customers", "Kunden", "users"]] },
   { label: "DATEN & SYSTEM", items: [["/admin/crossings/api", "DB API & Verbrauch", "activity"], ["/admin/crossings/forecasts", "Prognosen", "chart"]] },
 ];
 
@@ -51,9 +51,7 @@ export default function AdminShell({ children }: { children: ReactNode }) {
     </aside>
     <div className={styles.workspace}>
       <header className={styles.topbar}>
-        <div><span>MEINESCHRANKE</span><b>/</b><strong>
-          {activeItem?.[1] || "Administration"}
-        </strong></div>
+        <div><span>MEINESCHRANKE</span><b>/</b><strong>{activeItem?.[1] || "Administration"}</strong></div>
         <a href="/admin">Zur Übersicht <AdminIcon name="arrow-up-right" size={13} /></a>
       </header>
       <main className={styles.content}>{children}</main>
