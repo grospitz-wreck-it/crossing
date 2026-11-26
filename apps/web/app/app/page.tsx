@@ -141,6 +141,8 @@ const [data, setData] =
     setShowMoreTrains,
   ] = useState(false);
 
+  const [showAllClosures, setShowAllClosures] = useState(false);
+
   const [
     measurementState,
     setMeasurementState,
@@ -710,353 +712,71 @@ return (
       />
     </a>
 )}
-  <div className="trainCard">
-
-  <div className="trainLabel">
-  Nächste Schließphase
-</div>
-
-<div className="closureSummary">
-
-  <div className="closureTime">
-
-    {formatIsoTime(
-      data.phase?.start
-    )}
-
-    {" bis "}
-
-    {formatIsoTime(
-      data.phase?.end
-    )}
-
-  </div>
-
-  <div className="closureFacts">
-
-    <div className="closureFact">
-
-      ⏱
-
-      <strong>
-        {
-          data.phase
-            ?.durationMinutes
-        }
-      </strong>
-
-      <span>
-        Min.
-      </span>
-
-    </div>
-
-    <div className="closureFact">
-
-      🚆
-
-      <strong>
-        {
-          data.phase
-            ?.trainCount
-        }
-      </strong>
-
-      <span>
-        {data.phase
-          ?.trainCount === 1
-          ? "Zug"
-          : "Züge"}
-
-      </span>
-
-    </div>
-
-  </div>
-
-</div>
-
-  <div className="trainHeader">
-
-    <div className="trainMain">
-
-      <div className="trainLineRow">
-
-  <div className="trainLine">
-
-    {
-      data.phase
-        ?.trains?.[0]
-        ?.line
-    }
-
-
-
-  </div>
-
-  {data.phase?.trains?.[0]
-    ?.delayMinutes > 0 && (
-    <span className="delayChipInline">
-      +
-      {
-        data.phase
-          ?.trains?.[0]
-          ?.delayMinutes
-      }
-    </span>
-  )}
-
-</div>
-
-      <div className="trainDirection">
-  {data.phase?.trains?.[0]?.directionLabel}
-</div>
-
-<div className="trainMeta">
-  {data.phase?.trains?.[0]?.platform && (
-    <>
-      Gleis {data.phase.trains[0].platform}
-    </>
-  )}
-
-  {data.phase?.trains?.[0]?.delayMinutes > 0 && (
-    <>
-      {" · +"}
-      {data.phase.trains[0].delayMinutes} Min.
-    </>
-  )}
-</div>
-
-    </div>
-
-    <div className="etaCard">
-
-      <div className="etaLabel">
-        passiert in
+  <section className="upcomingClosures" aria-labelledby="upcomingClosuresTitle">
+    <div className="upcomingClosuresHeading">
+      <div>
+        <div className="upcomingClosuresTitleRow">
+          <span className="upcomingClosuresIcon" aria-hidden="true">▦</span>
+          <h2 id="upcomingClosuresTitle">Kommende Schließzeiten</h2>
+        </div>
+        <p>Die nächsten erwarteten Schrankenschließungen</p>
       </div>
-
-      <div className="etaValue">
-        {Math.max(
-          1,
-          Math.round(
-            (
-              data.phase
-                ?.trains?.[0]
-                ?.etaSeconds || 0
-            ) / 60
-          )
-        )}
-        <span className="etaUnit">
-          Min
-        </span>
-      </div>
-
+      <span className="upcomingLive"><span /> Live-Prognose</span>
     </div>
 
-  </div>
-
-
-
-{data.phase?.trains?.length > 1 && (
-  <>
-
-    <button
-  className="expandButton"
-  onClick={() =>
-    setShowMoreTrains(
-      !showMoreTrains
-    )
-  }
->
-  <span>
-    {showMoreTrains
-      ? "⌃"
-      : "⌄"}
-  </span>
-
-  <span>
-    Weitere Züge dieser
-    Schließphase
-  </span>
-
-  <div className="expandCount">
-    +
-    {data.phase.trains.length - 1}
-  </div>
-</button>
-
-    {showMoreTrains && (
-      <div className="extraTrains">
-
-        {data.phase.trains
-          .slice(1)
-          .map((train) => (
-            <div
-              key={
-                train.id
-              }
-              className="extraTrain"
+    {Array.isArray(data.closures) && data.closures.length > 0 ? (
+      <div className="upcomingClosureList">
+        {(showAllClosures ? data.closures : data.closures.slice(0, 3)).map((closure: any, index: number) => {
+          const minutesUntil = Math.max(0, Math.round((new Date(closure.start).getTime() - now) / 60000));
+          const closureTrains = Array.isArray(closure.trains) ? closure.trains : [];
+          return (
+            <article
+              key={`${closure.start}-${closure.end}`}
+              className={`upcomingClosureRow ${index === 0 ? "upcomingClosurePrimary" : ""}`}
             >
-
-              <div>
-
-  <div className="extraTrainHeader">
-
-  <div className="extraTrainLine">
-    {train.line}
-  </div>
-
-  <div className="extraTrainDelay">
-    {train.delayMinutes > 0
-      ? `+${train.delayMinutes}`
-      : ""}
-  </div>
-
-</div>
-
-  <div className="extraTrainRoute">
-    {train.directionLabel}
-  </div>
-
-  <div className="extraTrainMeta">
-
-  {train.platform && (
-    <>Gleis {train.platform}</>
-  )}
-
-</div>
-
-</div>
-              <div>
-                {formatIsoTime(
-                  train.crossingTime
-                )}
+              <div className="upcomingClosureTime">
+                <strong>{formatIsoTime(closure.start)}</strong>
+                <span>{formatIsoTime(closure.end)}</span>
               </div>
 
-            </div>
-          ))}
+              <div className="upcomingClosureDetails">
+                <div className="upcomingClosureMeta">
+                  <span>{closure.durationMinutes} Min. Schließzeit</span>
+                  <span>{closure.trainCount} {closure.trainCount === 1 ? "Zug" : "Züge"}</span>
+                </div>
+                <div className="upcomingClosureTrains">
+                  {closureTrains.map((closureTrain: any, trainIndex: number) => (
+                    <div className="upcomingClosureTrain" key={closureTrain.id || `${closureTrain.line}-${closureTrain.crossingTime}-${trainIndex}`}>
+                      <strong>{closureTrain.line || "Linie nicht verfügbar"}</strong>
+                      <span>{closureTrain.directionLabel || "Richtung nicht verfügbar"}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
+              <div className="upcomingClosureEta">
+                {index === 0 && minutesUntil === 0 ? "Demnächst" : `In ${minutesUntil} Min.`}
+              </div>
+            </article>
+          );
+        })}
       </div>
+    ) : (
+      <div className="upcomingClosuresEmpty">Aktuell sind keine weiteren Schließzeiten prognostiziert.</div>
     )}
 
-  </>
-)}
-</div>
-
-{data.closures &&
-  data.closures.length > 1 && (
-    <>
-
-      <div className="laterHeading">
-        Später
-      </div>
-
-      <div className="closureList">
-
-        {data.closures
-          .slice(1)
-          .map(
-            (
-              closure: any,
-              index: number
-            ) => (
-              <div
-                key={index}
-                className="closureCard"
-              >
-
-                <div className="closureCardTop">
-
-                  <div className="closureCardTime">
-
-                    {formatIsoTime(
-                      closure.start
-                    )}
-
-                    {" bis "}
-
-                    {formatIsoTime(
-                      closure.end
-                    )}
-
-                  </div>
-
-                  <div className="closureCardMeta">
-
-                    ⏱{" "}
-                    {
-                      closure.durationMinutes
-                    }{" "}
-                    Min.
-
-                    {" • "}
-
-                    🚆{" "}
-                    {
-                      closure.trainCount
-                    }
-
-                  </div>
-
-                </div>
-
-                <div className="closureCardTrains">
-
-                  {closure.trains.map(
-  (train: any) => (
-    <div
-      key={train.id}
-      className="closureTrain"
-    >
-
-      <div className="closureTrainInfo">
-
-        <div className="closureTrainLine">
-          {train.line}
-        </div>
-
-        <div className="closureTrainDirection">
-          {train.directionLabel}
-        </div>
-
-        <div className="closureTrainPlatform">
-          {train.platform
-            ? `Gleis ${train.platform}`
-            : ""}
-        </div>
-
-      </div>
-
-      <div className="closureTrainRight">
-
-        <span className="closureTrainTime">
-          {formatIsoTime(
-            train.crossingTime
-          )}
-        </span>
-
-        <span className="closureTrainDelay">
-          {train.delayMinutes > 0
-            ? `+${train.delayMinutes}`
-            : ""}
-        </span>
-
-      </div>
-
-    </div>
-  )
-)}
-
-                </div>
-
-              </div>
-            )
-          )}
-
-      </div>
-
-    </>
-)}
+    {Array.isArray(data.closures) && data.closures.length > 3 && (
+      <button
+        type="button"
+        className="upcomingClosuresToggle"
+        onClick={() => setShowAllClosures((value) => !value)}
+        aria-expanded={showAllClosures}
+      >
+        {showAllClosures ? "Weniger anzeigen" : "Alle Schließzeiten anzeigen"}
+        <span aria-hidden="true">{showAllClosures ? "⌃" : "⌄"}</span>
+      </button>
+    )}
+  </section>
 
 {message && (
   <div
