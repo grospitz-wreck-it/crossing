@@ -1,4 +1,5 @@
 import { directionFromCrossingAnchors } from "./directionFromCrossingAnchors";
+import { isRailService } from "./isRailService";
 
 export type SnapshotPrimaryTrain = {
   line: string;
@@ -144,6 +145,9 @@ export async function getSnapshotPrimaryTrains(
   const candidates: SnapshotPrimaryTrain[] = [];
 
   for (const row of rows || []) {
+    // Do not let bus journeys in the shared Mobilithek snapshot create
+    // primary train candidates for railway crossings.
+    if (!isRailService({ line: row.line, category: row.category })) continue;
     const calls = parseJson(row.calls_json, []);
     if (!Array.isArray(calls) || !calls.length) continue;
 
