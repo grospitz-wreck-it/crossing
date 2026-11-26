@@ -41,7 +41,7 @@ export default function AppleIcon() {
               background: "#d92d20",
               transform: "rotate(-28deg)",
               display: "flex",
-              justifyContent: "space-evenly",
+              justifyContent: "space-around",
               overflow: "hidden",
             }}
           >
