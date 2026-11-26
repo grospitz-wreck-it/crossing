@@ -14,10 +14,18 @@ export default function LoadingScreen({ message, detail }: LoadingScreenProps) {
           alt="Meine Schranke"
           className={styles.loadingLogo}
         />
-        {message && <p className={styles.loadingMessage}>{message}</p>}
-        {detail && <p className={styles.loadingDetail}>{detail}</p>}
-        <div className={styles.loadingBar} aria-label="Schranke öffnet sich">
+
+        <div className={styles.loadingBar} aria-label="Schranken-Animation">
           <div className={styles.loadingBarFill} />
+        </div>
+
+        <div className={styles.loadingCopy}>
+          <span className={styles.loadingEyebrow}>Einen Moment bitte</span>
+          {message && <p className={styles.loadingMessage}>{message}</p>}
+          {detail && <p className={styles.loadingDetail}>{detail}</p>}
+          <div className={styles.loadingProgress} aria-hidden="true">
+            <span />
+          </div>
         </div>
       </div>
     </main>
