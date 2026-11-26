@@ -92,10 +92,32 @@ async function loadStationCatalog() {
   if (stationCatalogPromise) return stationCatalogPromise;
   stationCatalogPromise = (async () => {
     try {
-      const result = await db.execute({ sql: `SELECT eva, name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`, args: [] });
-      console.info(`[STATION CATALOG] source=web mode=full-scan rows=${result.rows.length}`);
+      let rows: any[] = [];
+      let source = "compact-cache";
+      try {
+        const compact = await db.execute({
+          sql: `SELECT payload_json FROM railway_station_catalog_route_cache WHERE id = 1 LIMIT 1`,
+          args: [],
+        });
+        const payload = compact.rows[0]?.payload_json;
+        const parsed = payload ? JSON.parse(String(payload)) : [];
+        if (Array.isArray(parsed)) rows = parsed;
+      } catch {
+        // The compact lookup table is introduced by migration 011. Keep a
+        // bounded compatibility fallback until that migration is applied.
+        source = "legacy-fallback";
+      }
+      if (!rows.length) {
+        const result = await db.execute({
+          sql: `SELECT eva, name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`,
+          args: [],
+        });
+        rows = result.rows as any[];
+        source = "full-scan";
+      }
+      console.info(`[STATION CATALOG] source=web mode=${source} rows=${rows.length}`);
       const byName = new Map<string, RouteStation>();
-      for (const row of result.rows as any[]) {
+      for (const row of rows) {
         const name = String(row.name || "");
         const normalized = normalizeStationName(name);
         if (!normalized || byName.has(normalized)) continue;
