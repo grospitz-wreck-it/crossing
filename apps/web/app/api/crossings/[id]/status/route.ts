@@ -860,14 +860,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       // Only call a route "unrelated" when it contains explicit station
       // evidence and none of that evidence overlaps the configured corridor.
       // Missing/short routes remain inconclusive and are never shadow-skipped.
-      const wouldSkip = normalizedRoute.length >= 2 && matchedAnchors.length === 0 && !observationMatches;
+      const graphWasCalled = item.performance?.graphCalled === true;
+      const routeLooksUnrelated = normalizedRoute.length >= 2 && matchedAnchors.length === 0 && !observationMatches;
+      const wouldSkip = graphWasCalled && routeLooksUnrelated;
       const resultKey = String(item.result?.status || "unknown");
       const resultCounts = osmRouteRelevanceShadow.byOsmResult[resultKey] ||
         (osmRouteRelevanceShadow.byOsmResult[resultKey] = { wouldSkip: 0, wouldKeep: 0 });
       if (wouldSkip) {
         osmRouteRelevanceShadow.wouldSkip += 1;
         resultCounts.wouldSkip += 1;
-      } else {
+      } else if (graphWasCalled) {
         osmRouteRelevanceShadow.wouldKeep += 1;
         resultCounts.wouldKeep += 1;
       }
@@ -881,7 +883,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           routeLength: normalizedRoute.length,
           matchedAnchors: [...new Set(matchedAnchors)],
           observationStationMatched: observationMatches,
-          decision: wouldSkip ? "would-skip-graph-shadow-only" : "keep",
+          graphWasCalled,
+          decision: wouldSkip ? "would-skip-graph-shadow-only" : graphWasCalled ? "keep" : "graph-already-skipped",
         });
       }
     }
