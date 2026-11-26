@@ -627,12 +627,25 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         route: train.route,
         selectedTracks: selectedOsmTracks,
       });
-      const graphResult = await filterTrainByCrossingOsm(
-        crossing.id,
-        train.route,
-        selectedOsmWayIds.length ? selectedOsmWayIds : undefined,
-        train.observationStation || train.stationName || undefined,
+      // A unique OSM line-relation assignment to an explicitly selected
+      // physical way is already a positive match. In that case the graph
+      // matcher can only add directed-distance metadata; it cannot change the
+      // selected-track decision. Skip the expensive station snapping and
+      // shortest-path work for these candidates. Ambiguous/unknown assignments
+      // still go through the graph so topology can resolve or reject them.
+      const graphCanBeSkipped = Boolean(
+        rawLineAssignment.status === "matched" &&
+        rawLineAssignment.wayId != null &&
+        selectedOsmWayIds.includes(String(rawLineAssignment.wayId)),
       );
+      const graphResult = graphCanBeSkipped
+        ? { status: "unknown" as const, reason: "skipped-after-selected-line-assignment" }
+        : await filterTrainByCrossingOsm(
+            crossing.id,
+            train.route,
+            selectedOsmWayIds.length ? selectedOsmWayIds : undefined,
+            train.observationStation || train.stationName || undefined,
+          );
 
       // If several OSM ways carry the same forward line relation, use the
       // prepared crossing topology as the final physical discriminator. Only
