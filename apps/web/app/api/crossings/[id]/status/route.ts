@@ -360,7 +360,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // station links, or global timing settings. This reduces a warm status hit
   // to one indexed cache-row read instead of several config reads.
   const cacheKey = `status:${id}${includeOsmDetails ? ":osm-debug" : ""}`;
-  const cached = includeComparisonDetails
+  const cached = includeComparisonDetails || includePerformanceDetails
     ? null
     : await readCrossingForecastCache<any>(cacheKey, 60_000);
   if (cached) {
