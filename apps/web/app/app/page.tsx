@@ -136,7 +136,6 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
     startX.current = event.clientX;
     startY.current = event.clientY;
     pointerId.current = event.pointerId;
-    event.currentTarget.setPointerCapture(event.pointerId);
     event.stopPropagation();
   }
 
@@ -210,9 +209,9 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
               </>
             );
             return item.action_type === "open_url" && item.action_url ? (
-              <a className="editorialContentCard" key={item.id} href={item.action_url} target="_blank" rel="noopener noreferrer" style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</a>
+              <a className="editorialContentCard" key={item.id} style={{ width: `${slideWidth}%` }} href={item.action_url} target="_blank" rel="noopener noreferrer" style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</a>
             ) : (
-              <article className="editorialContentCard" key={item.id} style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</article>
+              <article className="editorialContentCard" key={item.id} style={{ width: `${slideWidth}%`, borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</article>
             );
           })}
         </div>
