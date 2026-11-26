@@ -42,7 +42,7 @@ export default function Icon() {
               transform: "rotate(-28deg)",
               display: "flex",
               alignItems: "center",
-              justifyContent: "space-evenly",
+              justifyContent: "space-around",
               overflow: "hidden",
             }}
           >
