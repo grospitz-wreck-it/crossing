@@ -238,10 +238,13 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
 }
 
 export default function Home() {
-const { activeId } = useCrossings();
+const { activeId, saved } = useCrossings();
 
 const [data, setData] =
   useState<any>(null);
+const [bootstrapLoading, setBootstrapLoading] = useState(true);
+const [bootstrapProgress, setBootstrapProgress] = useState(0);
+const [isSwitchingCrossing, setIsSwitchingCrossing] = useState(false);
   const [ads, setAds] =
     useState<any[]>([]);
   const [contentItems, setContentItems] = useState<any[]>([]);
@@ -346,6 +349,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
 
       if (activeIdRef.current === crossingId) {
         setData(json);
+        setIsSwitchingCrossing(false);
         setAds(adList);
         setContentItems(editorialItems);
         setCurrentAdIndex(0);
@@ -354,6 +358,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
       console.error(`Failed to load crossing ${crossingId}:`, error);
       if (activeIdRef.current === crossingId) {
         setData({ error: true, state: "UNKNOWN", phase: null, closures: [], trains: [], trainCount: 0 });
+        setIsSwitchingCrossing(false);
         setAds([]);
         setContentItems([]);
       }
@@ -473,6 +478,28 @@ const wakeLockRef =
   }
 
   useEffect(() => {
+  if (!saved.length) {
+    if (!activeId) setBootstrapLoading(false);
+    return;
+  }
+
+  let cancelled = false;
+  setBootstrapLoading(true);
+  setBootstrapProgress(0);
+
+  void Promise.all(saved.map(async (crossing) => {
+    await load(crossing.id, false);
+    if (!cancelled) {
+      setBootstrapProgress((current) => current + 1);
+    }
+  })).finally(() => {
+    if (!cancelled) setBootstrapLoading(false);
+  });
+
+  return () => { cancelled = true; };
+}, [saved]);
+
+useEffect(() => {
   if (!activeId) {
     setData(null);
     setAds([]);
@@ -482,9 +509,17 @@ const wakeLockRef =
   }
 
   const cached = statusCacheRef.current.get(activeId);
-  setData(cached || null);
+  if (cached) {
+    setData(cached);
+    setIsSwitchingCrossing(false);
+  } else if (data) {
+    // Keep the previous crossing visible while the new one is loading.
+    setIsSwitchingCrossing(true);
+  } else {
+    setIsSwitchingCrossing(false);
+  }
   setAds(adCacheRef.current.get(activeId) || []);
-  setContentItems([]);
+  setContentItems(contentCacheRef.current.get(activeId) || []);
   setCurrentAdIndex(0);
   setShowMoreTrains(false);
   setPendingEvent(null);
@@ -644,8 +679,13 @@ useEffect(() => {
   };
 }, [data, activeId]);
 
-if (!data) {
-  return <LoadingScreen />;
+if (!data || bootstrapLoading) {
+  return (
+    <LoadingScreen
+      message="Deine gespeicherten Bahnübergänge werden vorbereitet"
+      detail={saved.length ? `Daten für ${Math.min(bootstrapProgress, saved.length)} von ${saved.length} Bahnübergängen geladen` : undefined}
+    />
+  );
 }
 
 if (!data.phase || !data.phase.trains?.length) {
@@ -907,6 +947,40 @@ return (
     )}
   </section>
 
+
+  {isSwitchingCrossing && (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label="Bahnübergang wird geladen"
+      style={{
+        position: "fixed",
+        zIndex: 60,
+        top: "calc(env(safe-area-inset-top, 0px) + 14px)",
+        left: "50%",
+        transform: "translateX(-50%)",
+        display: "flex",
+        alignItems: "center",
+        gap: 9,
+        padding: "10px 14px",
+        borderRadius: 999,
+        background: "rgba(20, 32, 48, .92)",
+        color: "#fff",
+        boxShadow: "0 8px 28px rgba(0,0,0,.2)",
+        fontSize: 13,
+        fontWeight: 600,
+        backdropFilter: "blur(10px)",
+      }}
+    >
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,.28)" strokeWidth="3" />
+        <path d="M21 12a9 9 0 0 0-9-9" stroke="#fff" strokeWidth="3" strokeLinecap="round">
+          <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur=".8s" repeatCount="indefinite" />
+        </path>
+      </svg>
+      Schranke wird geladen
+    </div>
+  )}
 
   {contentItems.length > 0 && (
     <EditorialNewsCarousel items={contentItems} />

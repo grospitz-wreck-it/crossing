@@ -8,6 +8,41 @@ import { crossings as staticCrossings } from "../../../../../../../packages/cros
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
 import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 import { assignTrainToOsmTrack } from "../../../../../../../packages/crossing-model/src/osmLineMatching";
+import { isRailService } from "../../../../../../../packages/db-api-client/src/isRailService";
+
+// Multiple saved crossings are initialized concurrently when the app starts.
+// Reuse the same bounded Mobilithek snapshot read across those requests in a
+// warm server instance; crossing-specific matching remains isolated below.
+let sharedSnapshotRowsCache: { rows: any[]; expiresAt: number } | null = null;
+let sharedSnapshotRowsPromise: Promise<any[]> | null = null;
+
+async function getSharedSnapshotRows(): Promise<any[]> {
+  if (sharedSnapshotRowsCache && sharedSnapshotRowsCache.expiresAt > Date.now()) {
+    return sharedSnapshotRowsCache.rows;
+  }
+  if (sharedSnapshotRowsPromise) return sharedSnapshotRowsPromise;
+
+  sharedSnapshotRowsPromise = (async () => {
+    const from = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const to = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
+    const result = await db.execute({
+      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
+             FROM mobilithek_train_snapshot
+             WHERE actual_time >= ? AND actual_time <= ?
+             ORDER BY actual_time DESC
+             LIMIT 1500`,
+      args: [from, to],
+    });
+    const rows = result.rows as any[];
+    sharedSnapshotRowsCache = { rows, expiresAt: Date.now() + 15_000 };
+    return rows;
+  })().finally(() => {
+    sharedSnapshotRowsPromise = null;
+  });
+
+  return sharedSnapshotRowsPromise!;
+}
+
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { const parsed = value ? JSON.parse(String(value)) : []; return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
 function jsonValue(value: unknown, fallback: any = {}) { if (value && typeof value === "object") return value; try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; } }
@@ -355,13 +390,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const debugMode = new URL(request.url).searchParams.get("debug");
   const includeOsmDetails = debugMode === "osm";
   const includeComparisonDetails = debugMode === "compare";
+  const includePerformanceDetails = debugMode === "perf";
+  const requestStartedAt = Date.now();
+  const performanceTimings: Record<string, number> = {};
+  const markPerformance = (name: string) => { performanceTimings[name] = Date.now() - requestStartedAt; };
   // Fast path: serve the last computed status before loading crossing config,
   // station links, or global timing settings. This reduces a warm status hit
   // to one indexed cache-row read instead of several config reads.
   const cacheKey = `status:${id}${includeOsmDetails ? ":osm-debug" : ""}`;
-  const cached = includeComparisonDetails
+  const cached = includeComparisonDetails || includePerformanceDetails
     ? null
     : await readCrossingForecastCache<any>(cacheKey, 60_000);
+  markPerformance("cacheReadCompleteMs");
   if (cached) {
     return Response.json(cached, {
       headers: { "X-Crossing-Status-Cache": "HIT" },
@@ -369,6 +409,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 
   let crossing = await loadCrossing(id);
+  markPerformance("crossingConfigLoadedMs");
   if (!crossing) {
     // Explicit aliases for legacy IDs still stored by older app clients.
     // Do not infer these from EVA: multiple database crossings can share one station.
@@ -423,7 +464,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds);
   // Keep a short-lived previous forecast as a safety net when one snapshot poll
   // temporarily loses a journey. Explicit OSM rejections are never resurrected.
-  const previousForecast = await readCrossingForecastCache<any>(cacheKey,90_000);
+  // Keep a prior forecast long enough to bridge a transient source omission.
+  // The active closure itself is still bounded by its original predicted end.
+  const previousForecast = await readCrossingForecastCache<any>(cacheKey,5 * 60_000);
+  markPerformance("previousForecastReadMs");
   const lineHints=lineHintsForCrossing(crossing);
   // When a crossing has an explicitly selected physical OSM track, station
   // line hints must not pre-filter its trains. The track topology, not a
@@ -448,22 +492,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // One bounded Mobilithek read feeds both primary-stop and through-route
     // detection. The time index supports newest-first retrieval without sorting
     // the full snapshot table; all candidate matching then happens in memory.
-    const snapshotFrom = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
-    const snapshotTo = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
-    const snapshotResult = await db.execute({
-      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
-             FROM mobilithek_train_snapshot
-             WHERE actual_time >= ? AND actual_time <= ?
-             ORDER BY actual_time DESC
-             LIMIT 1500`,
-      args: [snapshotFrom, snapshotTo],
-    });
-    const snapshotRows = snapshotResult.rows as any[];
+    const snapshotRows = await getSharedSnapshotRows();
+    markPerformance("snapshotQueryCompleteMs");
 
     // PRIMARY: only explicitly declared reference stations.
     const primarySnapshot=await getSnapshotPrimaryTrains(db,crossing,snapshotRows);
     // SECONDARY: through candidates are derived from the exact same snapshot rows.
     const throughSnapshot=await getSnapshotThroughTrains(db,crossing,snapshotRows);
+    markPerformance("snapshotMatchingCompleteMs");
     const realtimeEvas = Array.from(new Set([
       ...primaryEvas,
       ...(crossing.throughRules || []).map((rule: any) => String(rule.observationEva || "").trim()),
@@ -593,10 +629,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       t,
     ])).values());
     const enrichedTrains = await addStationNames(db, unique);
+    markPerformance("candidateEnrichmentCompleteMs");
 
     // Evaluate each journey against this crossing's explicitly selected OSM ways.
     // The result is used below as a real assignment decision, not merely telemetry.
-    const osmShadowCandidates = Array.from(new Map(
+    const osmShadowCandidatePool = Array.from(new Map(
       [
         ...(primarySnapshot || []),
         ...(throughSnapshot || []),
@@ -605,6 +642,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
         .map((train: any) => [train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`, train]),
     ).values());
+    // Final safety prefilter also covers OpenBoards-only candidates. It is
+    // deliberately conservative: only ambiguous S-labelled services with
+    // multiple explicit bus-stop markers are removed; uncertain cases continue
+    // to the OSM matcher.
+    const osmShadowCandidates = osmShadowCandidatePool.filter((train: any) =>
+      isRailService({ line: train.line, category: train.category, route: train.route }),
+    );
+    const osmPrefilter = {
+      input: osmShadowCandidatePool.length,
+      kept: osmShadowCandidates.length,
+      removedBusLike: osmShadowCandidatePool.length - osmShadowCandidates.length,
+    };
     const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
     const selectedOsmTracks = selectedOsmTracksForCrossing(crossing);
     const configuredObservationStations = crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations)
@@ -619,7 +668,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           fallbackOffsetSeconds: Number(station.fallbackOffsetSeconds || 0),
         })).filter((station: any) => station.eva)
       : [];
+    const osmMatchingStartedAt = Date.now();
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => {
+      const candidateStartedAt = Date.now();
+      const assignmentStartedAt = Date.now();
       const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
       const rawLineAssignment = assignTrainToOsmTrack({
         line: train.line,
@@ -627,12 +679,28 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         route: train.route,
         selectedTracks: selectedOsmTracks,
       });
-      const graphResult = await filterTrainByCrossingOsm(
-        crossing.id,
-        train.route,
-        selectedOsmWayIds.length ? selectedOsmWayIds : undefined,
-        train.observationStation || train.stationName || undefined,
+      const assignmentDurationMs = Date.now() - assignmentStartedAt;
+      // A unique OSM line-relation assignment to an explicitly selected
+      // physical way is already a positive match. In that case the graph
+      // matcher can only add directed-distance metadata; it cannot change the
+      // selected-track decision. Skip the expensive station snapping and
+      // shortest-path work for these candidates. Ambiguous/unknown assignments
+      // still go through the graph so topology can resolve or reject them.
+      const graphCanBeSkipped = Boolean(
+        rawLineAssignment.status === "matched" &&
+        rawLineAssignment.wayId != null &&
+        selectedOsmWayIds.includes(String(rawLineAssignment.wayId)),
       );
+      const graphStartedAt = Date.now();
+      const graphResult = graphCanBeSkipped
+        ? { status: "unknown" as const, reason: "skipped-after-selected-line-assignment" }
+        : await filterTrainByCrossingOsm(
+            crossing.id,
+            train.route,
+            selectedOsmWayIds.length ? selectedOsmWayIds : undefined,
+            train.observationStation || train.stationName || undefined,
+          );
+      const graphDurationMs = graphCanBeSkipped ? 0 : Date.now() - graphStartedAt;
 
       // If several OSM ways carry the same forward line relation, use the
       // prepared crossing topology as the final physical discriminator. Only
@@ -674,6 +742,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       // The prepared OSM line relations establish service and travel direction.
       // Direct crossing-node topology now resolves otherwise ambiguous ways;
       // the route graph remains an optional source of directed-distance detail.
+      const topologyDurationMs = Date.now() - graphStartedAt - graphDurationMs;
       const assignedWayId = lineAssignment.wayId == null ? "" : String(lineAssignment.wayId);
       const assignmentIsSelected = Boolean(
         lineAssignment.status === "matched" &&
@@ -743,8 +812,108 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           eventType: point.eventType || "unknown",
         })) : [],
         result,
+        performance: {
+          assignmentDurationMs,
+          graphDurationMs,
+          graphCalled: !graphCanBeSkipped,
+          graphSkipped: graphCanBeSkipped,
+          topologyDurationMs,
+          candidateDurationMs: Date.now() - candidateStartedAt,
+        },
       };
     }));
+    const osmCandidatePerformance = (() => {
+      const items = osmShadowResults as any[];
+      const sum = (key: string) => items.reduce((total, item) => total + Number(item.performance?.[key] || 0), 0);
+      const graphCalls = items.filter((item) => item.performance?.graphCalled);
+      const graphDurations = graphCalls.map((item) => Number(item.performance?.graphDurationMs || 0)).sort((a, b) => a - b);
+      const percentile = (values: number[], p: number) => values.length ? values[Math.min(values.length - 1, Math.ceil(values.length * p) - 1)] : 0;
+      const byResult = items.reduce((acc: Record<string, any>, item) => {
+        const key = String(item.result?.status || "unknown");
+        const entry = acc[key] || (acc[key] = { count: 0, graphCalls: 0, graphDurationMs: 0, assignmentDurationMs: 0 });
+        entry.count += 1;
+        entry.graphCalls += item.performance?.graphCalled ? 1 : 0;
+        entry.graphDurationMs += Number(item.performance?.graphDurationMs || 0);
+        entry.assignmentDurationMs += Number(item.performance?.assignmentDurationMs || 0);
+        return acc;
+      }, {});
+      return {
+        candidates: items.length,
+        graphCalls: graphCalls.length,
+        graphSkipped: items.filter((item) => item.performance?.graphSkipped).length,
+        assignmentTotalMs: sum("assignmentDurationMs"),
+        graphTotalMs: sum("graphDurationMs"),
+        topologyTotalMs: sum("topologyDurationMs"),
+        candidateWallTotalMs: sum("candidateDurationMs"),
+        graphDurationMs: {
+          min: graphDurations.length ? graphDurations[0] : 0,
+          median: percentile(graphDurations, 0.5),
+          p95: percentile(graphDurations, 0.95),
+          max: graphDurations.length ? graphDurations[graphDurations.length - 1] : 0,
+        },
+        byResult,
+      };
+    })();
+    // Shadow-only route relevance audit. This deliberately does not alter
+    // graph calls or candidate inclusion: it measures whether an explicit
+    // route/observation station overlaps the crossing's configured corridor.
+    const normalizeStationEvidence = (value: unknown) => String(value || "")
+      .normalize("NFKC")
+      .toLocaleLowerCase("de-DE")
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/[^\p{L}\p{N}]+/gu, "");
+    const routeAnchorNames = Array.from(new Set<string>([
+      ...(Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : []),
+      ...(Array.isArray(crossing.anchorStations) ? crossing.anchorStations.map((station: any) => station.stationName) : []),
+      ...configuredObservationStations.map((station: any) => station.stationName),
+    ].map(normalizeStationEvidence).filter(Boolean)));
+    const routeAnchorSet = new Set(routeAnchorNames);
+    const osmRouteRelevanceShadow = {
+      mode: "shadow-only",
+      anchorCount: routeAnchorSet.size,
+      evaluated: osmShadowResults.length,
+      wouldSkip: 0,
+      wouldKeep: 0,
+      byOsmResult: {} as Record<string, { wouldSkip: number; wouldKeep: number }>,
+      examples: [] as any[],
+    };
+    for (const item of osmShadowResults) {
+      const routeNames = Array.isArray(item.route) ? item.route : [];
+      const normalizedRoute = routeNames.map(normalizeStationEvidence).filter(Boolean);
+      const observationName = normalizeStationEvidence(item.observationStation);
+      const matchedAnchors = normalizedRoute.filter((name: string) => routeAnchorSet.has(name));
+      const observationMatches = Boolean(observationName && routeAnchorSet.has(observationName));
+      // Only call a route "unrelated" when it contains explicit station
+      // evidence and none of that evidence overlaps the configured corridor.
+      // Missing/short routes remain inconclusive and are never shadow-skipped.
+      const graphWasCalled = item.performance?.graphCalled === true;
+      const routeLooksUnrelated = normalizedRoute.length >= 2 && matchedAnchors.length === 0 && !observationMatches;
+      const wouldSkip = graphWasCalled && routeLooksUnrelated;
+      const resultKey = String(item.result?.status || "unknown");
+      const resultCounts = osmRouteRelevanceShadow.byOsmResult[resultKey] ||
+        (osmRouteRelevanceShadow.byOsmResult[resultKey] = { wouldSkip: 0, wouldKeep: 0 });
+      if (wouldSkip) {
+        osmRouteRelevanceShadow.wouldSkip += 1;
+        resultCounts.wouldSkip += 1;
+      } else if (graphWasCalled) {
+        osmRouteRelevanceShadow.wouldKeep += 1;
+        resultCounts.wouldKeep += 1;
+      }
+      if (osmRouteRelevanceShadow.examples.length < 30) {
+        osmRouteRelevanceShadow.examples.push({
+          journeyRef: item.journeyRef || null,
+          line: item.line || "",
+          category: item.category || "",
+          osmResult: resultKey,
+          osmReason: item.result?.reason || null,
+          routeLength: normalizedRoute.length,
+          matchedAnchors: [...new Set(matchedAnchors)],
+          observationStationMatched: observationMatches,
+          graphWasCalled,
+          decision: wouldSkip ? "would-skip-graph-shadow-only" : graphWasCalled ? "keep" : "graph-already-skipped",
+        });
+      }
+    }
     const osmReasonCounts = osmShadowResults.reduce((counts: Record<string, number>, item: any) => {
       const key = item.result.reason || item.result.status;
       counts[key] = (counts[key] || 0) + 1;
@@ -884,6 +1053,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           return [{ ...train, directionLabel, osmRailwayWayId }];
         })
       : enrichedTrains;
+    performanceTimings.osmMatchingDurationMs = Date.now() - osmMatchingStartedAt;
+    markPerformance("osmMatchingCompleteMs");
     const osmShadow = {
       mode: selectedOsmWayIds.length ? "selected-track-filter" : "corridor-diagnostic",
       selectedWayIds: selectedOsmWayIds,
@@ -911,14 +1082,31 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       .filter((item: any) => item.journeyKey && item.result.status === "rejected")
       .map((item: any) => String(item.journeyKey)));
     const nowForRetention = Date.now();
+    const previousPhaseStart = Date.parse(String(previousForecast?.phase?.start || ""));
+    const previousPhaseEnd = Date.parse(String(previousForecast?.phase?.end || ""));
+    const previousPhaseIsActive = Number.isFinite(previousPhaseStart) &&
+      Number.isFinite(previousPhaseEnd) &&
+      previousPhaseStart <= nowForRetention &&
+      previousPhaseEnd > nowForRetention;
+    const previousActiveJourneyKeys = new Set(
+      previousPhaseIsActive && Array.isArray(previousForecast?.phase?.trains)
+        ? previousForecast.phase.trains.map(journeyKeyForRetention)
+        : [],
+    );
     const retainedFromPrevious = (Array.isArray(previousForecast?.trains) ? previousForecast.trains : [])
       .filter((train: any) => {
         const key = journeyKeyForRetention(train);
-        const crossingAt = Date.parse(String(train.crossingTime || ""));
         const firstSeenAt = Number(train.forecastObservedAt || nowForRetention);
-        return key && !currentJourneyKeys.has(key) && !rejectedKeys.has(key) &&
-          Number.isFinite(crossingAt) && crossingAt > nowForRetention &&
-          Number.isFinite(firstSeenAt) && nowForRetention - firstSeenAt <= 90_000;
+        const predictedOpenAt = Date.parse(String(train.predictedBarrierOpenAt || ""));
+        const belongsToActivePhase = previousActiveJourneyKeys.has(key);
+        const stillOccupiesCrossing = belongsToActivePhase
+          ? Number.isFinite(predictedOpenAt) && predictedOpenAt > nowForRetention
+          : Number.isFinite(Date.parse(String(train.crossingTime || ""))) &&
+            Date.parse(String(train.crossingTime || "")) > nowForRetention &&
+            Number.isFinite(firstSeenAt) && nowForRetention - firstSeenAt <= 90_000;
+        return key && !currentJourneyKeys.has(key) &&
+          (!rejectedKeys.has(key) || belongsToActivePhase) &&
+          stillOccupiesCrossing;
       });
     // Preserve the original observation timestamp so repeated cache refreshes
     // cannot extend a missing journey's grace period indefinitely.
@@ -934,6 +1122,21 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       line: displayLineForTrain(train),
     }));
     const payload=toPayload(crossing,dbDisplayTrains,lineHints,globalTimingCorrectionSeconds);
+    markPerformance("payloadBuiltMs");
+    if (includePerformanceDetails) (payload as any).performanceDiagnostics = {
+      cache: "MISS", ...performanceTimings,
+      snapshotRows: snapshotRows.length,
+      primaryCandidates: primarySnapshot.length,
+      throughCandidates: (throughSnapshot || []).length,
+      openBoardsObservations: realtimeObservations.length,
+      openBoardsCandidates: openBoardsTrains.length,
+      uniqueCandidates: unique.length,
+      osmCandidates: osmShadowCandidates.length,
+      osmGraphSkipped: osmCandidatePerformance.graphSkipped,
+      osmCandidatePerformance,
+      osmRouteRelevanceShadow,
+      totalMs: Date.now() - requestStartedAt,
+    };
     (payload as any).forecastDiagnostics = {
       snapshotRows: snapshotRows.length,
       primaryCandidates: primarySnapshot.length,
@@ -941,10 +1144,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       openBoardsObservations: realtimeObservations.length,
       openBoardsCandidates: openBoardsTrains.length,
       enrichedCandidates: enrichedTrains.length,
+      osmPrefilterInput: osmPrefilter.input,
+      osmPrefilterKept: osmPrefilter.kept,
+      osmPrefilterRemovedBusLike: osmPrefilter.removedBusLike,
       osmAcceptedCandidates: osmFilteredTrains.length,
       retainedPreviousCandidates: retainedFromPrevious.length,
       retentionWindowSeconds: 90,
+      activePhaseRetention: previousPhaseIsActive,
+      previousPhaseEnd: previousPhaseIsActive ? new Date(previousPhaseEnd).toISOString() : null,
     };
+    (payload as any).osmPrefilter = osmPrefilter;
     (payload as any).osmTrackFilter = { selectedWayIds: selectedOsmWayIds, evaluated: osmShadowResults.length, matched: osmShadow.matched, rejected: osmShadow.rejected, unknown: osmShadow.unknown, removedTrainCount: enrichedTrains.length - osmFilteredTrains.length };
     (payload as any).osmShadow = osmShadow;
 
@@ -1012,6 +1221,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     if (!includeComparisonDetails) await writeCrossingForecastCache(cacheKey,payload);
+    markPerformance("cacheWriteCompleteMs");
+    if (includePerformanceDetails) (payload as any).performanceDiagnostics = { ...(payload as any).performanceDiagnostics, ...performanceTimings, totalMs: Date.now() - requestStartedAt };
     return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
 }
