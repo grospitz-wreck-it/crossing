@@ -356,6 +356,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const debugMode = new URL(request.url).searchParams.get("debug");
   const includeOsmDetails = debugMode === "osm";
   const includeComparisonDetails = debugMode === "compare";
+  const includePerformanceDetails = debugMode === "perf";
+  const requestStartedAt = Date.now();
+  const performanceTimings: Record<string, number> = {};
+  const markPerformance = (name: string) => { performanceTimings[name] = Date.now() - requestStartedAt; };
   // Fast path: serve the last computed status before loading crossing config,
   // station links, or global timing settings. This reduces a warm status hit
   // to one indexed cache-row read instead of several config reads.
@@ -363,6 +367,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const cached = includeComparisonDetails || includePerformanceDetails
     ? null
     : await readCrossingForecastCache<any>(cacheKey, 60_000);
+  markPerformance("cacheReadCompleteMs");
   if (cached) {
     return Response.json(cached, {
       headers: { "X-Crossing-Status-Cache": "HIT" },
@@ -370,6 +375,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   }
 
   let crossing = await loadCrossing(id);
+  markPerformance("crossingConfigLoadedMs");
   if (!crossing) {
     // Explicit aliases for legacy IDs still stored by older app clients.
     // Do not infer these from EVA: multiple database crossings can share one station.
@@ -425,6 +431,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // Keep a short-lived previous forecast as a safety net when one snapshot poll
   // temporarily loses a journey. Explicit OSM rejections are never resurrected.
   const previousForecast = await readCrossingForecastCache<any>(cacheKey,90_000);
+  markPerformance("previousForecastReadMs");
   const lineHints=lineHintsForCrossing(crossing);
   // When a crossing has an explicitly selected physical OSM track, station
   // line hints must not pre-filter its trains. The track topology, not a
@@ -460,11 +467,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       args: [snapshotFrom, snapshotTo],
     });
     const snapshotRows = snapshotResult.rows as any[];
+    markPerformance("snapshotQueryCompleteMs");
 
     // PRIMARY: only explicitly declared reference stations.
     const primarySnapshot=await getSnapshotPrimaryTrains(db,crossing,snapshotRows);
     // SECONDARY: through candidates are derived from the exact same snapshot rows.
     const throughSnapshot=await getSnapshotThroughTrains(db,crossing,snapshotRows);
+    markPerformance("snapshotMatchingCompleteMs");
     const realtimeEvas = Array.from(new Set([
       ...primaryEvas,
       ...(crossing.throughRules || []).map((rule: any) => String(rule.observationEva || "").trim()),
@@ -594,6 +603,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       t,
     ])).values());
     const enrichedTrains = await addStationNames(db, unique);
+    markPerformance("candidateEnrichmentCompleteMs");
 
     // Evaluate each journey against this crossing's explicitly selected OSM ways.
     // The result is used below as a real assignment decision, not merely telemetry.
@@ -632,6 +642,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           fallbackOffsetSeconds: Number(station.fallbackOffsetSeconds || 0),
         })).filter((station: any) => station.eva)
       : [];
+    const osmMatchingStartedAt = Date.now();
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => {
       const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
       const rawLineAssignment = assignTrainToOsmTrack({
@@ -910,6 +921,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           return [{ ...train, directionLabel, osmRailwayWayId }];
         })
       : enrichedTrains;
+    performanceTimings.osmMatchingDurationMs = Date.now() - osmMatchingStartedAt;
+    markPerformance("osmMatchingCompleteMs");
     const osmShadow = {
       mode: selectedOsmWayIds.length ? "selected-track-filter" : "corridor-diagnostic",
       selectedWayIds: selectedOsmWayIds,
@@ -960,6 +973,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       line: displayLineForTrain(train),
     }));
     const payload=toPayload(crossing,dbDisplayTrains,lineHints,globalTimingCorrectionSeconds);
+    markPerformance("payloadBuiltMs");
+    if (includePerformanceDetails) (payload as any).performanceDiagnostics = {
+      cache: "MISS", ...performanceTimings,
+      snapshotRows: snapshotRows.length,
+      primaryCandidates: primarySnapshot.length,
+      throughCandidates: (throughSnapshot || []).length,
+      openBoardsObservations: realtimeObservations.length,
+      openBoardsCandidates: openBoardsTrains.length,
+      uniqueCandidates: unique.length,
+      osmCandidates: osmShadowCandidates.length,
+      osmGraphSkipped: osmShadowResults.filter((item: any) => item.result?.diagnostics?.graphResult?.reason === "skipped-after-selected-line-assignment").length,
+      totalMs: Date.now() - requestStartedAt,
+    };
     (payload as any).forecastDiagnostics = {
       snapshotRows: snapshotRows.length,
       primaryCandidates: primarySnapshot.length,
@@ -1042,6 +1068,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }
 
     if (!includeComparisonDetails) await writeCrossingForecastCache(cacheKey,payload);
+    markPerformance("cacheWriteCompleteMs");
+    if (includePerformanceDetails) (payload as any).performanceDiagnostics = { ...(payload as any).performanceDiagnostics, ...performanceTimings, totalMs: Date.now() - requestStartedAt };
     return Response.json(payload,{headers:{"X-Crossing-Status-Cache":"MISS","X-Crossing-Status-Source":openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot"}});
   } catch(error) { console.error("[STATUS] snapshot path failed",error); return Response.json({error:"Forecast temporarily unavailable"},{status:503}); }
 }
