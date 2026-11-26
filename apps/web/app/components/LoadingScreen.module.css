@@ -26,6 +26,24 @@
   animation: logoFade .6s ease forwards;
 }
 
+.loadingMessage {
+  position: relative;
+  z-index: 2;
+  margin: 28px 24px 0;
+  color: #283344;
+  font: 600 16px/1.4 system-ui, sans-serif;
+  text-align: center;
+}
+
+.loadingDetail {
+  position: relative;
+  z-index: 2;
+  margin: 7px 24px 0;
+  color: #566273;
+  font: 13px/1.4 system-ui, sans-serif;
+  text-align: center;
+}
+
 .loadingBar {
   position: relative;
   z-index: 2;
