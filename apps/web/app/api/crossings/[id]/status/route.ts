@@ -399,11 +399,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
   let globalTimingCorrectionSeconds = 0;
   try {
-    await db.execute(`CREATE TABLE IF NOT EXISTS crossing_timing_settings (
-      setting_key TEXT PRIMARY KEY,
-      setting_value TEXT NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )`);
+    // This table is provisioned by the existing admin/settings path.
+    // Avoid issuing DDL on every cache miss in the public status endpoint.
     const timingSetting = await db.execute({
       sql: "SELECT setting_value FROM crossing_timing_settings WHERE setting_key = ? LIMIT 1",
       args: ["global_crossing_time_correction_seconds"],
