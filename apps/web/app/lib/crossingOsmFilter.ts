@@ -57,10 +57,10 @@ type CorridorGraph = {
 // instance that handled the PATCH, while status requests may hit another
 // serverless instance. Keep mutable crossing/matcher state short-lived so a
 // newly saved OSM selection and invalidated profile become visible promptly.
-const CACHE_TTL_MS = 10_000;
+const CACHE_TTL_MS = 5 * 60_000;
 const STATION_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
-const RESULT_CACHE_TTL_MS = 10_000;
-const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 5_000;
+const RESULT_CACHE_TTL_MS = 2 * 60_000;
+const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 60_000;
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
@@ -118,7 +118,7 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
     const byName = await loadStationCatalog();
     const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
     console.log("[OSM ROUTE]", route.map((name, i) => ({ input: name, normalized: normalizeStationName(name), resolved: value[i]?.lat != null && value[i]?.lon != null, lat: value[i]?.lat, lon: value[i]?.lon })));
-    stationCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+    stationCache.set(key, { expiresAt: Date.now() + 60 * 60_000, value });
     return value;
   } catch (error) {
     console.error("Failed to resolve route stations:", error);
