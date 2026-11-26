@@ -122,6 +122,120 @@ function getDestination(
 const MAX_PHASE_MS =
   900 * 1000;
 
+type EditorialNewsCarouselProps = { items: any[] };
+
+function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [dragX, setDragX] = useState(0);
+  const startX = useRef<number | null>(null);
+  const startY = useRef<number | null>(null);
+  const pointerId = useRef<number | null>(null);
+
+  function handlePointerDown(event: React.PointerEvent<HTMLElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    startX.current = event.clientX;
+    startY.current = event.clientY;
+    pointerId.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.stopPropagation();
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLElement>) {
+    if (pointerId.current !== event.pointerId || startX.current === null || startY.current === null) return;
+    event.stopPropagation();
+    const deltaX = event.clientX - startX.current;
+    const deltaY = event.clientY - startY.current;
+    if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 8) return;
+    setDragX(deltaX);
+  }
+
+  function finishGesture(event: React.PointerEvent<HTMLElement>) {
+    if (pointerId.current !== event.pointerId || startX.current === null || startY.current === null) return;
+    event.stopPropagation();
+    const deltaX = event.clientX - startX.current;
+    const deltaY = event.clientY - startY.current;
+    if (Math.abs(deltaX) >= 42 && Math.abs(deltaX) > Math.abs(deltaY)) {
+      setActiveIndex((index) => Math.max(0, Math.min(items.length - 1, index + (deltaX < 0 ? 1 : -1))));
+    }
+    startX.current = null;
+    startY.current = null;
+    pointerId.current = null;
+    setDragX(0);
+  }
+
+  function cancelGesture(event: React.PointerEvent<HTMLElement>) {
+    event.stopPropagation();
+    startX.current = null;
+    startY.current = null;
+    pointerId.current = null;
+    setDragX(0);
+  }
+
+  const slideWidth = 100 / items.length;
+
+  return (
+    <section
+      className="editorialContent"
+      aria-label="Aktuelle Informationen"
+      data-no-crossing-swipe
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={finishGesture}
+      onPointerCancel={cancelGesture}
+    >
+      <div className="editorialContentHeader">
+        <span>Aktuelle Informationen</span>
+        {items.length > 1 && <span className="editorialContentCounter">{activeIndex + 1} / {items.length}</span>}
+      </div>
+      <div className="editorialContentViewport">
+        <div
+          className="editorialContentTrack"
+          style={{
+            width: `${items.length * 100}%`,
+            transform: `translate3d(calc(-${activeIndex * slideWidth}% + ${dragX}px), 0, 0)`,
+            transition: dragX === 0 ? "transform 240ms cubic-bezier(.22,1,.36,1)" : "none",
+          }}
+        >
+          {items.map((item: any) => {
+            const card = (
+              <>
+                <div className="editorialContentTop">
+                  <span className="editorialContentIcon" style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}>{item.icon || "✨"}</span>
+                  <span className="editorialContentType">{item.content_type === "local_news" ? "Lokal informiert" : item.content_type === "event" ? "Veranstaltung" : item.content_type === "partner" ? "Partner" : item.content_type === "onboarding" ? "Gut zu wissen" : "Tipp"}</span>
+                </div>
+                {item.image_url && <img className="editorialContentImage" src={item.image_url} alt="" loading="lazy" />}
+                <h2>{item.title}</h2>
+                {item.summary && <p>{item.summary}</p>}
+                {item.action_type === "open_url" && item.action_url && <span className="editorialContentAction">Mehr erfahren <span aria-hidden="true">↗</span></span>}
+              </>
+            );
+            return item.action_type === "open_url" && item.action_url ? (
+              <a className="editorialContentCard" key={item.id} href={item.action_url} target="_blank" rel="noopener noreferrer" style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</a>
+            ) : (
+              <article className="editorialContentCard" key={item.id} style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</article>
+            );
+          })}
+        </div>
+      </div>
+      {items.length > 1 && (
+        <div className="editorialContentPagination" aria-label="Information auswählen">
+          {items.map((item: any, index: number) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`editorialContentDot ${index === activeIndex ? "isActive" : ""}`}
+              aria-label={`Information ${index + 1} anzeigen`}
+              aria-current={index === activeIndex ? "true" : undefined}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => setActiveIndex(index)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function Home() {
 const { activeId } = useCrossings();
 
@@ -794,27 +908,7 @@ return (
 
 
   {contentItems.length > 0 && (
-    <section className="editorialContent" aria-label="Aktuelle Informationen">
-      {contentItems.map((item: any) => {
-        const card = (
-          <>
-            <div className="editorialContentTop">
-              <span className="editorialContentIcon" style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}>{item.icon || "✨"}</span>
-              <span className="editorialContentType">{item.content_type === "local_news" ? "Lokal informiert" : item.content_type === "event" ? "Veranstaltung" : item.content_type === "partner" ? "Partner" : item.content_type === "onboarding" ? "Gut zu wissen" : "Tipp"}</span>
-            </div>
-            {item.image_url && <img className="editorialContentImage" src={item.image_url} alt="" loading="lazy" />}
-            <h2>{item.title}</h2>
-            {item.summary && <p>{item.summary}</p>}
-            {item.action_type === "open_url" && item.action_url && <span className="editorialContentAction">Mehr erfahren <span aria-hidden="true">↗</span></span>}
-          </>
-        );
-        return item.action_type === "open_url" && item.action_url ? (
-          <a className="editorialContentCard" key={item.id} href={item.action_url} target="_blank" rel="noopener noreferrer" style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</a>
-        ) : (
-          <article className="editorialContentCard" key={item.id} style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</article>
-        );
-      })}
-    </section>
+    <EditorialNewsCarousel items={contentItems} />
   )}
 
 {message && (
