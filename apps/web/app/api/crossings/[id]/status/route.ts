@@ -644,6 +644,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       : [];
     const osmMatchingStartedAt = Date.now();
     const osmShadowResults = await Promise.all(osmShadowCandidates.map(async (train: any) => {
+      const candidateStartedAt = Date.now();
+      const assignmentStartedAt = Date.now();
       const journeyKey = train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`;
       const rawLineAssignment = assignTrainToOsmTrack({
         line: train.line,
@@ -651,6 +653,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         route: train.route,
         selectedTracks: selectedOsmTracks,
       });
+      const assignmentDurationMs = Date.now() - assignmentStartedAt;
       // A unique OSM line-relation assignment to an explicitly selected
       // physical way is already a positive match. In that case the graph
       // matcher can only add directed-distance metadata; it cannot change the
@@ -662,6 +665,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         rawLineAssignment.wayId != null &&
         selectedOsmWayIds.includes(String(rawLineAssignment.wayId)),
       );
+      const graphStartedAt = Date.now();
       const graphResult = graphCanBeSkipped
         ? { status: "unknown" as const, reason: "skipped-after-selected-line-assignment" }
         : await filterTrainByCrossingOsm(
@@ -670,6 +674,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
             selectedOsmWayIds.length ? selectedOsmWayIds : undefined,
             train.observationStation || train.stationName || undefined,
           );
+      const graphDurationMs = graphCanBeSkipped ? 0 : Date.now() - graphStartedAt;
 
       // If several OSM ways carry the same forward line relation, use the
       // prepared crossing topology as the final physical discriminator. Only
@@ -711,6 +716,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       // The prepared OSM line relations establish service and travel direction.
       // Direct crossing-node topology now resolves otherwise ambiguous ways;
       // the route graph remains an optional source of directed-distance detail.
+      const topologyDurationMs = Date.now() - graphStartedAt - graphDurationMs;
       const assignedWayId = lineAssignment.wayId == null ? "" : String(lineAssignment.wayId);
       const assignmentIsSelected = Boolean(
         lineAssignment.status === "matched" &&
@@ -780,8 +786,48 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           eventType: point.eventType || "unknown",
         })) : [],
         result,
+        performance: {
+          assignmentDurationMs,
+          graphDurationMs,
+          graphCalled: !graphCanBeSkipped,
+          graphSkipped: graphCanBeSkipped,
+          topologyDurationMs,
+          candidateDurationMs: Date.now() - candidateStartedAt,
+        },
       };
     }));
+    const osmCandidatePerformance = (() => {
+      const items = osmShadowResults as any[];
+      const sum = (key: string) => items.reduce((total, item) => total + Number(item.performance?.[key] || 0), 0);
+      const graphCalls = items.filter((item) => item.performance?.graphCalled);
+      const graphDurations = graphCalls.map((item) => Number(item.performance?.graphDurationMs || 0)).sort((a, b) => a - b);
+      const percentile = (values: number[], p: number) => values.length ? values[Math.min(values.length - 1, Math.ceil(values.length * p) - 1)] : 0;
+      const byResult = items.reduce((acc: Record<string, any>, item) => {
+        const key = String(item.result?.status || "unknown");
+        const entry = acc[key] || (acc[key] = { count: 0, graphCalls: 0, graphDurationMs: 0, assignmentDurationMs: 0 });
+        entry.count += 1;
+        entry.graphCalls += item.performance?.graphCalled ? 1 : 0;
+        entry.graphDurationMs += Number(item.performance?.graphDurationMs || 0);
+        entry.assignmentDurationMs += Number(item.performance?.assignmentDurationMs || 0);
+        return acc;
+      }, {});
+      return {
+        candidates: items.length,
+        graphCalls: graphCalls.length,
+        graphSkipped: items.filter((item) => item.performance?.graphSkipped).length,
+        assignmentTotalMs: sum("assignmentDurationMs"),
+        graphTotalMs: sum("graphDurationMs"),
+        topologyTotalMs: sum("topologyDurationMs"),
+        candidateWallTotalMs: sum("candidateDurationMs"),
+        graphDurationMs: {
+          min: graphDurations.length ? graphDurations[0] : 0,
+          median: percentile(graphDurations, 0.5),
+          p95: percentile(graphDurations, 0.95),
+          max: graphDurations.length ? graphDurations[graphDurations.length - 1] : 0,
+        },
+        byResult,
+      };
+    })();
     const osmReasonCounts = osmShadowResults.reduce((counts: Record<string, number>, item: any) => {
       const key = item.result.reason || item.result.status;
       counts[key] = (counts[key] || 0) + 1;
@@ -983,7 +1029,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       openBoardsCandidates: openBoardsTrains.length,
       uniqueCandidates: unique.length,
       osmCandidates: osmShadowCandidates.length,
-      osmGraphSkipped: osmShadowResults.filter((item: any) => item.result?.diagnostics?.graphResult?.reason === "skipped-after-selected-line-assignment").length,
+      osmGraphSkipped: osmCandidatePerformance.graphSkipped,
+      osmCandidatePerformance,
       totalMs: Date.now() - requestStartedAt,
     };
     (payload as any).forecastDiagnostics = {
