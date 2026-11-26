@@ -40,7 +40,7 @@ async function getSharedSnapshotRows(): Promise<any[]> {
     sharedSnapshotRowsPromise = null;
   });
 
-  return sharedSnapshotRowsPromise;
+  return sharedSnapshotRowsPromise!;
 }
 
 
