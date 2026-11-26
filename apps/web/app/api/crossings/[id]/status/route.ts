@@ -8,6 +8,7 @@ import { crossings as staticCrossings } from "../../../../../../../packages/cros
 import { readCrossingForecastCache, writeCrossingForecastCache } from "../../../../lib/crossingForecastCache";
 import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 import { assignTrainToOsmTrack } from "../../../../../../../packages/crossing-model/src/osmLineMatching";
+import { isRailService } from "../../../../../../../packages/db-api-client/src/isRailService";
 
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { const parsed = value ? JSON.parse(String(value)) : []; return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
 function jsonValue(value: unknown, fallback: any = {}) { if (value && typeof value === "object") return value; try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; } }
@@ -596,7 +597,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     // Evaluate each journey against this crossing's explicitly selected OSM ways.
     // The result is used below as a real assignment decision, not merely telemetry.
-    const osmShadowCandidates = Array.from(new Map(
+    const osmShadowCandidatePool = Array.from(new Map(
       [
         ...(primarySnapshot || []),
         ...(throughSnapshot || []),
@@ -605,6 +606,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         .filter((train: any) => Array.isArray(train.route) && train.route.length >= 2)
         .map((train: any) => [train.journeyRef || `${train.line}-${train.category}-${train.journeyNumber}-${train.origin || ""}-${train.destination || ""}`, train]),
     ).values());
+    // Final safety prefilter also covers OpenBoards-only candidates. It is
+    // deliberately conservative: only ambiguous S-labelled services with
+    // multiple explicit bus-stop markers are removed; uncertain cases continue
+    // to the OSM matcher.
+    const osmShadowCandidates = osmShadowCandidatePool.filter((train: any) =>
+      isRailService({ line: train.line, category: train.category, route: train.route }),
+    );
+    const osmPrefilter = {
+      input: osmShadowCandidatePool.length,
+      kept: osmShadowCandidates.length,
+      removedBusLike: osmShadowCandidatePool.length - osmShadowCandidates.length,
+    };
     const selectedOsmWayIds = selectedOsmWayIdsForCrossing(crossing);
     const selectedOsmTracks = selectedOsmTracksForCrossing(crossing);
     const configuredObservationStations = crossing.rules && !Array.isArray(crossing.rules) && Array.isArray(crossing.rules.observationStations)
@@ -954,10 +967,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       openBoardsObservations: realtimeObservations.length,
       openBoardsCandidates: openBoardsTrains.length,
       enrichedCandidates: enrichedTrains.length,
+      osmPrefilterInput: osmPrefilter.input,
+      osmPrefilterKept: osmPrefilter.kept,
+      osmPrefilterRemovedBusLike: osmPrefilter.removedBusLike,
       osmAcceptedCandidates: osmFilteredTrains.length,
       retainedPreviousCandidates: retainedFromPrevious.length,
       retentionWindowSeconds: 90,
     };
+    (payload as any).osmPrefilter = osmPrefilter;
     (payload as any).osmTrackFilter = { selectedWayIds: selectedOsmWayIds, evaluated: osmShadowResults.length, matched: osmShadow.matched, rejected: osmShadow.rejected, unknown: osmShadow.unknown, removedTrainCount: enrichedTrains.length - osmFilteredTrains.length };
     (payload as any).osmShadow = osmShadow;
 
