@@ -35,7 +35,7 @@ export default function CrossingSwipeNav({ children }: Props) {
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (animating || saved.length <= 1) return;
+    if (animating || saved.length <= 1) return;\n    if (event.target instanceof Element && event.target.closest("[data-no-crossing-swipe]")) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     startX.current = event.clientX;
     startY.current = event.clientY;
