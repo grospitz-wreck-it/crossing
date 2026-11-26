@@ -1,5 +1,6 @@
 import type { Client } from "@libsql/client";
 import type { Crossing } from "../../crossing-model/src/types";
+import { isRailService } from "./isRailService";
 
 export type SnapshotThroughTrain = {
   type: "through";
@@ -227,6 +228,9 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing, s
       });
       if (route.length < 2) continue;
       const train = { line: String(row.line || ""), category: String(row.category || "") };
+      // The shared snapshot also contains bus journeys. Include route-stop
+      // metadata so ambiguous S-labelled regional bus services are excluded.
+      if (!isRailService({ ...train, route })) continue;
 
       for (const rule of rules) {
         // With explicitly selected physical OSM tracks, line/category allowlists
