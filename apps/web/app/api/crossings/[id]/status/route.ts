@@ -1104,7 +1104,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           : Number.isFinite(Date.parse(String(train.crossingTime || ""))) &&
             Date.parse(String(train.crossingTime || "")) > nowForRetention &&
             Number.isFinite(firstSeenAt) && nowForRetention - firstSeenAt <= 90_000;
-        return key && !currentJourneyKeys.has(key) && !rejectedKeys.has(key) &&
+        return key && !currentJourneyKeys.has(key) &&
+          (!rejectedKeys.has(key) || belongsToActivePhase) &&
           stillOccupiesCrossing;
       });
     // Preserve the original observation timestamp so repeated cache refreshes
