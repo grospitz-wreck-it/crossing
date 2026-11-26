@@ -228,9 +228,9 @@ export async function getSnapshotThroughTrains(db: Client, crossing: Crossing, s
       });
       if (route.length < 2) continue;
       const train = { line: String(row.line || ""), category: String(row.category || "") };
-      // The shared snapshot also contains bus journeys. Exclude them before
-      // route matching, even when selected OSM tracks bypass manual line hints.
-      if (!isRailService(train)) continue;
+      // The shared snapshot also contains bus journeys. Include route-stop
+      // metadata so ambiguous S-labelled regional bus services are excluded.
+      if (!isRailService({ ...train, route })) continue;
 
       for (const rule of rules) {
         // With explicitly selected physical OSM tracks, line/category allowlists
