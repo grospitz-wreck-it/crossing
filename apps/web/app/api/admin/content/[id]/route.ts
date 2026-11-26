@@ -26,6 +26,9 @@ function clean(body: any) {
     if (!["https:","http:"].includes(url.protocol)) throw new Error("Nur http(s)-Links sind erlaubt.");
   }
   const contentType = TYPES.has(body.contentType) ? body.contentType : "feature_tip";
+  const crossingIds: string[] = Array.isArray(body.crossings)
+    ? [...new Set<string>(body.crossings.map((v: unknown)=>String(v).trim()).filter(Boolean))].slice(0,100)
+    : [];
   return {
     title, summary: String(body.summary ?? "").trim().slice(0,600), contentType,
     imageUrl: String(body.imageUrl ?? "").trim().slice(0,2000) || null,
@@ -34,7 +37,7 @@ function clean(body: any) {
     status: body.status === "published" ? "published" : "draft", actionType,
     actionUrl: actionUrl || null, sortOrder: Math.max(0,Math.min(9999,Number(body.sortOrder)||0)),
     onboardingVersion: contentType === "onboarding" ? Math.max(1,Number(body.onboardingVersion)||1) : null,
-    crossings: Array.isArray(body.crossings) ? [...new Set(body.crossings.map((v: unknown)=>String(v).trim()).filter(Boolean))].slice(0,100) : [],
+    crossings: crossingIds,
   };
 }
 export async function PATCH(request: Request, { params }: { params: Promise<{id:string}> }) {
