@@ -137,14 +137,11 @@ export function assignTrainToOsmTrack(input: {
   }
   if (!matches.length) {
     // OpenBoards/Mobilithek may provide only a partial stop sequence for a
-    // through service. The selected OSM way is already physically located at
-    // this crossing, and its route relation identifies the service using it.
-    // Requiring BOTH relation endpoints in every observed route incorrectly
-    // sends these otherwise identifiable trains into the expensive graph
-    // fallback. Accept a partial route only when it contains at least one
-    // relation endpoint and exactly one selected physical way carries the
-    // matching line relation. We deliberately leave direction unset: one
-    // endpoint cannot establish travel direction.
+    // through service. One relation endpoint can still identify the selected
+    // physical way. When that endpoint is at the beginning or end of the
+    // ordered observed route, its position also establishes relation direction.
+    // An endpoint in the middle of a partial route is not enough to infer
+    // direction and remains unknown.
     const partialMatches: OSMLineAssignment["candidates"] = [];
     for (const track of tracks) {
       for (const relation of track.lineRelations ?? []) {
@@ -158,20 +155,35 @@ export function assignTrainToOsmTrack(input: {
         const fromIndex = stationIndex(route, String(relation.from ?? ""));
         const toIndex = stationIndex(route, String(relation.to ?? ""));
         if ((fromIndex < 0) === (toIndex < 0)) continue;
+
+        let direction: "from-to" | "to-from" | undefined;
+        if (fromIndex >= 0) {
+          if (fromIndex === 0) direction = "from-to";
+          else if (fromIndex === route.length - 1) direction = "to-from";
+        } else if (toIndex >= 0) {
+          if (toIndex === route.length - 1) direction = "from-to";
+          else if (toIndex === 0) direction = "to-from";
+        }
+
         partialMatches.push({
           wayId: String(track.wayId),
           relationId: relation.id,
           lineRef: String(relation.ref || relation.name || ""),
           from: String(relation.from ?? ""),
           to: String(relation.to ?? ""),
+          ...(direction ? { direction } : {}),
           ...(fromIndex >= 0 ? { fromIndex } : {}),
           ...(toIndex >= 0 ? { toIndex } : {}),
         });
       }
     }
+
     const partialWays = [...new Set(partialMatches.map((match) => match.wayId))];
     if (partialWays.length === 1) {
       const wayMatches = partialMatches.filter((match) => match.wayId === partialWays[0]);
+      const directions = [...new Set(wayMatches.map((match) => match.direction).filter(
+        (direction): direction is "from-to" | "to-from" => direction != null,
+      ))];
       const relationIds = [...new Set(wayMatches.map((match) => match.relationId).filter((id): id is number => id != null))];
       const lineRefs = [...new Set(wayMatches.map((match) => match.lineRef))];
       return {
@@ -179,18 +191,43 @@ export function assignTrainToOsmTrack(input: {
         wayId: partialWays[0],
         relationId: relationIds.length === 1 ? relationIds[0] : undefined,
         lineRef: lineRefs.length === 1 ? lineRefs[0] : undefined,
-        direction: undefined,
-        reason: "unique-selected-way-line-relation-partial-route",
+        direction: directions.length === 1 ? directions[0] : undefined,
+        reason: directions.length === 1
+          ? "unique-selected-way-line-relation-partial-route"
+          : "unique-selected-way-line-relation-partial-route-direction-unknown",
         candidates: partialMatches,
       };
     }
+
     if (partialWays.length > 1) {
+      // Prefer the unique selected way whose relation direction agrees with
+      // the observed route order. This is what distinguishes opposite S28
+      // directions when the only shared endpoint is Kaarster See.
+      const forwardMatches = partialMatches.filter((match) => match.direction === "from-to");
+      const forwardWays = [...new Set(forwardMatches.map((match) => match.wayId))];
+      if (forwardWays.length === 1) {
+        const selectedMatches = forwardMatches.filter((match) => match.wayId === forwardWays[0]);
+        const relationIds = [...new Set(selectedMatches.map((match) => match.relationId).filter((id): id is number => id != null))];
+        const lineRefs = [...new Set(selectedMatches.map((match) => match.lineRef))];
+        return {
+          status: "matched",
+          wayId: forwardWays[0],
+          relationId: relationIds.length === 1 ? relationIds[0] : undefined,
+          lineRef: lineRefs.length === 1 ? lineRefs[0] : undefined,
+          direction: "from-to",
+          reason: "unique-forward-selected-way-line-relation-partial-route",
+          candidates: partialMatches,
+        };
+      }
       return {
         status: "ambiguous",
-        reason: "partial-route-line-relation-matches-multiple-selected-ways",
+        reason: forwardWays.length > 1
+          ? "multiple-tracks-match-partial-route-direction"
+          : "no-unique-track-matches-partial-route-direction",
         candidates: partialMatches,
       };
     }
+
     return { status: "unknown", reason: "route-does-not-contain-relation-endpoints", candidates: [] };
   }
 
