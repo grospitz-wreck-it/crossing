@@ -834,8 +834,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const normalizeStationEvidence = (value: unknown) => String(value || "")
       .normalize("NFKC")
       .toLocaleLowerCase("de-DE")
-      .replace(/\\([^)]*\\)/g, " ")
-      .replace(/[^\\p{L}\\p{N}]+/gu, "");
+      .replace(/\([^)]*\)/g, " ")
+      .replace(/[^\p{L}\p{N}]+/gu, "");
     const routeAnchorNames = Array.from(new Set<string>([
       ...(Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : []),
       ...(Array.isArray(crossing.anchorStations) ? crossing.anchorStations.map((station: any) => station.stationName) : []),
