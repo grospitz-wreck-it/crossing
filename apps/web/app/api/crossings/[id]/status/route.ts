@@ -852,10 +852,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       examples: [] as any[],
     };
     for (const item of osmShadowResults) {
-      const train = item.train || {};
-      const routeNames = Array.isArray(train.route) ? train.route : [];
+      const routeNames = Array.isArray(item.route) ? item.route : [];
       const normalizedRoute = routeNames.map(normalizeStationEvidence).filter(Boolean);
-      const observationName = normalizeStationEvidence(train.observationStation || train.stationName);
+      const observationName = normalizeStationEvidence(item.observationStation);
       const matchedAnchors = normalizedRoute.filter((name: string) => routeAnchorSet.has(name));
       const observationMatches = Boolean(observationName && routeAnchorSet.has(observationName));
       // Only call a route "unrelated" when it contains explicit station
@@ -875,8 +874,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       if (osmRouteRelevanceShadow.examples.length < 30) {
         osmRouteRelevanceShadow.examples.push({
           journeyRef: item.journeyRef || null,
-          line: item.line || train.line || "",
-          category: item.category || train.category || "",
+          line: item.line || "",
+          category: item.category || "",
           osmResult: resultKey,
           osmReason: item.result?.reason || null,
           routeLength: normalizedRoute.length,
@@ -1089,6 +1088,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       osmCandidates: osmShadowCandidates.length,
       osmGraphSkipped: osmCandidatePerformance.graphSkipped,
       osmCandidatePerformance,
+      osmRouteRelevanceShadow,
       totalMs: Date.now() - requestStartedAt,
     };
     (payload as any).forecastDiagnostics = {
