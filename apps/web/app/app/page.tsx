@@ -186,6 +186,7 @@ activeIdRef.current = activeId;
 const statusCacheRef = useRef<Map<string, any>>(new Map());
 const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
 const adCacheRef = useRef<Map<string, any[]>>(new Map());
+const contentCacheRef = useRef<Map<string, any[]>>(new Map());
 
 async function load(crossingId: string | null = activeIdRef.current, force = false) {
   if (!crossingId) return;
@@ -195,6 +196,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
     if (activeIdRef.current === crossingId) {
       setData(cached);
       setAds(adCacheRef.current.get(crossingId) || []);
+      setContentItems(contentCacheRef.current.get(crossingId) || []);
     }
     return;
   }
@@ -225,6 +227,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
         const list = await contentRes.json();
         editorialItems = Array.isArray(list) ? list : [];
       }
+      contentCacheRef.current.set(crossingId, editorialItems);
 
       if (activeIdRef.current === crossingId) {
         setData(json);
