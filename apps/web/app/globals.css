@@ -2237,3 +2237,239 @@ margin-top: 24px;
 .appHeaderMenuButton:focus-visible { outline:3px solid rgba(200,16,46,.28); outline-offset:3px; }
 .appHeaderMenuButton svg { width:21px; height:21px; fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 @media(max-width:600px) { .appHeader { min-height:68px; padding:10px 16px; } .appHeaderMenuButton { width:44px; height:44px; flex-basis:44px; } }
+
+
+/* ========================================
+   KOMMENDE SCHLIESSZEITEN – KOMPAKTE LISTE
+======================================== */
+.upcomingClosures {
+  margin-top: 22px;
+  padding: 20px 18px 12px;
+  border: 1px solid rgba(30, 67, 105, .07);
+  border-radius: 26px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 12px 36px rgba(20, 48, 78, .07);
+}
+
+.upcomingClosuresHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.upcomingClosureTime strong,
+.upcomingClosureTime span {
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.upcomingClosuresTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.upcomingClosuresTitleRow h2 {
+  margin: 0;
+  color: #18324a;
+  font-size: 1.12rem;
+  line-height: 1.25;
+  font-weight: 800;
+}
+
+.upcomingClosuresIcon {
+  color: #315f9a;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.upcomingClosuresHeading p {
+  margin: 6px 0 0;
+  color: #73839a;
+  font-size: .82rem;
+  line-height: 1.35;
+}
+
+.upcomingLive {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: #3156a8;
+  font-size: .72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.upcomingLive > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22b66a;
+  box-shadow: 0 0 0 3px rgba(34, 182, 106, .12);
+}
+
+.upcomingClosureList {
+  display: flex;
+  flex-direction: column;
+}
+
+.upcomingClosureRow {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 2px;
+  border-top: 1px solid #edf1f6;
+}
+
+.upcomingClosurePrimary {
+  margin: 0 -6px;
+  padding: 13px 8px;
+  border: 0;
+  border-radius: 16px;
+  background: linear-gradient(105deg, #fff0eb 0%, #fff5f3 100%);
+}
+
+.upcomingClosureTime strong {
+  color: #18324a;
+  font-size: 1.18rem;
+  font-weight: 850;
+  line-height: 1.15;
+}
+
+.upcomingClosurePrimary .upcomingClosureTime strong {
+  color: #a52e25;
+}
+
+.upcomingClosureTime span {
+  margin-top: 3px;
+  color: #8290a3;
+  font-size: .72rem;
+}
+
+.upcomingClosureDetails {
+  min-width: 0;
+}
+
+.upcomingClosureMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  margin-bottom: 5px;
+  color: #718198;
+  font-size: .7rem;
+  font-weight: 650;
+}
+
+.upcomingClosureTrains {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.upcomingClosureTrain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 7px;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.upcomingClosureTrain strong {
+  color: #1d3557;
+  font-size: .82rem;
+  font-weight: 800;
+}
+
+.upcomingClosureTrain span {
+  color: #52677f;
+  font-size: .76rem;
+}
+
+.upcomingClosureEta {
+  align-self: center;
+  padding: 7px 9px;
+  border-radius: 999px;
+  background: #f0f3f9;
+  color: #415875;
+  font-size: .72rem;
+  font-weight: 800;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.upcomingClosurePrimary .upcomingClosureEta {
+  background: #ffe1dc;
+  color: #a52e25;
+}
+
+.upcomingClosuresEmpty {
+  padding: 18px 4px;
+  border-top: 1px solid #edf1f6;
+  color: #718198;
+  font-size: .88rem;
+}
+
+.upcomingClosuresToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 14px 4px 5px;
+  border: 0;
+  border-top: 1px solid #edf1f6;
+  background: transparent;
+  color: #1763bd;
+  font-size: .88rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.upcomingClosuresToggle span {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+@media (max-width: 420px) {
+  .upcomingClosures {
+    padding: 17px 13px 10px;
+    border-radius: 22px;
+  }
+
+  .upcomingClosuresHeading {
+    gap: 8px;
+  }
+
+  .upcomingClosuresTitleRow h2 {
+    font-size: 1rem;
+  }
+
+  .upcomingLive {
+    padding: 6px 8px;
+    font-size: .66rem;
+  }
+
+  .upcomingClosureRow {
+    grid-template-columns: 65px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .upcomingClosureEta {
+    grid-column: 2;
+    justify-self: start;
+    margin-top: 3px;
+  }
+
+  .upcomingClosurePrimary .upcomingClosureEta {
+    margin-top: 3px;
+  }
+}
