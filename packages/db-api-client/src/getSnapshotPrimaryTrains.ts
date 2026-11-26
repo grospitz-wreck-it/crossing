@@ -145,11 +145,14 @@ export async function getSnapshotPrimaryTrains(
   const candidates: SnapshotPrimaryTrain[] = [];
 
   for (const row of rows || []) {
-    // Do not let bus journeys in the shared Mobilithek snapshot create
-    // primary train candidates for railway crossings.
-    if (!isRailService({ line: row.line, category: row.category })) continue;
     const calls = parseJson(row.calls_json, []);
     if (!Array.isArray(calls) || !calls.length) continue;
+    const routeForClassification = calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean).length >= 2
+      ? calls.map((item: any) => String(item?.name || "").trim()).filter(Boolean)
+      : parseJson(row.route_json, []).map(String).filter(Boolean);
+    // Exclude ambiguous S-labelled bus services using explicit route-stop
+    // markers before they can become primary train candidates.
+    if (!isRailService({ line: row.line, category: row.category, route: routeForClassification })) continue;
 
     // Only explicit reference stations may create primary-stop candidates.
     // Configured before/after stations are attached below as timing observations
