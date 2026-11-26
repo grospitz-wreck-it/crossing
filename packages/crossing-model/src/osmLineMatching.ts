@@ -23,7 +23,7 @@ export type OSMLineAssignment = {
     wayId: string;
     relationId?: number;
     lineRef: string;
-    direction: "from-to" | "to-from";
+    direction?: "from-to" | "to-from";
     from?: string;
     to?: string;
     fromIndex?: number;
