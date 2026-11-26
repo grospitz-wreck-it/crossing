@@ -171,7 +171,8 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
     setDragX(0);
   }
 
-  const slideWidth = 100 / items.length;\n  const safeIndex = Math.min(activeIndex, items.length - 1);
+  const slideWidth = 100 / items.length;
+  const safeIndex = Math.min(activeIndex, items.length - 1);
 
   return (
     <section
