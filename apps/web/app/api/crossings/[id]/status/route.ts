@@ -351,7 +351,23 @@ function toPayload(crossing: any, trains: any[], lineHints: string[], globalTimi
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id }=await params;
+  const { id } = await params;
+  const debugMode = new URL(request.url).searchParams.get("debug");
+  const includeOsmDetails = debugMode === "osm";
+  const includeComparisonDetails = debugMode === "compare";
+  // Fast path: serve the last computed status before loading crossing config,
+  // station links, or global timing settings. This reduces a warm status hit
+  // to one indexed cache-row read instead of several config reads.
+  const cacheKey = `status:${id}${includeOsmDetails ? ":osm-debug" : ""}`;
+  const cached = includeComparisonDetails
+    ? null
+    : await readCrossingForecastCache<any>(cacheKey, 60_000);
+  if (cached) {
+    return Response.json(cached, {
+      headers: { "X-Crossing-Status-Cache": "HIT" },
+    });
+  }
+
   let crossing = await loadCrossing(id);
   if (!crossing) {
     // Explicit aliases for legacy IDs still stored by older app clients.
@@ -383,11 +399,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if(!crossing)return Response.json({error:"Crossing not found"},{status:404});
   let globalTimingCorrectionSeconds = 0;
   try {
-    await db.execute(`CREATE TABLE IF NOT EXISTS crossing_timing_settings (
-      setting_key TEXT PRIMARY KEY,
-      setting_value TEXT NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )`);
+    // This table is provisioned by the existing admin/settings path.
+    // Avoid issuing DDL on every cache miss in the public status endpoint.
     const timingSetting = await db.execute({
       sql: "SELECT setting_value FROM crossing_timing_settings WHERE setting_key = ? LIMIT 1",
       args: ["global_crossing_time_correction_seconds"],
@@ -407,14 +420,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // OSM track/rule edit must never keep serving a forecast computed from old rules.
   // Keep verbose OSM diagnostics in a separate cache entry so normal app requests
   // never pay the response-size or cache-storage cost of per-journey route details.
-  const debugMode = new URL(request.url).searchParams.get("debug");
-  const includeOsmDetails = debugMode === "osm";
-  const includeComparisonDetails = debugMode === "compare";
   const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds);
-  const timingConfigKey = JSON.stringify(crossing.rules && !Array.isArray(crossing.rules) ? crossing.rules.timing || {} : {});
-  const cacheKey=`status:${crossing.id}:${crossing.configUpdatedAt || "unversioned"}:global-${globalTimingCorrectionSeconds}:timing-${timingConfigKey}${includeOsmDetails ? ":osm-debug" : ""}`;
-  const cached=includeComparisonDetails ? null : await readCrossingForecastCache<any>(cacheKey,30_000);
-  if(cached)return Response.json(cached,{headers:{"X-Crossing-Status-Cache":"HIT"}});
   // Keep a short-lived previous forecast as a safety net when one snapshot poll
   // temporarily loses a journey. Explicit OSM rejections are never resurrected.
   const previousForecast = await readCrossingForecastCache<any>(cacheKey,90_000);

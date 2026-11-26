@@ -57,10 +57,10 @@ type CorridorGraph = {
 // instance that handled the PATCH, while status requests may hit another
 // serverless instance. Keep mutable crossing/matcher state short-lived so a
 // newly saved OSM selection and invalidated profile become visible promptly.
-const CACHE_TTL_MS = 10_000;
+const CACHE_TTL_MS = 60_000;
 const STATION_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
-const RESULT_CACHE_TTL_MS = 10_000;
-const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 5_000;
+const RESULT_CACHE_TTL_MS = 60_000;
+const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 30_000;
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
@@ -92,10 +92,32 @@ async function loadStationCatalog() {
   if (stationCatalogPromise) return stationCatalogPromise;
   stationCatalogPromise = (async () => {
     try {
-      const result = await db.execute({ sql: `SELECT eva, name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`, args: [] });
-      console.info(`[STATION CATALOG] source=web mode=full-scan rows=${result.rows.length}`);
+      let rows: any[] = [];
+      let source = "compact-cache";
+      try {
+        const compact = await db.execute({
+          sql: `SELECT payload_json FROM railway_station_catalog_route_cache WHERE id = 1 LIMIT 1`,
+          args: [],
+        });
+        const payload = compact.rows[0]?.payload_json;
+        const parsed = payload ? JSON.parse(String(payload)) : [];
+        if (Array.isArray(parsed)) rows = parsed;
+      } catch {
+        // The compact lookup table is introduced by migration 011. Keep a
+        // bounded compatibility fallback until that migration is applied.
+        source = "legacy-fallback";
+      }
+      if (!rows.length) {
+        const result = await db.execute({
+          sql: `SELECT eva, name, lat, lon FROM railway_station_catalog WHERE lat IS NOT NULL AND lon IS NOT NULL`,
+          args: [],
+        });
+        rows = result.rows as any[];
+        source = "full-scan";
+      }
+      console.info(`[STATION CATALOG] source=web mode=${source} rows=${rows.length}`);
       const byName = new Map<string, RouteStation>();
-      for (const row of result.rows as any[]) {
+      for (const row of rows) {
         const name = String(row.name || "");
         const normalized = normalizeStationName(name);
         if (!normalized || byName.has(normalized)) continue;
@@ -118,7 +140,7 @@ async function routeToCoordinates(route: string[]): Promise<RouteStation[]> {
     const byName = await loadStationCatalog();
     const value = route.map((name) => byName.get(normalizeStationName(name)) || { name });
     console.log("[OSM ROUTE]", route.map((name, i) => ({ input: name, normalized: normalizeStationName(name), resolved: value[i]?.lat != null && value[i]?.lon != null, lat: value[i]?.lat, lon: value[i]?.lon })));
-    stationCache.set(key, { expiresAt: Date.now() + CACHE_TTL_MS, value });
+    stationCache.set(key, { expiresAt: Date.now() + 60 * 60_000, value });
     return value;
   } catch (error) {
     console.error("Failed to resolve route stations:", error);
