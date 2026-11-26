@@ -828,6 +828,64 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         byResult,
       };
     })();
+    // Shadow-only route relevance audit. This deliberately does not alter
+    // graph calls or candidate inclusion: it measures whether an explicit
+    // route/observation station overlaps the crossing's configured corridor.
+    const normalizeStationEvidence = (value: unknown) => String(value || "")
+      .normalize("NFKC")
+      .toLocaleLowerCase("de-DE")
+      .replace(/\\([^)]*\\)/g, " ")
+      .replace(/[^\\p{L}\\p{N}]+/gu, "");
+    const routeAnchorNames = Array.from(new Set<string>([
+      ...(Array.isArray(crossing.requiredRouteStops) ? crossing.requiredRouteStops : []),
+      ...(Array.isArray(crossing.anchorStations) ? crossing.anchorStations.map((station: any) => station.stationName) : []),
+      ...configuredObservationStations.map((station: any) => station.stationName),
+    ].map(normalizeStationEvidence).filter(Boolean)));
+    const routeAnchorSet = new Set(routeAnchorNames);
+    const osmRouteRelevanceShadow = {
+      mode: "shadow-only",
+      anchorCount: routeAnchorSet.size,
+      evaluated: osmShadowResults.length,
+      wouldSkip: 0,
+      wouldKeep: 0,
+      byOsmResult: {} as Record<string, { wouldSkip: number; wouldKeep: number }>,
+      examples: [] as any[],
+    };
+    for (const item of osmShadowResults) {
+      const train = item.train || {};
+      const routeNames = Array.isArray(train.route) ? train.route : [];
+      const normalizedRoute = routeNames.map(normalizeStationEvidence).filter(Boolean);
+      const observationName = normalizeStationEvidence(train.observationStation || train.stationName);
+      const matchedAnchors = normalizedRoute.filter((name: string) => routeAnchorSet.has(name));
+      const observationMatches = Boolean(observationName && routeAnchorSet.has(observationName));
+      // Only call a route "unrelated" when it contains explicit station
+      // evidence and none of that evidence overlaps the configured corridor.
+      // Missing/short routes remain inconclusive and are never shadow-skipped.
+      const wouldSkip = normalizedRoute.length >= 2 && matchedAnchors.length === 0 && !observationMatches;
+      const resultKey = String(item.result?.status || "unknown");
+      const resultCounts = osmRouteRelevanceShadow.byOsmResult[resultKey] ||
+        (osmRouteRelevanceShadow.byOsmResult[resultKey] = { wouldSkip: 0, wouldKeep: 0 });
+      if (wouldSkip) {
+        osmRouteRelevanceShadow.wouldSkip += 1;
+        resultCounts.wouldSkip += 1;
+      } else {
+        osmRouteRelevanceShadow.wouldKeep += 1;
+        resultCounts.wouldKeep += 1;
+      }
+      if (osmRouteRelevanceShadow.examples.length < 30) {
+        osmRouteRelevanceShadow.examples.push({
+          journeyRef: item.journeyRef || null,
+          line: item.line || train.line || "",
+          category: item.category || train.category || "",
+          osmResult: resultKey,
+          osmReason: item.result?.reason || null,
+          routeLength: normalizedRoute.length,
+          matchedAnchors: [...new Set(matchedAnchors)],
+          observationStationMatched: observationMatches,
+          decision: wouldSkip ? "would-skip-graph-shadow-only" : "keep",
+        });
+      }
+    }
     const osmReasonCounts = osmShadowResults.reduce((counts: Record<string, number>, item: any) => {
       const key = item.result.reason || item.result.status;
       counts[key] = (counts[key] || 0) + 1;
