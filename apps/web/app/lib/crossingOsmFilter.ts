@@ -57,10 +57,10 @@ type CorridorGraph = {
 // instance that handled the PATCH, while status requests may hit another
 // serverless instance. Keep mutable crossing/matcher state short-lived so a
 // newly saved OSM selection and invalidated profile become visible promptly.
-const CACHE_TTL_MS = 5 * 60_000;
+const CACHE_TTL_MS = 60_000;
 const STATION_CATALOG_CACHE_TTL_MS = 24 * 60 * 60_000;
-const RESULT_CACHE_TTL_MS = 2 * 60_000;
-const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 60_000;
+const RESULT_CACHE_TTL_MS = 60_000;
+const NEGATIVE_CORRIDOR_CACHE_TTL_MS = 30_000;
 
 const stationCache = new Map<string, { expiresAt: number; value: RouteStation[] }>();
 const resultCache = new Map<string, { expiresAt: number; value: CrossingOsmFilterResult }>();
