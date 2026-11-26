@@ -10,6 +10,40 @@ import { filterTrainByCrossingOsm } from "../../../../lib/crossingOsmFilter";
 import { assignTrainToOsmTrack } from "../../../../../../../packages/crossing-model/src/osmLineMatching";
 import { isRailService } from "../../../../../../../packages/db-api-client/src/isRailService";
 
+// Multiple saved crossings are initialized concurrently when the app starts.
+// Reuse the same bounded Mobilithek snapshot read across those requests in a
+// warm server instance; crossing-specific matching remains isolated below.
+let sharedSnapshotRowsCache: { rows: any[]; expiresAt: number } | null = null;
+let sharedSnapshotRowsPromise: Promise<any[]> | null = null;
+
+async function getSharedSnapshotRows(): Promise<any[]> {
+  if (sharedSnapshotRowsCache && sharedSnapshotRowsCache.expiresAt > Date.now()) {
+    return sharedSnapshotRowsCache.rows;
+  }
+  if (sharedSnapshotRowsPromise) return sharedSnapshotRowsPromise;
+
+  sharedSnapshotRowsPromise = (async () => {
+    const from = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
+    const to = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
+    const result = await db.execute({
+      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
+             FROM mobilithek_train_snapshot
+             WHERE actual_time >= ? AND actual_time <= ?
+             ORDER BY actual_time DESC
+             LIMIT 1500`,
+      args: [from, to],
+    });
+    const rows = result.rows as any[];
+    sharedSnapshotRowsCache = { rows, expiresAt: Date.now() + 15_000 };
+    return rows;
+  })().finally(() => {
+    sharedSnapshotRowsPromise = null;
+  });
+
+  return sharedSnapshotRowsPromise;
+}
+
+
 function jsonArray(value: unknown): any[] { if (Array.isArray(value)) return value; try { const parsed = value ? JSON.parse(String(value)) : []; return Array.isArray(parsed) ? parsed : []; } catch { return []; } }
 function jsonValue(value: unknown, fallback: any = {}) { if (value && typeof value === "object") return value; try { return value ? JSON.parse(String(value)) : fallback; } catch { return fallback; } }
 function buildCrossingFromDb(row: any, stationRows: any[]): any {
@@ -430,7 +464,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const timingCorrectionSeconds = timingCorrectionForCrossing(crossing, globalTimingCorrectionSeconds);
   // Keep a short-lived previous forecast as a safety net when one snapshot poll
   // temporarily loses a journey. Explicit OSM rejections are never resurrected.
-  const previousForecast = await readCrossingForecastCache<any>(cacheKey,90_000);
+  // Keep a prior forecast long enough to bridge a transient source omission.
+  // The active closure itself is still bounded by its original predicted end.
+  const previousForecast = await readCrossingForecastCache<any>(cacheKey,5 * 60_000);
   markPerformance("previousForecastReadMs");
   const lineHints=lineHintsForCrossing(crossing);
   // When a crossing has an explicitly selected physical OSM track, station
@@ -456,17 +492,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     // One bounded Mobilithek read feeds both primary-stop and through-route
     // detection. The time index supports newest-first retrieval without sorting
     // the full snapshot table; all candidate matching then happens in memory.
-    const snapshotFrom = new Date(Date.now() - 24 * 60 * 60_000).toISOString();
-    const snapshotTo = new Date(Date.now() + 3 * 60 * 60_000).toISOString();
-    const snapshotResult = await db.execute({
-      sql: `SELECT line,category,journey_number,journey_ref,origin,destination,route_json,calls_json,delay_minutes,actual_time,scheduled_time,direction
-             FROM mobilithek_train_snapshot
-             WHERE actual_time >= ? AND actual_time <= ?
-             ORDER BY actual_time DESC
-             LIMIT 1500`,
-      args: [snapshotFrom, snapshotTo],
-    });
-    const snapshotRows = snapshotResult.rows as any[];
+    const snapshotRows = await getSharedSnapshotRows();
     markPerformance("snapshotQueryCompleteMs");
 
     // PRIMARY: only explicitly declared reference stations.
@@ -1056,14 +1082,30 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       .filter((item: any) => item.journeyKey && item.result.status === "rejected")
       .map((item: any) => String(item.journeyKey)));
     const nowForRetention = Date.now();
+    const previousPhaseStart = Date.parse(String(previousForecast?.phase?.start || ""));
+    const previousPhaseEnd = Date.parse(String(previousForecast?.phase?.end || ""));
+    const previousPhaseIsActive = Number.isFinite(previousPhaseStart) &&
+      Number.isFinite(previousPhaseEnd) &&
+      previousPhaseStart <= nowForRetention &&
+      previousPhaseEnd > nowForRetention;
+    const previousActiveJourneyKeys = new Set(
+      previousPhaseIsActive && Array.isArray(previousForecast?.phase?.trains)
+        ? previousForecast.phase.trains.map(journeyKeyForRetention)
+        : [],
+    );
     const retainedFromPrevious = (Array.isArray(previousForecast?.trains) ? previousForecast.trains : [])
       .filter((train: any) => {
         const key = journeyKeyForRetention(train);
-        const crossingAt = Date.parse(String(train.crossingTime || ""));
         const firstSeenAt = Number(train.forecastObservedAt || nowForRetention);
+        const predictedOpenAt = Date.parse(String(train.predictedBarrierOpenAt || ""));
+        const belongsToActivePhase = previousActiveJourneyKeys.has(key);
+        const stillOccupiesCrossing = belongsToActivePhase
+          ? Number.isFinite(predictedOpenAt) && predictedOpenAt > nowForRetention
+          : Number.isFinite(Date.parse(String(train.crossingTime || ""))) &&
+            Date.parse(String(train.crossingTime || "")) > nowForRetention &&
+            Number.isFinite(firstSeenAt) && nowForRetention - firstSeenAt <= 90_000;
         return key && !currentJourneyKeys.has(key) && !rejectedKeys.has(key) &&
-          Number.isFinite(crossingAt) && crossingAt > nowForRetention &&
-          Number.isFinite(firstSeenAt) && nowForRetention - firstSeenAt <= 90_000;
+          stillOccupiesCrossing;
       });
     // Preserve the original observation timestamp so repeated cache refreshes
     // cannot extend a missing journey's grace period indefinitely.
@@ -1107,6 +1149,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       osmAcceptedCandidates: osmFilteredTrains.length,
       retainedPreviousCandidates: retainedFromPrevious.length,
       retentionWindowSeconds: 90,
+      activePhaseRetention: previousPhaseIsActive,
+      previousPhaseEnd: previousPhaseIsActive ? new Date(previousPhaseEnd).toISOString() : null,
     };
     (payload as any).osmPrefilter = osmPrefilter;
     (payload as any).osmTrackFilter = { selectedWayIds: selectedOsmWayIds, evaluated: osmShadowResults.length, matched: osmShadow.matched, rejected: osmShadow.rejected, unknown: osmShadow.unknown, removedTrainCount: enrichedTrains.length - osmFilteredTrains.length };
