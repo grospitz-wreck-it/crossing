@@ -136,6 +136,7 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
     startX.current = event.clientX;
     startY.current = event.clientY;
     pointerId.current = event.pointerId;
+    if (event.target instanceof HTMLElement) event.target.setPointerCapture(event.pointerId);
     event.stopPropagation();
   }
 
@@ -170,7 +171,7 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
     setDragX(0);
   }
 
-  const slideWidth = 100 / items.length;
+  const slideWidth = 100 / items.length;\n  const safeIndex = Math.min(activeIndex, items.length - 1);
 
   return (
     <section
@@ -184,14 +185,14 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
     >
       <div className="editorialContentHeader">
         <span>Aktuelle Informationen</span>
-        {items.length > 1 && <span className="editorialContentCounter">{activeIndex + 1} / {items.length}</span>}
+        {items.length > 1 && <span className="editorialContentCounter">{safeIndex + 1} / {items.length}</span>}
       </div>
       <div className="editorialContentViewport">
         <div
           className="editorialContentTrack"
           style={{
             width: `${items.length * 100}%`,
-            transform: `translate3d(calc(-${activeIndex * slideWidth}% + ${dragX}px), 0, 0)`,
+            transform: `translate3d(calc(-${safeIndex * slideWidth}% + ${dragX}px), 0, 0)`,
             transition: dragX === 0 ? "transform 240ms cubic-bezier(.22,1,.36,1)" : "none",
           }}
         >
@@ -209,7 +210,7 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
               </>
             );
             return item.action_type === "open_url" && item.action_url ? (
-              <a className="editorialContentCard" key={item.id} style={{ width: `${slideWidth}%` }} href={item.action_url} target="_blank" rel="noopener noreferrer" style={{ borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</a>
+              <a className="editorialContentCard" key={item.id} style={{ width: `${slideWidth}%`, borderColor: (item.accent_color || "#f32643") + "55" }} href={item.action_url} target="_blank" rel="noopener noreferrer">{card}</a>
             ) : (
               <article className="editorialContentCard" key={item.id} style={{ width: `${slideWidth}%`, borderColor: (item.accent_color || "#f32643") + "55" }}>{card}</article>
             );
@@ -222,9 +223,9 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
             <button
               key={item.id}
               type="button"
-              className={`editorialContentDot ${index === activeIndex ? "isActive" : ""}`}
+              className={`editorialContentDot ${index === safeIndex ? "isActive" : ""}`}
               aria-label={`Information ${index + 1} anzeigen`}
-              aria-current={index === activeIndex ? "true" : undefined}
+              aria-current={index === safeIndex ? "true" : undefined}
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => setActiveIndex(index)}
             />
