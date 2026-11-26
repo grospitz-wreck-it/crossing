@@ -238,10 +238,12 @@ function EditorialNewsCarousel({ items }: EditorialNewsCarouselProps) {
 }
 
 export default function Home() {
-const { activeId } = useCrossings();
+const { activeId, saved } = useCrossings();
 
 const [data, setData] =
   useState<any>(null);
+const [bootstrapLoading, setBootstrapLoading] = useState(true);
+const [bootstrapProgress, setBootstrapProgress] = useState(0);
   const [ads, setAds] =
     useState<any[]>([]);
   const [contentItems, setContentItems] = useState<any[]>([]);
@@ -473,6 +475,28 @@ const wakeLockRef =
   }
 
   useEffect(() => {
+  if (!saved.length) {
+    if (!activeId) setBootstrapLoading(false);
+    return;
+  }
+
+  let cancelled = false;
+  setBootstrapLoading(true);
+  setBootstrapProgress(0);
+
+  void Promise.all(saved.map(async (crossing) => {
+    await load(crossing.id, false);
+    if (!cancelled) {
+      setBootstrapProgress((current) => current + 1);
+    }
+  })).finally(() => {
+    if (!cancelled) setBootstrapLoading(false);
+  });
+
+  return () => { cancelled = true; };
+}, [saved]);
+
+useEffect(() => {
   if (!activeId) {
     setData(null);
     setAds([]);
@@ -644,8 +668,13 @@ useEffect(() => {
   };
 }, [data, activeId]);
 
-if (!data) {
-  return <LoadingScreen />;
+if (!data || bootstrapLoading) {
+  return (
+    <LoadingScreen
+      message="Deine gespeicherten Bahnübergänge werden vorbereitet"
+      detail={saved.length ? `Daten für ${Math.min(bootstrapProgress, saved.length)} von ${saved.length} Bahnübergängen geladen` : undefined}
+    />
+  );
 }
 
 if (!data.phase || !data.phase.trains?.length) {
