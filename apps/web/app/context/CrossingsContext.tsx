@@ -17,6 +17,7 @@ type CrossingsContextValue = {
   favoriteId: string | null;
   maxCrossings: number;
   purchasedSlots: number;
+  hydrated: boolean;
   premiumPackage: {
     additionalCrossings: number;
     priceCents: number;
@@ -222,8 +223,11 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ crossingId: id }),
       });
-      if (response.status === 401) return;
-      if (!response.ok) throw new Error(`Failed to remove crossing (${response.status})`);
+      if (response.status === 401) throw new Error("Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.");
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error(result?.error || `Schranke konnte nicht entfernt werden (${response.status}).`);
+      }
       const result = await response.json().catch(() => null);
 
       setSaved((prev) => {
@@ -248,6 +252,7 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
       }
     } catch (error) {
       console.error("Failed to remove crossing:", error);
+      throw error;
     }
   }
 
@@ -261,6 +266,7 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         maxCrossings,
         purchasedSlots,
         premiumPackage,
+        hydrated,
         setActiveId: setActiveIdState,
         setFavorite,
         addCrossing,
