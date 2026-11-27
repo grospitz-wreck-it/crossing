@@ -8,7 +8,11 @@ export type AdminIconName = Extract<AppIconName,
   | "arrow-up-down" | "arrow-up" | "arrow-down" | "check" | "file-text"
 >;
 
-type Props = SVGProps<SVGSVGElement> & { name: AdminIconName; size?: number };
+type Props = Omit<SVGProps<SVGSVGElement>, "name" | "strokeWidth"> & {
+  name: AdminIconName;
+  size?: number;
+  strokeWidth?: number;
+};
 
 export default function AdminIcon({ name, size = 18, ...props }: Props) {
   return <AppIcon name={name} size={size} {...props} />;
