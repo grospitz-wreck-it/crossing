@@ -98,7 +98,7 @@ async function findTask(now: number): Promise<RefreshTask | null> {
     sql: `SELECT s.id
       FROM fuel_stations s
       LEFT JOIN fuel_refresh_state rs
-        ON rs.scope_type = 'station' AND rs.scope_id = s.id
+        ON rs.scope_type = 'prices' AND rs.scope_id = s.id
       WHERE rs.scope_id IS NULL OR rs.next_attempt_at <= ?
       ORDER BY COALESCE(rs.last_success_at, 0) ASC, s.last_seen_at ASC
       LIMIT 10`,
@@ -128,9 +128,9 @@ async function discoverStations(task: Extract<RefreshTask, { kind: "discovery" }
   const statements = [];
   let savedCount = 0;
   for (const station of stations) {
-    if (!station?.id || !station.name) continue;
-    const lat = typeof station.lat === "number" && Number.isFinite(station.lat) ? station.lat : null;
-    const lon = typeof station.lng === "number" && Number.isFinite(station.lng) ? station.lng : null;
+    if (!station?.id || !station.name || typeof station.lat !== "number" || !Number.isFinite(station.lat) || typeof station.lng !== "number" || !Number.isFinite(station.lng)) continue;
+    const lat = station.lat;
+    const lon = station.lng;
     savedCount += 1;
     statements.push(statement(
       `INSERT INTO fuel_stations
@@ -176,7 +176,7 @@ async function discoverStations(task: Extract<RefreshTask, { kind: "discovery" }
     statements.push(statement(
       `INSERT INTO fuel_refresh_state
         (scope_type, scope_id, last_attempt_at, last_success_at, next_attempt_at, error_message, cursor_value, updated_at)
-        VALUES ('station', ?, ?, ?, ?, NULL, NULL, ?)
+        VALUES ('prices', ?, ?, ?, ?, NULL, NULL, ?)
         ON CONFLICT(scope_type, scope_id) DO UPDATE SET
           last_attempt_at = excluded.last_attempt_at,
           last_success_at = excluded.last_success_at,
@@ -302,7 +302,7 @@ export async function POST(request: Request) {
       await saveRefreshState("crossing", task.crossingId, failedAt, failedAt + ERROR_RETRY_MS, message);
     } else {
       for (const stationId of task.stationIds) {
-        await saveRefreshState("station", stationId, failedAt, failedAt + ERROR_RETRY_MS, message);
+        await saveRefreshState("prices", stationId, failedAt, failedAt + ERROR_RETRY_MS, message);
       }
     }
     console.error("[FUEL-REFRESH] update failed:", message);
