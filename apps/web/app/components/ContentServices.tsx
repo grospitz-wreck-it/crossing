@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useCrossings } from "../context/CrossingsContext";
 import styles from "./ContentServices.module.css";
+import AppIcon from "./AppIcon";
 
 type FuelType = "e5" | "e10" | "diesel";
 type Preferences = { newsEnabled: boolean; fuelEnabled: boolean; fuelType: FuelType | null; jokesEnabled: boolean };
@@ -102,11 +103,11 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
         {hasNews && newsItems.map((item) => {
           const card = (
             <>
-              <div className={styles.cardHead}><span className={styles.icon} style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}>{item.icon || "✨"}</span><span className={styles.eyebrow}>{contentLabel(item)}</span></div>
+              <div className={styles.cardHead}><span className={styles.icon} style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}><AppIcon name="info" size={20} /></span><span className={styles.eyebrow}>{contentLabel(item)}</span></div>
               {item.image_url && <img className={styles.newsImage} src={item.image_url} alt="" loading="lazy" />}
               <h2 className={styles.newsTitle}>{item.title}</h2>
               {item.summary && <p className={styles.newsSummary}>{item.summary}</p>}
-              {item.action_type === "open_url" && item.action_url && <span className={styles.action}>Mehr erfahren ↗</span>}
+              {item.action_type === "open_url" && item.action_url && <span className={styles.action}>Mehr erfahren <AppIcon name="arrow-up-right" size={14} /></span>}
             </>
           );
           return item.action_type === "open_url" && item.action_url
@@ -115,7 +116,7 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
         })}
         {hasFuel && (
           <article className={styles.card}>
-            <div className={styles.cardHead}><span className={styles.icon}>⛽</span><span className={styles.eyebrow}>GÜNSTIG TANKEN</span><span className={styles.type}>{prefs.fuelType ? fuelLabels[prefs.fuelType] : ""}</span></div>
+            <div className={styles.cardHead}><span className={styles.icon}><AppIcon name="fuel" size={20} /></span><span className={styles.eyebrow}>GÜNSTIG TANKEN</span><span className={styles.type}>{prefs.fuelType ? fuelLabels[prefs.fuelType] : ""}</span></div>
             {loadingFuel ? <p className={styles.muted}>Preise werden geladen …</p> : fuelError ? <p className={styles.error}>{fuelError}</p> : fuel?.results?.length ? (
               <div className={styles.stationList}>
                 {fuel.results.map((entry, index) => {
@@ -125,7 +126,7 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
                     <div className={styles.stationRank}>{index + 1}</div>
                     <div className={styles.stationInfo}><strong>{station.brand || station.name}</strong><span>{[station.street, station.postCode, station.place].filter(Boolean).join(", ")}</span><small>{entry.direction} · {station.distanceKm != null ? `${station.distanceKm.toLocaleString("de-DE", { maximumFractionDigits: 1 })} km` : "Entfernung unbekannt"}{station.isOpen ? " · geöffnet" : ""}</small></div>
                     <strong className={styles.stationPrice}>{entry.price.toLocaleString("de-DE", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} €</strong>
-                    {route && <a className={styles.routeButton} href={route} target="_blank" rel="noopener noreferrer" aria-label={`Route zu ${station.name} in Google Maps öffnen`} title="Route in Google Maps öffnen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h5l3 4h8M4 5v14h6l3-4h7M9 5l3 4-3 4" /></svg></a>}
+                    {route && <a className={styles.routeButton} href={route} target="_blank" rel="noopener noreferrer" aria-label={`Route zu ${station.name} in Google Maps öffnen`} title="Route in Google Maps öffnen"><AppIcon name="route" size={18} /></a>}
                   </div>;
                 })}
               </div>
@@ -134,9 +135,9 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
           </article>
         )}
         {hasJokes && <article className={styles.card}>
-          <div className={styles.cardHead}><span className={styles.icon}>😄</span><span className={styles.eyebrow}>KLEINE PAUSE</span><span className={styles.type}>Witz des Tages</span></div>
+          <div className={styles.cardHead}><span className={styles.icon}><AppIcon name="message-circle" size={20} /></span><span className={styles.eyebrow}>KLEINE PAUSE</span><span className={styles.type}>Witz des Tages</span></div>
           {loadingJoke ? <p className={styles.muted}>Ein Witz wird gesucht …</p> : jokeError ? <p className={styles.error}>{jokeError}</p> : joke ? <div className={styles.joke}>{joke.type === "single" ? joke.joke : <><strong>{joke.setup}</strong><span>{joke.delivery}</span></>}</div> : <p className={styles.muted}>Noch kein Witz geladen.</p>}
-          <button className={styles.refresh} type="button" onClick={() => void loadJoke()} disabled={loadingJoke}>{loadingJoke ? "Lädt …" : "Neuen Witz laden ↻"}</button>
+          <button className={styles.refresh} type="button" onClick={() => void loadJoke()} disabled={loadingJoke}>{loadingJoke ? "Lädt …" : <>Neuen Witz laden <AppIcon name="refresh" size={15} /></>}</button>
           <div className={styles.attribution}>Witze von <a href="https://sv443.net/jokeapi/v2/" target="_blank" rel="noreferrer">JokeAPI</a></div>
         </article>}
       </div>
