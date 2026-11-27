@@ -7,6 +7,7 @@ import {
 } from "react";
 import LoadingScreen from "../components/LoadingScreen";
 import ContentServices from "../components/ContentServices";
+import AppIcon from "../components/AppIcon";
 import { useCrossings } from "../context/CrossingsContext";
 
 function formatSeconds(
@@ -771,7 +772,7 @@ return (
     <div className="upcomingClosuresHeading">
       <div>
         <div className="upcomingClosuresTitleRow">
-          <span className="upcomingClosuresIcon" aria-hidden="true">▦</span>
+          <span className="upcomingClosuresIcon" aria-hidden="true"><AppIcon name="train" size={21} /></span>
           <h2 id="upcomingClosuresTitle">Kommende Schließzeiten</h2>
         </div>
         <p>Die nächsten erwarteten Schrankenschließungen</p>
@@ -828,7 +829,7 @@ return (
         aria-expanded={showAllClosures}
       >
         {showAllClosures ? "Weniger anzeigen" : "Alle Schließzeiten anzeigen"}
-        <span aria-hidden="true">{showAllClosures ? "⌃" : "⌄"}</span>
+        <AppIcon name={showAllClosures ? "chevron-up" : "chevron-down"} size={16} />
       </button>
     )}
   </section>
