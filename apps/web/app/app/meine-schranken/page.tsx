@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { useCrossings } from "../../context/CrossingsContext";
-import { MAX_FREE_CROSSINGS } from "../../context/CrossingsContext";
+import { FREE_CROSSING_LIMIT, PREMIUM_CROSSING_PACKAGE } from "../../lib/subscription-config";
 import styles from "./page.module.css";
 import ContentPreferences from "../../components/ContentPreferences";
 
@@ -72,8 +72,8 @@ export default function MeineSchrankenPage() {
   }
 
   async function add(id: string) {
-    if (saved.length >= MAX_FREE_CROSSINGS) {
-      setNotice(`Du kannst maximal ${MAX_FREE_CROSSINGS} Schranken speichern.`);
+    if (saved.length >= FREE_CROSSING_LIMIT) {
+      setNotice(`Du kannst maximal ${FREE_CROSSING_LIMIT} Schranken speichern.`);
       return;
     }
     setBusyId(id);
@@ -119,9 +119,29 @@ export default function MeineSchrankenPage() {
             <p>Verwalte deine Bahnübergänge und lege fest, welche Schranke beim Öffnen der App zuerst angezeigt wird.</p>
           </div>
           <div className={styles.countCard}>
-            <strong>{saved.length}<span>/{MAX_FREE_CROSSINGS}</span></strong>
+            <strong>{saved.length}<span>/{FREE_CROSSING_LIMIT}</span></strong>
             <small>gespeichert</small>
           </div>
+        </section>
+
+        <section className={styles.profilePanel}>
+          <div>
+            <span className={styles.overline}>PREMIUM-PAKET</span>
+            <h2>Mehr Schranken im Blick</h2>
+            <p>
+              +{PREMIUM_CROSSING_PACKAGE.additionalCrossings} zusätzliche Bahnübergänge ·{" "}
+              {(PREMIUM_CROSSING_PACKAGE.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto ·{" "}
+              {PREMIUM_CROSSING_PACKAGE.durationDays} Tage Laufzeit
+            </p>
+            <p>
+              {PREMIUM_CROSSING_PACKAGE.enabled
+                ? "Das Paket ist verfügbar."
+                : "Der Kauf wird freigeschaltet, sobald der Katalog ausreichend ausgebaut ist."}
+            </p>
+          </div>
+          <span className={styles.pill}>
+            {PREMIUM_CROSSING_PACKAGE.enabled ? "Verfügbar" : "Demnächst"}
+          </span>
         </section>
 
         <section className={styles.savedPanel}>
@@ -130,7 +150,7 @@ export default function MeineSchrankenPage() {
               <span className={styles.overline}>DEINE AUSWAHL</span>
               <h2>Gespeicherte Schranken</h2>
             </div>
-            <span className={styles.pill}>{saved.length} von {MAX_FREE_CROSSINGS}</span>
+            <span className={styles.pill}>{saved.length} von {FREE_CROSSING_LIMIT}</span>
           </div>
           {saved.length === 0 ? (
             <div className={styles.emptySaved}>
@@ -193,14 +213,14 @@ export default function MeineSchrankenPage() {
                 <article className={styles.resultItem} key={crossing.id}>
                   <span className={styles.resultGlyph}><i /><i /></span>
                   <span className={styles.resultName}><strong>{crossing.name}</strong><small>{distanceLabel(crossing.distance)}</small></span>
-                  <button className={styles.addButton} onClick={() => add(crossing.id)} disabled={busyId === crossing.id || saved.length >= MAX_FREE_CROSSINGS} aria-label={`${crossing.name} hinzufügen`}>
+                  <button className={styles.addButton} onClick={() => add(crossing.id)} disabled={busyId === crossing.id || saved.length >= FREE_CROSSING_LIMIT} aria-label={`${crossing.name} hinzufügen`}>
                     {busyId === crossing.id ? "…" : "+"}
                   </button>
                 </article>
               ))}
             </div>
           )}
-          {saved.length >= MAX_FREE_CROSSINGS && <p className={styles.limitNote}>Du hast das Limit von {MAX_FREE_CROSSINGS} Schranken erreicht. Entferne eine Schranke, um eine andere hinzuzufügen.</p>}
+          {saved.length >= FREE_CROSSING_LIMIT && <p className={styles.limitNote}>Du hast das Limit von {FREE_CROSSING_LIMIT} Schranken erreicht. Entferne eine Schranke, um eine andere hinzuzufügen.</p>}
         </section>
 
         <ContentPreferences />
