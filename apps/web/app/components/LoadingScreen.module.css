@@ -1,3 +1,8 @@
+:global(body:has(.splash-active) .appHeader),
+:global(body:has(.splash-active) [aria-label="Meine Bahnübergänge"]) {
+  display: none !important;
+}
+
 .loadingScreen {
   position: fixed;
   inset: 0;
@@ -92,10 +97,10 @@
 .loadingLogo {
   display: block;
   width: 100%;
-  max-width: 560px;
+  max-width: 504px;
   height: auto;
-  max-height: 128px;
-  margin: 0 0 22px;
+  max-height: 115px;
+  margin: 0 0 12px;
   object-fit: contain;
   filter: drop-shadow(0 7px 18px rgba(34,54,78,.10));
   animation: logoFade .7s .12s ease both;
@@ -175,14 +180,14 @@
 @media (max-width: 520px) {
   .splashContent { width: calc(100vw - 32px); padding: 16px 0; }
   .loadingBar { height: 176px; transform: scale(.88); transform-origin: center bottom; margin-bottom: 0; }
-  .loadingLogo { max-height: 94px; margin-bottom: 16px; }
+  .loadingLogo { max-height: 85px; margin-bottom: 10px; }
   .loadingCopy { min-height: 124px; padding: 21px 18px 19px; border-radius: 23px; }
 }
 
 @media (max-height: 700px) {
   .splashContent { padding: 10px 0; }
   .loadingBar { height: 150px; transform: scale(.78); transform-origin: center bottom; margin-bottom: -4px; }
-  .loadingLogo { max-height: 78px; margin-bottom: 12px; }
+  .loadingLogo { max-height: 70px; margin-bottom: 8px; }
   .loadingCopy { min-height: 112px; padding-top: 17px; padding-bottom: 15px; }
   .loadingProgress { margin-top: 13px; }
 }
