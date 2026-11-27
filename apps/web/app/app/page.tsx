@@ -144,6 +144,7 @@ const [data, setData] =
   useState<any>(null);
 const [bootstrapLoading, setBootstrapLoading] = useState(true);
 const [bootstrapProgress, setBootstrapProgress] = useState(0);
+const [loadingAnimationFinished, setLoadingAnimationFinished] = useState(false);
 const [isSwitchingCrossing, setIsSwitchingCrossing] = useState(false);
   const [ads, setAds] =
     useState<any[]>([]);
@@ -638,11 +639,13 @@ useEffect(() => {
   };
 }, [data, activeId]);
 
-if (!data || bootstrapLoading) {
+if (!data || bootstrapLoading || !loadingAnimationFinished) {
   return (
     <LoadingScreen
       message="Deine gespeicherten Bahnübergänge werden vorbereitet"
       detail={saved.length ? `Daten für ${Math.min(bootstrapProgress, saved.length)} von ${saved.length} Bahnübergängen geladen` : undefined}
+      ready={!bootstrapLoading && Boolean(data)}
+      onComplete={() => setLoadingAnimationFinished(true)}
     />
   );
 }
