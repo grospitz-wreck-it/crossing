@@ -129,7 +129,7 @@ export default function MeineSchrankenPage() {
               <h2>Deine Schranken-Plätze</h2>
               <p className={styles.slotIntro}>Tippe auf ein Plus, um einen Bahnübergang hinzuzufügen. Belegte Plätze kannst du jederzeit austauschen.</p>
             </div>
-            <span className={styles.pill}>{saved.length} / {maxCrossings}</span>
+            <span className={styles.slotCountChip}><strong>{saved.length}</strong><span>/ {maxCrossings} Plätze belegt</span></span>
           </div>
           <div className={styles.slotGrid}>
             {Array.from({ length: slotCount }, (_, index) => {
@@ -146,7 +146,7 @@ export default function MeineSchrankenPage() {
                   </button>
                   <div className={styles.slotActions}>
                     <button className={favorite ? styles.favoriteActive : styles.favorite} onClick={() => setFavorite(crossing.id)} aria-label="Als Favorit festlegen" title="Favorit">★</button>
-                    <button className={styles.slotEdit} onClick={() => { setModalSlot(index); setQuery(""); }} aria-label="Bahnübergang austauschen" title="Austauschen">↻</button>
+                    <button className={styles.slotEdit} onClick={() => { setModalSlot(index); setQuery(""); }} aria-label="Bahnübergang austauschen" title="Bahnübergang bearbeiten"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" /></svg></button>
                     <button className={styles.remove} onClick={() => remove(crossing.id)} disabled={busyId === crossing.id || saved.length <= 1} aria-label="Platz leeren" title="Entfernen">×</button>
                   </div>
                 </article>
