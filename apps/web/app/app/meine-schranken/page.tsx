@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { useCrossings } from "../../context/CrossingsContext";
-import { FREE_CROSSING_LIMIT, PREMIUM_CROSSING_PACKAGE } from "../../lib/subscription-config";
 import styles from "./page.module.css";
 import ContentPreferences from "../../components/ContentPreferences";
 
@@ -22,7 +21,7 @@ function distanceLabel(km?: number) {
 }
 
 export default function MeineSchrankenPage() {
-  const { saved, available, activeId, favoriteId, maxCrossings, purchasedSlots, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
+  const { saved, available, activeId, favoriteId, maxCrossings, purchasedSlots, premiumPackage, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "loading" | "ready" | "denied" | "error">("idle");
@@ -73,10 +72,14 @@ export default function MeineSchrankenPage() {
   }
 
   async function add(id: string) {
-    const replaceId = saved.length >= maxCrossings
+    if (saved.length > maxCrossings) {
+      setNotice(`Dein Kontingent umfasst aktuell ${maxCrossings} Plätze. Entferne zuerst Schranken, bis du wieder innerhalb deines Kontingents bist.`);
+      return;
+    }
+    const replaceId = saved.length === maxCrossings
       ? (replaceTargetId || saved[0]?.id)
       : undefined;
-    if (saved.length >= maxCrossings && !replaceId) {
+    if (saved.length === maxCrossings && !replaceId) {
       setNotice("Wähle zuerst eine gespeicherte Schranke aus, die ersetzt werden soll.");
       return;
     }
@@ -134,18 +137,18 @@ export default function MeineSchrankenPage() {
             <span className={styles.overline}>PREMIUM-PAKET</span>
             <h2>Mehr Schranken im Blick</h2>
             <p>
-              +{PREMIUM_CROSSING_PACKAGE.additionalCrossings} zusätzliche Plätze ·{" "}
-              {(PREMIUM_CROSSING_PACKAGE.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto ·{" "}
-              {PREMIUM_CROSSING_PACKAGE.durationDays} Tage Laufzeit
+              +{premiumPackage.additionalCrossings} zusätzliche Plätze ·{" "}
+              {(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto ·{" "}
+              {premiumPackage.durationDays} Tage Laufzeit
             </p>
             <p>
-              {PREMIUM_CROSSING_PACKAGE.enabled
+              {premiumPackage.enabled
                 ? "Das Paket ist verfügbar."
                 : "Der Kauf wird freigeschaltet, sobald der Katalog ausreichend ausgebaut ist."}
             </p>
           </div>
           <span className={styles.pill}>
-            {PREMIUM_CROSSING_PACKAGE.enabled ? "Verfügbar" : "Demnächst"}
+            {premiumPackage.enabled ? "Verfügbar" : "Demnächst"}
           </span>
         </section>
 
@@ -210,7 +213,7 @@ export default function MeineSchrankenPage() {
           </label>
 
           {locationState === "ready" && <div className={styles.locationNote}>Standort gefunden – Ergebnisse sind nach Entfernung sortiert. Deine GPS-Daten bleiben auf deinem Gerät.</div>}
-          {saved.length >= maxCrossings && saved.length > 0 && (
+          {saved.length === maxCrossings && saved.length > 0 && (
             <div className={styles.limitNote}>
               <strong>Alle {maxCrossings} Plätze sind belegt.</strong>
               <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
@@ -234,14 +237,15 @@ export default function MeineSchrankenPage() {
                 <article className={styles.resultItem} key={crossing.id}>
                   <span className={styles.resultGlyph}><i /><i /></span>
                   <span className={styles.resultName}><strong>{crossing.name}</strong><small>{distanceLabel(crossing.distance)}</small></span>
-                  <button className={styles.addButton} onClick={() => add(crossing.id)} disabled={busyId === crossing.id} aria-label={`${crossing.name} ${saved.length >= maxCrossings ? "als Ersatz übernehmen" : "hinzufügen"}`}>
+                  <button className={styles.addButton} onClick={() => add(crossing.id)} disabled={busyId === crossing.id || saved.length > maxCrossings} aria-label={`${crossing.name} ${saved.length >= maxCrossings ? "als Ersatz übernehmen" : "hinzufügen"}`}>
                     {busyId === crossing.id ? "…" : saved.length >= maxCrossings ? "↻" : "+"}
                   </button>
                 </article>
               ))}
             </div>
           )}
-          {saved.length >= maxCrossings && <p className={styles.limitNote}>Mit ↻ ersetzt du die oben ausgewählte Schranke direkt – ohne sie vorher löschen zu müssen.</p>}
+          {saved.length === maxCrossings && <p className={styles.limitNote}>Mit ↻ ersetzt du die oben ausgewählte Schranke direkt – ohne sie vorher löschen zu müssen.</p>}
+          {saved.length > maxCrossings && <p className={styles.limitNote}>Dein Premium-Kontingent ist abgelaufen. Deine gespeicherten Schranken bleiben erhalten. Entferne bitte {saved.length - maxCrossings} Schranke(n), bevor du neue hinzufügen kannst.</p>}
         </section>
 
         <ContentPreferences />
