@@ -68,7 +68,7 @@ export default function ContentPreferences() {
     <section className={styles.panel}>
       <div className={styles.heading}>
         <span className={styles.eyebrow}>PERSONALISIEREN</span>
-        <h2>Dein Content</h2>
+        <h2>Mein Content</h2>
         <p>Wähle aus, welche zusätzlichen Inhalte in deiner Schranken-Übersicht erscheinen sollen.</p>
       </div>
       {loading ? <div className={styles.loading}>Einstellungen werden geladen …</div> : (
