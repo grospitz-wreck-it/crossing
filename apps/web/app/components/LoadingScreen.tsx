@@ -5,20 +5,21 @@ import styles from "./LoadingScreen.module.css";
 type LoadingScreenProps = {
   message?: string;
   detail?: string;
-  ready?: boolean;
+  progress?: number;
   onComplete?: () => void;
 };
 
-export default function LoadingScreen({ message, detail, ready = false, onComplete }: LoadingScreenProps) {
+export default function LoadingScreen({ message, detail, progress = 0, onComplete }: LoadingScreenProps) {
   return (
     <main className={styles.loadingScreen} role="status" aria-live="polite">
       <div className={styles.loadingOverlay} />
       <div className={styles.splashContent}>
         <div className={styles.loadingBar} aria-label="Schranken-Animation">
           <div
-            className={`${styles.loadingBarFill} ${ready ? styles.loadingBarReady : ""}`}
-            onAnimationEnd={(event) => {
-              if (event.currentTarget === event.target && ready) {
+            className={styles.loadingBarFill}
+            style={{ transform: `rotate(${-70 * Math.max(0, Math.min(100, progress)) / 100}deg)` }}
+            onTransitionEnd={(event) => {
+              if (event.currentTarget === event.target && event.propertyName === "transform" && progress >= 100) {
                 onComplete?.();
               }
             }}
