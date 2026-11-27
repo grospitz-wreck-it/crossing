@@ -1,0 +1,30 @@
+"use client";
+import {
+  Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
+  ArrowUpDown, ArrowUpRight, Bell, CalendarDays, Check, ChevronDown,
+  ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gauge, Home,
+  Info, Map, MapPin, Menu, Megaphone, MessageCircle, MoreHorizontal,
+  Navigation, Pencil, Play, Plus, RefreshCw, Route, Search, Settings,
+  ShieldCheck, TrainFront, Trash2, Users, X, type LucideIcon,
+} from "lucide-react";
+import type { SVGProps } from "react";
+const icons = {
+  home: Home, railway: TrainFront, train: TrainFront, clock: Clock3,
+  megaphone: Megaphone, users: Users, activity: Activity, chart: Gauge,
+  trash: Trash2, pencil: Pencil, pause: MoreHorizontal, play: Play,
+  plus: Plus, x: X, "arrow-up-right": ArrowUpRight, "arrow-right": ArrowRight,
+  "arrow-left": ArrowLeft, "arrow-up-down": ArrowUpDown, "arrow-up": ArrowUp,
+  "arrow-down": ArrowDown, check: Check, "file-text": Info, menu: Menu,
+  fuel: Fuel, map: Map, "map-pin": MapPin, navigation: Navigation,
+  route: Route, search: Search, settings: Settings, bell: Bell,
+  calendar: CalendarDays, refresh: RefreshCw, "chevron-down": ChevronDown,
+  "chevron-up": ChevronUp, "chevron-left": ChevronLeft,
+  "chevron-right": ChevronRight, alert: AlertTriangle, info: Info,
+  "shield-check": ShieldCheck, "message-circle": MessageCircle,
+} satisfies Record<string, LucideIcon>;
+export type AppIconName = keyof typeof icons;
+type Props = Omit<SVGProps<SVGSVGElement>, "name"> & { name: AppIconName; size?: number; strokeWidth?: number };
+export default function AppIcon({ name, size = 20, strokeWidth = 1.8, ...props }: Props) {
+  const Icon = icons[name];
+  return <Icon size={size} strokeWidth={strokeWidth} aria-hidden="true" focusable="false" {...props} />;
+}
