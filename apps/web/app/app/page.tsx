@@ -1018,36 +1018,29 @@ return (
   SCHRANKE RUNTER
 </button>
 
+      {measurementState === "close-recorded" && (
+        <button
+          className="flagButton"
+          disabled={unexpectedTrainSaved || savingUnexpectedTrain}
+          onClick={() => void saveUnexpectedTrain()}
+        >
+          {savingUnexpectedTrain
+            ? "WIRD GESPEICHERT …"
+            : unexpectedTrainSaved
+              ? "✓ SONDERFALL GESPEICHERT"
+              : "⚠ GÜTERZUG / SONDERZUG"}
+        </button>
+      )}
+
       <button
-  className={`cta ctaOpen ${
-    measurementState ===
-    "open-recorded"
-      ? "disabledMeasurement"
-      : ""
-  }`}
-  disabled={
-    measurementState ===
-    "open-recorded"
-  }
-  onClick={() =>
-    setPendingEvent("open")
-  }
->
-  SCHRANKE HOCH
-</button>
- {measurementState === "close-recorded" && (
-  <button
-    className="flagButton"
-    disabled={unexpectedTrainSaved || savingUnexpectedTrain}
-    onClick={() => void saveUnexpectedTrain()}
-  >
-    {savingUnexpectedTrain
-      ? "WIRD GESPEICHERT …"
-      : unexpectedTrainSaved
-        ? "✓ SONDERFALL GESPEICHERT"
-        : "⚠ GÜTERZUG / SONDERZUG"}
-  </button>
-)}
+        className={`cta ctaOpen ${
+          measurementState === "open-recorded" ? "disabledMeasurement" : ""
+        }`}
+        disabled={measurementState === "open-recorded"}
+        onClick={() => setPendingEvent("open")}
+      >
+        SCHRANKE HOCH
+      </button>
     </div>
 )}
  

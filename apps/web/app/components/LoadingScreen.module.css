@@ -6,7 +6,8 @@
   place-items: center;
   overflow: hidden;
   isolation: isolate;
-  background: url("/images/bg.webp") center center / cover no-repeat;
+  background:
+    radial-gradient(ellipse at 50% 34%, rgba(255,255,255,.98) 0%, rgba(245,248,252,.96) 48%, rgba(229,237,246,.98) 100%);
   z-index: 1000;
 }
 
@@ -14,43 +15,32 @@
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse at 50% 42%, rgba(255,255,255,.74), rgba(241,246,251,.86) 58%, rgba(232,239,247,.91)),
-    rgba(244, 248, 252, .72);
-  backdrop-filter: blur(10px);
+    radial-gradient(ellipse at 50% 44%, rgba(255,255,255,.35), rgba(232,239,248,.22) 72%),
+    linear-gradient(145deg, rgba(255,255,255,.45), rgba(221,231,243,.22));
+  pointer-events: none;
 }
 
 .splashContent {
   position: relative;
   z-index: 2;
-  width: min(540px, 92vw);
+  width: min(560px, calc(100vw - 36px));
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 28px 22px 34px;
-  animation: splashEnter .55s ease both;
+  padding: 28px 0;
+  animation: splashEnter .65s cubic-bezier(.2,.75,.25,1) both;
 }
 
-.loadingLogo {
-  display: block;
-  width: min(360px, 70vw);
-  max-height: 112px;
-  height: auto;
-  object-fit: contain;
-  opacity: 0;
-  filter: drop-shadow(0 8px 18px rgba(34, 54, 78, .08));
-  animation: logoFade .6s ease forwards;
-}
-
-/* Schranken-Animation */
 .loadingBar {
   position: relative;
   z-index: 2;
-  margin-top: 12px;
+  margin: 0 auto 8px;
   width: 260px;
-  height: 166px;
+  height: 210px;
   display: flex;
   justify-content: center;
   align-items: flex-end;
+  filter: drop-shadow(0 16px 18px rgba(34, 49, 69, .12));
 }
 
 .loadingBar::after {
@@ -58,91 +48,102 @@
   position: absolute;
   left: 50%;
   bottom: 0;
-  width: 12px;
-  height: 56px;
+  width: 16px;
+  height: 66px;
   transform: translateX(-50%);
-  border-radius: 6px;
-  background: linear-gradient(90deg, #3f4855, #687486 52%, #3e4652);
-  box-shadow: 0 8px 18px rgba(28, 43, 61, .2), inset 0 1px 0 rgba(255,255,255,.22);
+  border-radius: 9px;
+  background: linear-gradient(90deg, #354052, #738197 52%, #354052);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.32), 0 8px 20px rgba(28,43,61,.2);
 }
 
 .loadingBar::before {
   content: "";
   position: absolute;
   left: 50%;
-  bottom: 49px;
-  width: 20px;
-  height: 20px;
+  bottom: 57px;
+  width: 26px;
+  height: 26px;
   transform: translateX(-50%);
-  border: 3px solid rgba(255,255,255,.78);
+  border: 4px solid rgba(255,255,255,.92);
   border-radius: 50%;
-  background: #596678;
-  box-shadow: 0 3px 10px rgba(0,0,0,.2);
+  background: #536176;
+  box-shadow: 0 5px 16px rgba(0,0,0,.22);
   z-index: 3;
 }
 
 .loadingBarFill {
   position: absolute;
   left: 50%;
-  bottom: 54px;
-  width: 190px;
-  height: 13px;
+  bottom: 66px;
+  width: 218px;
+  height: 17px;
   margin-left: -2px;
-  transform-origin: 6px 50%;
-  border: 1px solid rgba(255,255,255,.78);
+  transform-origin: 7px 50%;
+  border: 1px solid rgba(255,255,255,.92);
   border-radius: 999px;
-  background: repeating-linear-gradient(135deg, #fff 0 16px, #d73535 16px 32px);
-  box-shadow: 0 5px 14px rgba(31, 47, 66, .2);
+  background: repeating-linear-gradient(135deg, #fff 0 18px, #e33236 18px 36px);
+  box-shadow: 0 7px 18px rgba(31,47,66,.2);
   z-index: 2;
   animation: barrierOpen 3.2s cubic-bezier(.2,.85,.2,1) forwards;
 }
 
+.loadingLogo {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  max-height: 128px;
+  margin: 0 0 22px;
+  object-fit: contain;
+  filter: drop-shadow(0 7px 18px rgba(34,54,78,.10));
+  animation: logoFade .7s .12s ease both;
+}
+
 .loadingCopy {
-  width: min(420px, 100%);
-  min-height: 112px;
-  margin-top: 2px;
-  padding: 20px 24px 18px;
+  width: 100%;
+  min-height: 132px;
+  padding: 25px clamp(20px, 5vw, 42px) 22px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  border: 1px solid rgba(255,255,255,.82);
-  border-radius: 20px;
-  background: rgba(255,255,255,.66);
-  box-shadow: 0 16px 42px rgba(43, 62, 84, .09), inset 0 1px 0 rgba(255,255,255,.9);
-  backdrop-filter: blur(14px);
+  border: 1px solid rgba(255,255,255,.94);
+  border-radius: 28px;
+  background: rgba(255,255,255,.78);
+  box-shadow: 0 24px 70px rgba(43,62,84,.12), inset 0 1px 0 rgba(255,255,255,.98);
+  backdrop-filter: blur(22px) saturate(1.25);
   text-align: center;
 }
 
 .loadingEyebrow {
-  color: #718096;
-  font: 700 10px/1.2 system-ui, sans-serif;
-  letter-spacing: .16em;
+  color: #72829a;
+  font: 750 11px/1.2 system-ui, sans-serif;
+  letter-spacing: .19em;
   text-transform: uppercase;
 }
 
 .loadingMessage {
-  margin: 8px 0 0;
+  margin: 12px 0 0;
   color: #1e2d40;
-  font: 700 clamp(16px, 3.8vw, 19px)/1.35 system-ui, sans-serif;
-  letter-spacing: -.025em;
+  font: 750 clamp(19px, 4vw, 27px)/1.22 system-ui, sans-serif;
+  letter-spacing: -.045em;
   text-wrap: balance;
 }
 
 .loadingDetail {
-  margin: 6px 0 0;
+  margin: 10px 0 0;
   max-width: 34em;
-  color: #65758a;
-  font: 500 13px/1.55 system-ui, sans-serif;
+  color: #687991;
+  font: 550 clamp(13px, 2.5vw, 16px)/1.5 system-ui, sans-serif;
   text-wrap: balance;
 }
 
 .loadingProgress {
-  width: 76px;
-  height: 3px;
-  margin-top: 15px;
+  width: 104px;
+  height: 4px;
+  margin-top: 22px;
   overflow: hidden;
   border-radius: 999px;
-  background: rgba(91, 112, 138, .13);
+  background: rgba(91,112,138,.13);
 }
 
 .loadingProgress span {
@@ -150,65 +151,9 @@
   width: 42%;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, #6688ad, #294d75);
+  background: linear-gradient(90deg, #8aa5c5, #315b88);
   animation: progressPulse 1.5s ease-in-out infinite;
 }
-
-.debugPanel {
-  position: fixed;
-  z-index: 50;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  max-width: 760px;
-  margin: 0 auto;
-  padding: 14px 16px;
-  border-radius: 14px;
-  background: rgba(12, 18, 28, .94);
-  color: #e8edf5;
-  box-shadow: 0 14px 40px rgba(0,0,0,.35);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.55;
-  text-align: left;
-}
-
-.debugHeader {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  font-family: system-ui, sans-serif;
-  font-size: 14px;
-  margin-bottom: 3px;
-}
-
-.debugHint {
-  opacity: .6;
-  margin-bottom: 8px;
-  font-family: system-ui, sans-serif;
-}
-
-.debugLines {
-  max-height: 190px;
-  overflow: auto;
-  border-top: 1px solid rgba(255,255,255,.12);
-  padding-top: 7px;
-}
-
-.debugLine {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.debugLine span {
-  display: inline-block;
-  width: 42px;
-  opacity: .5;
-}
-
-.debug_wait { color: #ffd166; }
-.debug_ok { color: #8ee6a8; }
-.debug_error { color: #ff8d8d; }
 
 @keyframes barrierOpen {
   from { transform: rotate(0deg); }
@@ -216,12 +161,12 @@
 }
 
 @keyframes logoFade {
-  from { opacity: 0; transform: translateY(12px); }
+  from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes splashEnter {
-  from { opacity: 0; transform: translateY(12px) scale(.985); }
+  from { opacity: 0; transform: translateY(16px) scale(.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
@@ -230,14 +175,23 @@
   100% { transform: translateX(250%); }
 }
 
-@media (max-width: 480px) {
-  .splashContent { padding: 18px 16px 24px; }
-  .loadingLogo { width: min(310px, 74vw); }
-  .loadingBar { margin-top: 2px; transform: scale(.9); transform-origin: center bottom; }
-  .loadingCopy { margin-top: -8px; padding: 18px 18px 16px; }
+@media (max-width: 520px) {
+  .splashContent { width: calc(100vw - 32px); padding: 16px 0; }
+  .loadingBar { height: 176px; transform: scale(.88); transform-origin: center bottom; margin-bottom: 0; }
+  .loadingLogo { max-height: 94px; margin-bottom: 16px; }
+  .loadingCopy { min-height: 124px; padding: 21px 18px 19px; border-radius: 23px; }
+}
+
+@media (max-height: 700px) {
+  .splashContent { padding: 10px 0; }
+  .loadingBar { height: 150px; transform: scale(.78); transform-origin: center bottom; margin-bottom: -4px; }
+  .loadingLogo { max-height: 78px; margin-bottom: 12px; }
+  .loadingCopy { min-height: 112px; padding-top: 17px; padding-bottom: 15px; }
+  .loadingProgress { margin-top: 13px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .loadingBarFill { animation: none; transform: rotate(-70deg); }
   .loadingProgress span { animation: none; width: 100%; }
+  .splashContent, .loadingLogo { animation: none; }
 }
