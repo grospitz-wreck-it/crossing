@@ -123,6 +123,19 @@ function getDestination(
 
 const MAX_PHASE_MS =
   900 * 1000;
+const MEASUREMENT_STATE_PREFIX = "crossing-app:measurement-state:";
+
+// Keep the feedback ID stable across reloads and identical to the ID used by
+// the separate prediction-rating component. The status API intentionally
+// contains forecast data only; it does not provide a predictionId.
+function makePredictionId(crossingId: string, phase: any) {
+  const trainIds = (phase?.trains ?? [])
+    .map((train: any) => String(train.id ?? ""))
+    .sort()
+    .join(",");
+
+  return `${crossingId}:${phase?.start ?? ""}:${phase?.end ?? ""}:${trainIds}`;
+}
 
 export default function Home() {
 const { activeId, saved } = useCrossings();
@@ -187,6 +200,44 @@ const [isSwitchingCrossing, setIsSwitchingCrossing] = useState(false);
 
 const activeIdRef = useRef<string | null>(activeId);
 activeIdRef.current = activeId;
+
+const predictionId =
+  activeId && data?.phase?.start && data?.phase?.end
+    ? makePredictionId(activeId, data.phase)
+    : null;
+
+useEffect(() => {
+  setPendingEvent(null);
+  setMessage("");
+  if (!predictionId) {
+    setMeasurementState("none");
+    setFirstClickAt(null);
+    setUnexpectedTrainSaved(false);
+    return;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(MEASUREMENT_STATE_PREFIX + predictionId);
+    const savedState = raw ? JSON.parse(raw) : null;
+    const savedAt = Number(savedState?.firstClickAt || 0);
+    const isFresh = savedAt > 0 && Date.now() - savedAt <= MAX_PHASE_MS;
+
+    if (savedState?.state === "close-recorded" && isFresh) {
+      setMeasurementState("close-recorded");
+      setFirstClickAt(savedAt);
+      setUnexpectedTrainSaved(savedState.unexpectedTrainSaved === true);
+    } else {
+      window.localStorage.removeItem(MEASUREMENT_STATE_PREFIX + predictionId);
+      setMeasurementState("none");
+      setFirstClickAt(null);
+      setUnexpectedTrainSaved(false);
+    }
+  } catch {
+    setMeasurementState("none");
+    setFirstClickAt(null);
+    setUnexpectedTrainSaved(false);
+  }
+}, [predictionId]);
 
 const statusCacheRef = useRef<Map<string, any>>(new Map());
 const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -261,7 +312,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
 }
 
 async function saveUnexpectedTrain() {
-  if (!data?.predictionId || measurementState !== "close-recorded" || unexpectedTrainSaved || savingUnexpectedTrain) {
+  if (!predictionId || measurementState !== "close-recorded" || unexpectedTrainSaved || savingUnexpectedTrain) {
     return;
   }
 
@@ -271,7 +322,7 @@ async function saveUnexpectedTrain() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        predictionId: data.predictionId,
+        predictionId,
         flag: "unexpected_train",
       }),
     });
@@ -281,7 +332,13 @@ async function saveUnexpectedTrain() {
     }
 
     setUnexpectedTrainSaved(true);
-    setMessage("✓ Güterzug-Sonderfall gespeichert");
+    if (predictionId && firstClickAt) {
+      window.localStorage.setItem(
+        MEASUREMENT_STATE_PREFIX + predictionId,
+        JSON.stringify({ state: "close-recorded", firstClickAt, unexpectedTrainSaved: true })
+      );
+    }
+    setMessage("✓ Güterzug-/Sonderzug-Hinweis gespeichert");
   } catch (error) {
     console.error("Unexpected train flag failed:", error);
     setMessage("⚠️ Speichern fehlgeschlagen – bitte erneut versuchen");
@@ -295,7 +352,7 @@ async function saveMeasurement(
   event: "close" | "open",
   precision: "exact" | "at_least"
 ) {
-  if (!data?.predictionId || savingMeasurement) return;
+  if (!predictionId || savingMeasurement) return;
   if (event === "close" && measurementState === "close-recorded") return;
   if (event === "open" && measurementState === "open-recorded") return;
 
@@ -305,7 +362,7 @@ async function saveMeasurement(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        predictionId: data.predictionId,
+        predictionId,
         event,
         actualAt: new Date().toISOString(),
         phase: data.phase,
@@ -319,8 +376,15 @@ async function saveMeasurement(
 
     if (event === "close") {
       setMeasurementState("close-recorded");
-      setFirstClickAt(Date.now());
+      const recordedAt = Date.now();
+      setFirstClickAt(recordedAt);
       setUnexpectedTrainSaved(false);
+      if (predictionId) {
+        window.localStorage.setItem(
+          MEASUREMENT_STATE_PREFIX + predictionId,
+          JSON.stringify({ state: "close-recorded", firstClickAt: recordedAt, unexpectedTrainSaved: false })
+        );
+      }
       setMessage(precision === "exact"
         ? "✓ Schranke geschlossen – Messung gespeichert"
         : "✓ Zustand erfasst (Zeitpunkt ungenau)");
@@ -328,10 +392,15 @@ async function saveMeasurement(
       setMeasurementState("none");
       setFirstClickAt(null);
       setUnexpectedTrainSaved(false);
+      if (predictionId) {
+        window.localStorage.removeItem(MEASUREMENT_STATE_PREFIX + predictionId);
+      }
       setMessage(precision === "exact"
         ? "✓ Schranke offen – Messung gespeichert"
         : "✓ Öffnungszustand erfasst (Zeitpunkt ungenau)");
     }
+    // Keep the precision choice visible until the server confirms the write.
+    setPendingEvent(null);
   } catch (error) {
     console.error("Measurement save failed:", error);
     setMessage("⚠️ Speichern fehlgeschlagen – bitte erneut versuchen");
@@ -485,6 +554,9 @@ useEffect(() => {
         setFirstClickAt(
           null
         );
+        if (predictionId) {
+          window.localStorage.removeItem(MEASUREMENT_STATE_PREFIX + predictionId);
+        }
 
         setMessage(
           "⚠️ Messung verworfen"
@@ -901,7 +973,6 @@ return (
       disabled={savingMeasurement}
       onClick={() => {
         void saveMeasurement(pendingEvent, "exact");
-        setPendingEvent(null);
       }}
     >
       GERADE EBEN
@@ -912,7 +983,6 @@ return (
       disabled={savingMeasurement}
       onClick={() => {
         void saveMeasurement(pendingEvent, "at_least");
-        setPendingEvent(null);
       }}
     >
       WAR SCHON EINE WEILE SO
@@ -920,6 +990,7 @@ return (
 
     <button
       className="cancelButton"
+      disabled={savingMeasurement}
       onClick={() =>
         setPendingEvent(null)
       }
@@ -974,7 +1045,7 @@ return (
       ? "WIRD GESPEICHERT …"
       : unexpectedTrainSaved
         ? "✓ SONDERFALL GESPEICHERT"
-        : "⚠ GÜTERZUG / SONDERFALL"}
+        : "⚠ GÜTERZUG / SONDERZUG"}
   </button>
 )}
     </div>

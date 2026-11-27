@@ -22,6 +22,24 @@ export async function POST(
     const body =
       await request.json();
 
+    const event = body.event;
+    const actualAt = typeof body.actualAt === "string" ? body.actualAt : "";
+    const predictionId = typeof body.predictionId === "string" ? body.predictionId.trim() : "";
+
+    if (
+      !predictionId ||
+      (event !== "close" && event !== "open") ||
+      !actualAt ||
+      !Number.isFinite(Date.parse(actualAt)) ||
+      !body.phase ||
+      typeof body.phase !== "object"
+    ) {
+      return Response.json(
+        { success: false, error: "Invalid measurement payload" },
+        { status: 400 }
+      );
+    }
+
     // "exact": Nutzer hat den Wechsel (Schranke runter/hoch) live
     // mitbekommen - actualAt ist eine präzise Punktmessung und fließt
     // 1:1 in die Kalibrierung ein.
@@ -49,9 +67,9 @@ export async function POST(
         VALUES (?, ?, ?, ?, ?)
       `,
       args: [
-        body.predictionId ?? null,
-        body.event,
-        body.actualAt,
+        predictionId,
+        event,
+        new Date(actualAt).toISOString(),
         JSON.stringify(
           body.phase
         ),
