@@ -11,9 +11,15 @@ type LoadingScreenProps = {
 
 export default function LoadingScreen({ message, detail, progress = 0, onComplete }: LoadingScreenProps) {
   return (
-    <main className={styles.loadingScreen} role="status" aria-live="polite">
+    <main className={`${styles.loadingScreen} splash-active`} role="status" aria-live="polite">
       <div className={styles.loadingOverlay} />
       <div className={styles.splashContent}>
+        <img
+          src="/images/meineschranke_logo_trans.webp"
+          alt="Meine Schranke"
+          className={styles.loadingLogo}
+        />
+
         <div className={styles.loadingBar} aria-label="Schranken-Animation">
           <div
             className={styles.loadingBarFill}
@@ -25,12 +31,6 @@ export default function LoadingScreen({ message, detail, progress = 0, onComplet
             }}
           />
         </div>
-
-        <img
-          src="/images/meineschranke_logo_trans.webp"
-          alt="Meine Schranke"
-          className={styles.loadingLogo}
-        />
 
         <div className={styles.loadingCopy}>
           <span className={styles.loadingEyebrow}>Einen Moment bitte</span>
