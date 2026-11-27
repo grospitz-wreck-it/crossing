@@ -52,22 +52,58 @@ function lineRouteAnchorPairs(crossing: any, line: string): string[][] {
       .filter((pair: string[]) => pair[0] && pair[1] && normalize(pair[0]) !== normalize(pair[1]))
   );
 }
+function routeStationMatches(value: string, anchor: string): boolean {
+  return Boolean(value && anchor && (
+    value === anchor || value.includes(anchor) || anchor.includes(value)
+  ));
+}
+
 function hasOrderedRouteAnchors(observation: OpenBoardsStationObservation, requiredStops: string[]): boolean {
   const anchors = requiredStops
     .filter((value) => !/^\d{2,7}$/.test(String(value).trim()))
     .map(normalize)
     .filter(Boolean);
   if (anchors.length < 2) return false;
+
   const route = observation.routeNames.map(normalize);
-  const positions = anchors.map((anchor) => route.findIndex((stop) =>
-    stop && (stop === anchor || stop.includes(anchor) || anchor.includes(stop))
-  ));
-  const matched = positions.filter((position) => position >= 0);
-  if (matched.length < 2) return false;
-  for (let index = 1; index < positions.length; index += 1) {
-    if (positions[index - 1] >= 0 && positions[index] >= 0 && positions[index - 1] >= positions[index]) return false;
+  let previousIndex = -1;
+  let matched = 0;
+
+  // OpenBoards provides a partial via-list. Match the configured anchors as an
+  // ordered subsequence, allowing omitted intermediate stops but never allowing
+  // the observed anchors to appear in the opposite order.
+  for (const anchor of anchors) {
+    const index = route.findIndex((stop, routeIndex) =>
+      routeIndex > previousIndex && routeStationMatches(stop, anchor)
+    );
+    if (index < 0) continue;
+    previousIndex = index;
+    matched += 1;
   }
-  return true;
+
+  return matched >= 2;
+}
+
+function hasPartialRouteEndpoint(
+  observation: OpenBoardsStationObservation,
+  relationPair: string[],
+): boolean {
+  const [fromName, toName] = relationPair.map(normalize);
+  if (!fromName || !toName) return false;
+
+  const route = observation.routeNames.map(normalize);
+  if (route.length < 2) return false;
+
+  const fromIndex = route.findIndex((stop) => routeStationMatches(stop, fromName));
+  const toIndex = route.findIndex((stop) => routeStationMatches(stop, toName));
+
+  // When both OSM relation endpoints are present, their order must agree with
+  // the relation. With only one endpoint, it must be at the edge of the partial
+  // via-list; the final selected-way matcher then resolves the physical track.
+  if (fromIndex >= 0 && toIndex >= 0) return fromIndex < toIndex;
+  if (fromIndex >= 0) return fromIndex === 0 || fromIndex === route.length - 1;
+  if (toIndex >= 0) return toIndex === 0 || toIndex === route.length - 1;
+  return false;
 }
 
 /**
@@ -158,7 +194,8 @@ export function getOpenBoardsForecastTrains(
       const hasConfiguredRouteEvidence = configuredAnchors.length >= 2 &&
         hasOrderedRouteAnchors(observation, configuredAnchors);
       const hasRelationRouteEvidence = relationPairs.some((pair) =>
-        hasOrderedRouteAnchors(observation, pair)
+        hasOrderedRouteAnchors(observation, pair) ||
+        hasPartialRouteEndpoint(observation, pair)
       );
       const hasRouteEvidence = hasConfiguredRouteEvidence || hasRelationRouteEvidence;
       if (!hasRouteEvidence) continue;
