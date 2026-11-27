@@ -82,7 +82,7 @@ export default function CrossingSwipeNav({ children }: Props) {
     }
 
     setAnimating(true);
-    setDragX(direction * window.innerWidth * -1);
+    setDragX(-direction * window.innerWidth);
 
     animationTimer.current = window.setTimeout(() => {
       const nextId = saved[nextIndex].id;
