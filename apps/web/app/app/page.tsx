@@ -641,9 +641,43 @@ useEffect(() => {
   return () =>
     clearInterval(timer);
 }, []);
-// Keine zusätzliche API-Abfrage zum errechneten Phasenwechsel:
-// Status- und Countdown-Wechsel werden ausschließlich durch die bereits
-// vorhandenen periodischen bzw. durch Nutzeraktivität ausgelösten Loads bestätigt.
+useEffect(() => {
+  if (!data?.phase) {
+    return;
+  }
+
+  if (refreshTimeout.current) {
+    clearTimeout(
+      refreshTimeout.current
+    );
+  }
+
+  const crossingId = activeId;
+  const target = new Date(
+    data.state === "OPEN" ? data.phase.start : data.phase.end
+  ).getTime();
+
+  const delay =
+    Math.max(
+      0,
+      target - Date.now()
+    ) + 500;
+
+  refreshTimeout.current =
+    setTimeout(() => {
+      if (crossingId) void load(crossingId, true);
+    }, delay);
+
+  return () => {
+    if (
+      refreshTimeout.current
+    ) {
+      clearTimeout(
+        refreshTimeout.current
+      );
+    }
+  };
+}, [data, activeId]);
 
 if (!data || bootstrapLoading) {
   return (
@@ -680,9 +714,16 @@ const closureDuration =
 const train =
   data.phase.trains[0];
 
-// Der Zustand bleibt bis zu einer durch neue API-Daten bestätigten
-// Prognoseänderung stabil. Die Uhr aktualisiert ausschließlich den Countdown.
-const displayState = data.state;
+// Der Status muss lokal am exakten Phasenwechsel umspringen.
+// Die API-Antwort kann noch OPEN enthalten, wenn der Countdown gerade 0 erreicht.
+const phaseStartMs = new Date(data.phase.start).getTime();
+const phaseEndMs = new Date(data.phase.end).getTime();
+const displayState =
+  now >= phaseStartMs && now < phaseEndMs
+    ? "CLOSED"
+    : now < phaseStartMs
+      ? "OPEN"
+      : data.state;
 
   const countdown =
   data?.phase
