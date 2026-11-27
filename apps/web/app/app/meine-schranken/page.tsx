@@ -227,6 +227,7 @@ export default function MeineSchrankenPage() {
               </button>
             </div>
             {locationState === "ready" && <p className={styles.locationNote}>Nach Entfernung sortiert. Deine Standortdaten bleiben auf deinem Gerät.</p>}
+            {notice && <div className={styles.modalError} role="alert">{notice}</div>}
             <div className={styles.modalResults}>
               {results.length === 0 ? (
                 <div className={styles.noResults}>{available.length === 0 ? "Bahnübergänge werden geladen …" : "Keine passenden Bahnübergänge gefunden."}</div>
@@ -234,7 +235,7 @@ export default function MeineSchrankenPage() {
                 <button className={styles.modalResult} key={crossing.id} onClick={() => chooseCrossing(crossing.id)} disabled={busyId === crossing.id}>
                   <span className={styles.resultGlyph}><i /><i /></span>
                   <span className={styles.resultName}><strong>{crossing.name}</strong><small>{distanceLabel(crossing.distance)}</small></span>
-                  <span className={styles.modalAdd}>{busyId === crossing.id ? "…" : "+"}</span>
+                  <span className={styles.modalAdd}>{busyId === crossing.id ? <span className={styles.modalSpinner} aria-label="Wird gespeichert" /> : "+"}</span>
                 </button>
               ))}
             </div>
