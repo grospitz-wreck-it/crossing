@@ -130,6 +130,7 @@ const statusCache = new Map<string, any>();
 const statusInFlight = new Map<string, Promise<void>>();
 const adCache = new Map<string, any[]>();
 const contentCache = new Map<string, any[]>();
+let hasCompletedInitialBootstrap = false;
 
 // Keep the feedback ID stable across reloads and identical to the ID used by
 // the separate prediction-rating component. The status API intentionally
@@ -144,14 +145,14 @@ function makePredictionId(crossingId: string, phase: any) {
 }
 
 export default function Home() {
-const { activeId, saved } = useCrossings();
+const { activeId, saved, favoriteId, hydrated } = useCrossings();
 
 const [data, setData] =
   useState<any>(null);
-const [bootstrapLoading, setBootstrapLoading] = useState(true);
+const [bootstrapLoading, setBootstrapLoading] = useState(!hasCompletedInitialBootstrap);
 const [bootstrapProgress, setBootstrapProgress] = useState(0);
 const [bootstrapDetail, setBootstrapDetail] = useState("Deine Schranke wird geladen");
-const [loadingAnimationFinished, setLoadingAnimationFinished] = useState(false);
+const [loadingAnimationFinished, setLoadingAnimationFinished] = useState(hasCompletedInitialBootstrap);
 const [isSwitchingCrossing, setIsSwitchingCrossing] = useState(false);
   const [ads, setAds] =
     useState<any[]>([]);
@@ -262,7 +263,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
       setAds(adCacheRef.current.get(crossingId) || []);
       setContentItems(contentCacheRef.current.get(crossingId) || []);
     }
-    onProgress?.(100, "Gespeicherte Daten geladen");
+    onProgress?.(100, `${saved.find((item) => item.id === crossingId)?.name ?? "Bahnübergang"} geladen`);
     return;
   }
 
@@ -280,16 +281,13 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
 
   const request = (async () => {
     try {
-      let completed = 0;
-      const markLoaded = (label: string) => {
-        completed += 1;
-        onProgress?.(Math.round((completed / 3) * 85), label);
-      };
+      const crossingName = saved.find((item) => item.id === crossingId)?.name ?? "Bahnübergang";
       const [statusRes, adRes, contentRes] = await Promise.all([
-        fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }).then((response) => { markLoaded("Schrankendaten geladen"); return response; }),
-        fetch(`/api/ads/${crossingId}`, { cache: "no-store" }).then((response) => { markLoaded("Anzeigen geladen"); return response; }),
-        fetch(`/api/content/${crossingId}`, { cache: "no-store" }).then((response) => { markLoaded("Inhalte geladen"); return response; }),
+        fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }),
+        fetch(`/api/ads/${crossingId}`, { cache: "no-store" }),
+        fetch(`/api/content/${crossingId}`, { cache: "no-store" }),
       ]);
+      onProgress?.(85, `${crossingName} geladen`);
       if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
 
       const json = await statusRes.json();
@@ -458,32 +456,45 @@ const wakeLockRef =
   }
 
   useEffect(() => {
-  if (!activeId) {
+  if (hasCompletedInitialBootstrap || !hydrated) return;
+
+  let cancelled = false;
+  const initialCrossings = saved.length
+    ? saved
+    : activeId
+      ? [{ id: activeId, name: "Deine Schranke" }]
+      : [];
+
+  if (initialCrossings.length === 0) {
+    hasCompletedInitialBootstrap = true;
     setBootstrapLoading(false);
-    setBootstrapProgress(0);
+    setLoadingAnimationFinished(true);
     return;
   }
 
-  let cancelled = false;
   setBootstrapLoading(true);
   setBootstrapProgress(0);
+  setBootstrapDetail("Deine Bahnübergänge werden geladen");
 
-  setBootstrapDetail("Deine aktive Schranke wird geladen");
-  void load(activeId, false, (progress, detail) => {
-    if (!cancelled) {
-      setBootstrapProgress(progress);
+  let completed = 0;
+  void Promise.all(initialCrossings.map((crossing) =>
+    load(crossing.id, false, (_progress, detail) => {
+      if (cancelled) return;
+      completed += 1;
+      setBootstrapProgress(Math.round((completed / initialCrossings.length) * 90));
       setBootstrapDetail(detail);
-    }
-  }).finally(() => {
+    })
+  )).finally(() => {
     if (!cancelled) {
+      hasCompletedInitialBootstrap = true;
       setBootstrapProgress(100);
-      setBootstrapDetail("Alles bereit");
+      setBootstrapDetail("Alle Schranken sind bereit");
       setBootstrapLoading(false);
     }
   });
 
   return () => { cancelled = true; };
-}, [activeId]);
+}, [hydrated]);
 
 useEffect(() => {
   if (!activeId) {
@@ -668,7 +679,7 @@ useEffect(() => {
   };
 }, [data, activeId]);
 
-if (!data || bootstrapLoading || !loadingAnimationFinished) {
+if (!hasCompletedInitialBootstrap && (!data || bootstrapLoading || !loadingAnimationFinished)) {
   return (
     <LoadingScreen
       message="Deine aktive Schranke wird vorbereitet"
