@@ -21,6 +21,23 @@ type CrossingCapacity = {
 };
 
 async function getCrossingCapacity(userId: string): Promise<CrossingCapacity> {
+  // Premium-Slots sind zum Launch deaktiviert. In diesem Modus darf die
+  // Verwaltung gespeicherter Schranken nicht von den optionalen Billing-
+  // Tabellen abhängen. So bleibt das kostenlose 3-Slots-Modell verfügbar,
+  // auch wenn die spätere Premium-Migration noch nicht eingespielt wurde.
+  if (!PREMIUM_CROSSING_PACKAGE.enabled) {
+    return {
+      freeLimit: FREE_CROSSING_LIMIT,
+      purchasedSlots: 0,
+      maxCrossings: FREE_CROSSING_LIMIT,
+      premiumEnabled: false,
+      packageSlots: PREMIUM_CROSSING_PACKAGE.additionalCrossings,
+      packagePriceCents: PREMIUM_CROSSING_PACKAGE.priceCents,
+      packageCurrency: PREMIUM_CROSSING_PACKAGE.currency,
+      packageDurationDays: PREMIUM_CROSSING_PACKAGE.durationDays,
+    };
+  }
+
   const [configRows, purchaseRows] = await Promise.all([
     authDb.all<{
       free_crossing_limit: number;
