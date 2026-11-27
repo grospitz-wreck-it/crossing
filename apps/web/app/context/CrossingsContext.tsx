@@ -110,15 +110,19 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
           : normalized.find((crossing: any) => crossing.isFavorite)?.id ?? null;
 
         if (!cancelled) {
-          setSaved(withActiveCrossing(normalized, rawActive, []));
+          const ordered = apiFavoriteId
+            ? [...normalized].sort((a: any, b: any) =>
+                a.id === apiFavoriteId ? -1 : b.id === apiFavoriteId ? 1 : 0
+              )
+            : normalized;
+          setSaved(withActiveCrossing(ordered, rawActive, []));
           setFavoriteId(apiFavoriteId);
-          if (normalized.some((crossing) => crossing.id === rawActive)) {
-            setActiveIdState(rawActive);
-          } else if (!rawActive) {
-            setActiveIdState(normalized[0]?.id ?? null);
-          } else if (normalized.length > 0) {
-            setActiveIdState(normalized[0].id);
-          }
+          // Der Favorit ist immer der linke Startpunkt.
+          setActiveIdState(
+            ordered.some((crossing: any) => crossing.id === apiFavoriteId)
+              ? apiFavoriteId
+              : ordered[0]?.id ?? null
+          );
         }
       } catch (error) {
         console.error("Failed to initialize saved crossings:", error);
@@ -210,6 +214,10 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
       }
 
       setFavoriteId(id);
+      setSaved((prev) => [
+        ...prev.filter((crossing) => crossing.id === id),
+        ...prev.filter((crossing) => crossing.id !== id),
+      ]);
     } catch (error) {
       console.error("Failed to set favorite crossing:", error);
       throw error;
