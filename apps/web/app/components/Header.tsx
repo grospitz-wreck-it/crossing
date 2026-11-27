@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCrossings } from "../context/CrossingsContext";
+import AppIcon from "./AppIcon";
 
 export default function Header() {
   const { saved, activeId } = useCrossings();
@@ -25,9 +26,9 @@ export default function Header() {
         title={inManager ? "Zur BÜ-Übersicht" : "Schranken und Profil"}
       >
         {inManager ? (
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m7 7-7-7 7-7" /></svg>
+          <AppIcon name="arrow-left" size={21} />
         ) : (
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+          <AppIcon name="menu" size={21} />
         )}
       </Link>
     </header>
