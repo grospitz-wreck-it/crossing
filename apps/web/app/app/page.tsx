@@ -922,12 +922,19 @@ return (
                   <span>{closure.trainCount} {closure.trainCount === 1 ? "Zug" : "Züge"}</span>
                 </div>
                 <div className="upcomingClosureTrains">
-                  {closureTrains.map((closureTrain: any, trainIndex: number) => (
-                    <div className="upcomingClosureTrain" key={closureTrain.id || `${closureTrain.line}-${closureTrain.crossingTime}-${trainIndex}`}>
-                      <strong>{closureTrain.line || "Linie nicht verfügbar"}</strong>
-                      <span>{closureTrain.directionLabel || "Richtung nicht verfügbar"}</span>
-                    </div>
-                  ))}
+                  {closureTrains.map((closureTrain: any, trainIndex: number) => {
+                    const rawDirection = String(closureTrain.directionLabel || "").trim();
+                    const directionIsReadable =
+                      rawDirection.length > 0 &&
+                      !/unknown|nl:|vbn-|^richtung\\s*[:\\d]/i.test(rawDirection) &&
+                      !/\\b\\d{7}\\b/.test(rawDirection);
+                    return (
+                      <div className="upcomingClosureTrain" key={closureTrain.id || `${closureTrain.line}-${closureTrain.crossingTime}-${trainIndex}`}>
+                        <strong>{closureTrain.line || "Linie nicht verfügbar"}</strong>
+                        {directionIsReadable ? <span>{rawDirection}</span> : null}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
