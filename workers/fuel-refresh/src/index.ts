@@ -141,7 +141,7 @@ async function discoverStations(
   url.searchParams.set("lng", String(task.lon));
   url.searchParams.set("rad", "5");
   url.searchParams.set("type", "all");
-  url.searchParams.set("sort", "price");
+  url.searchParams.set("sort", "dist");
   url.searchParams.set("apikey", apiKey);
 
   const response = await fetch(url, { signal: AbortSignal.timeout(12_000) });
