@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
+import { FREE_CROSSING_LIMIT } from "../lib/subscription-config";
 
 type CrossingSummary = {
   id: string;
@@ -21,7 +22,6 @@ type CrossingsContextValue = {
 };
 
 const STORAGE_KEY_ACTIVE = "crossing-app:active-crossing";
-const MAX_FREE_CROSSINGS = 5;
 const CrossingsContext = createContext<CrossingsContextValue | null>(null);
 
 function withActiveCrossing(
@@ -38,7 +38,7 @@ function withActiveCrossing(
   );
 
   return availableCrossing
-    ? [...list, availableCrossing].slice(0, MAX_FREE_CROSSINGS)
+    ? [...list, availableCrossing]
     : list;
 }
 
@@ -119,7 +119,7 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
             // temporarily stale or the row was not persisted yet. It is still
             // required to exist in the active crossings catalogue.
             const nextSaved = withActiveCrossing(
-              normalized.slice(0, MAX_FREE_CROSSINGS),
+              normalized,
               rawActive,
               availableList,
             );
@@ -177,7 +177,7 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
           return prev;
         }
 
-        if (prev.length >= MAX_FREE_CROSSINGS) {
+        if (prev.length >= FREE_CROSSING_LIMIT) {
           return prev;
         }
 
@@ -280,7 +280,7 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-export { MAX_FREE_CROSSINGS };
+export { FREE_CROSSING_LIMIT };
 
 export function useCrossings() {
   const ctx = useContext(CrossingsContext);
