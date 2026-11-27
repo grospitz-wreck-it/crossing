@@ -1,5 +1,5 @@
 import { auth } from "../../../../../auth";
-import { db } from "../../../../lib/db";
+import { db } from "../../../lib/db";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +68,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ cros
     const cacheRow = cached.rows[0] as any;
     const cachedAt = Number(cacheRow?.fetched_at || 0);
     let stations: Station[] = [];
+    let fetchedAt = cachedAt;
 
     if (cacheRow && Date.now() - cachedAt < 60_000) {
       const parsed = JSON.parse(String(cacheRow.payload_json));
@@ -111,6 +112,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ cros
           throw new Error(payload?.message || "Tankerkönig hat keine gültigen Daten geliefert.");
         }
         stations = payload.stations as Station[];
+        fetchedAt = Date.now();
         await db.execute({
           sql: "INSERT INTO fuel_price_cache (crossing_id, payload_json, fetched_at) VALUES (?, ?, ?) ON CONFLICT(crossing_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at",
           args: [crossingId, JSON.stringify(stations), Date.now()],
@@ -121,7 +123,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ cros
     return Response.json({
       type,
       result: cheapest(stations, type),
-      fetchedAt: cachedAt && Date.now() - cachedAt < 60_000 ? cachedAt : Date.now(),
+      fetchedAt,
       radiusKm: 5,
       attribution: "Daten: Tankerkönig · CC BY 4.0",
       attributionUrl: "https://creativecommons.org/licenses/by/4.0/deed.de",
