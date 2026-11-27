@@ -22,28 +22,51 @@ async function ensureCache() {
   )`);
 }
 
-function cheapest(stations: Station[], type: FuelType) {
+function compassDirection(fromLat: number, fromLon: number, toLat: number, toLon: number) {
+  const toRad = (value: number) => value * Math.PI / 180;
+  const y = Math.sin(toRad(toLon - fromLon)) * Math.cos(toRad(toLat));
+  const x = Math.cos(toRad(fromLat)) * Math.sin(toRad(toLat)) -
+    Math.sin(toRad(fromLat)) * Math.cos(toRad(toLat)) * Math.cos(toRad(toLon - fromLon));
+  const bearing = (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  return ["N", "NO", "O", "SO", "S", "SW", "W", "NW"][Math.round(bearing / 45) % 8];
+}
+
+function cheapest(stations: Station[], type: FuelType, lat: number, lon: number) {
   const available = stations
     .map((station) => ({ station, price: station[type] }))
     .filter((item): item is { station: Station; price: number } =>
       typeof item.price === "number" && Number.isFinite(item.price) && item.price > 0
     )
     .sort((a, b) => a.price - b.price);
-  if (!available.length) return null;
-  const { station, price } = available[0];
-  return {
+  const selected: typeof available = [];
+  const directions = new Set<string>();
+  for (const item of available) {
+    if (typeof item.station.lat !== "number" || typeof item.station.lng !== "number") continue;
+    const direction = compassDirection(lat, lon, item.station.lat, item.station.lng);
+    if (!directions.has(direction)) {
+      selected.push(item);
+      directions.add(direction);
+      if (selected.length === 3) break;
+    }
+  }
+  for (const item of available) {
+    if (selected.length === 3) break;
+    if (!selected.includes(item)) selected.push(item);
+  }
+  return selected.map(({ station, price }) => ({
     price,
+    direction: typeof station.lat === "number" && typeof station.lng === "number"
+      ? compassDirection(lat, lon, station.lat, station.lng) : "Umgebung",
     station: {
-      name: station.name,
-      brand: station.brand || null,
+      name: station.name, brand: station.brand || null,
       street: [station.street, station.houseNumber].filter(Boolean).join(" ") || null,
-      place: station.place || null,
-      postCode: station.postCode || null,
+      place: station.place || null, postCode: station.postCode || null,
       distanceKm: typeof station.dist === "number" ? station.dist : null,
       isOpen: station.isOpen === true,
+      lat: typeof station.lat === "number" ? station.lat : null,
+      lng: typeof station.lng === "number" ? station.lng : null,
     },
-    stationCount: available.length,
-  };
+  }));
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ crossingId: string }> }) {
@@ -102,7 +125,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ cros
         url.searchParams.set("lng", String(crossing.lon));
         url.searchParams.set("rad", "5");
         url.searchParams.set("type", "all");
-        url.searchParams.set("sort", "dist");
+        url.searchParams.set("sort", "price");
         url.searchParams.set("apikey", apiKey);
 
         const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10000) });
@@ -120,9 +143,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ cros
       }
     }
 
+    const crossingResult = await db.execute({
+      sql: "SELECT lat, lon FROM crossings WHERE id = ? LIMIT 1",
+      args: [crossingId],
+    });
+    const crossing = crossingResult.rows[0] as any;
+    const results = crossing
+      ? cheapest(stations, type, Number(crossing.lat), Number(crossing.lon))
+      : [];
+
     return Response.json({
       type,
-      result: cheapest(stations, type),
+      results,
       fetchedAt,
       radiusKm: 5,
       attribution: "Daten: Tankerkönig · CC BY 4.0",
