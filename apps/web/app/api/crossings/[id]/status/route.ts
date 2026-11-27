@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { db } from "../../../../lib/db";
 import { getSnapshotPrimaryTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotPrimaryTrains";
 import { getSnapshotThroughTrains } from "../../../../../../../packages/db-api-client/src/getSnapshotThroughTrains";
@@ -151,42 +150,6 @@ function lineHintsForCrossing(crossing: any): string[] {
 function lineMatches(train: any, hints: string[]) { if (!hints.length) return true; const normalize=(v:any)=>String(v||"").toUpperCase().replace(/\s+/g,"").replace(/[._-]/g,""); const line=normalize(train.line),cat=normalize(train.category); return hints.some(h=>{const x=normalize(h);return line===x||line.includes(x)||x.includes(line)||cat===x;}); }
 function normalizeTrainKey(value: unknown): string {
   return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
-}
-
-// Fingerprint only information that can change the crossing forecast. Source
-// polling timestamps and request timestamps are intentionally excluded, so a
-// repeated copy of the same train data cannot advance the displayed phase.
-function buildForecastInputSignature(
-  trains: any[],
-  crossing: any,
-  timingCorrectionSeconds: number,
-): string {
-  const relevantTrains = trains.map((train: any) => ({
-    key: String(train.journeyRef || train.id || ""),
-    line: String(train.line || ""),
-    category: String(train.category || ""),
-    journeyNumber: Number(train.journeyNumber || 0),
-    origin: String(train.origin || ""),
-    destination: String(train.destination || ""),
-    crossingTime: String(train.crossingTime || ""),
-    delayMinutes: train.delayMinutes == null ? null : Number(train.delayMinutes),
-    platform: String(train.platform || ""),
-    isStoppingTrain: train.isStoppingTrain === true,
-    direction: String(train.direction || "unknown"),
-    osmRailwayWayId: train.osmRailwayWayId == null ? null : String(train.osmRailwayWayId),
-    crossingTimeModel: String(train.crossingTimeModel || ""),
-  })).sort((a, b) => a.key.localeCompare(b.key));
-
-  const relevantConfiguration = {
-    updatedAt: String(crossing.configUpdatedAt || ""),
-    closeOffsetSeconds: Number(crossing.closeOffsetSeconds || 0),
-    openOffsetSeconds: Number(crossing.openOffsetSeconds || 0),
-    timingCorrectionSeconds,
-  };
-
-  return createHash("sha256")
-    .update(JSON.stringify({ relevantConfiguration, relevantTrains }))
-    .digest("hex");
 }
 
 // OpenBoards can place its internal journey number into the line label
@@ -422,6 +385,43 @@ function toPayload(crossing: any, trains: any[], lineHints: string[], globalTimi
   };
 }
 
+function refreshCachedPhase(payload: any, now = Date.now()) {
+  const closures = Array.isArray(payload?.closures) ? payload.closures : [];
+  const next = closures.find((closure: any) => {
+    const end = Date.parse(String(closure?.end || ""));
+    return Number.isFinite(end) && end > now;
+  });
+
+  if (!next) {
+    return {
+      ...payload,
+      state: "OPEN",
+      nextCloseIn: 0,
+      nextOpenIn: 0,
+      phase: null,
+    };
+  }
+
+  const startMs = Date.parse(String(next.start || ""));
+  const endMs = Date.parse(String(next.end || ""));
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return payload;
+
+  return {
+    ...payload,
+    state: now >= startMs ? "CLOSED" : "OPEN",
+    nextCloseIn: Math.max(0, Math.floor((startMs - now) / 1000)),
+    nextOpenIn: Math.max(0, Math.floor((endMs - now) / 1000)),
+    phase: {
+      start: next.start,
+      end: next.end,
+      durationMinutes: Number(next.durationMinutes) ||
+        Math.round((endMs - startMs) / 60_000),
+      trainCount: Array.isArray(next.trains) ? next.trains.length : Number(next.trainCount || 0),
+      trains: Array.isArray(next.trains) ? next.trains : [],
+    },
+  };
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const debugMode = new URL(request.url).searchParams.get("debug");
@@ -440,8 +440,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     : await readCrossingForecastCache<any>(cacheKey, 60_000);
   markPerformance("cacheReadCompleteMs");
   if (cached) {
-    return Response.json(cached, {
-      headers: { "X-Crossing-Status-Cache": "HIT" },
+    // The cached train/closure forecast is still reusable, but its phase and
+    // countdown are time-dependent. Re-evaluate those lightweight fields on
+    // every hit so a cache entry cannot skip an entire CLOSED interval.
+    const refreshed = refreshCachedPhase(cached);
+    return Response.json(refreshed, {
+      headers: {
+        "X-Crossing-Status-Cache": "HIT",
+        "X-Crossing-Phase-Refreshed": "true",
+      },
     });
   }
 
@@ -1158,42 +1165,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       ...train,
       line: displayLineForTrain(train),
     }));
-    const inputSignature = buildForecastInputSignature(
-      dbDisplayTrains,
-      crossing,
-      timingCorrectionSeconds,
-    );
-
-    // The normal polling cycle still reads the existing snapshot sources. If
-    // their forecast-relevant content is unchanged, keep the last confirmed
-    // phase instead of deriving a new OPEN/CLOSED state from the wall clock.
-    // This also refreshes the ordinary cache TTL without issuing extra source
-    // requests or changing the train matching / timing model.
-    if (
-      !includeOsmDetails &&
-      !includeComparisonDetails &&
-      !includePerformanceDetails &&
-      previousForecast?.forecastInputSignature === inputSignature
-    ) {
-      const stablePayload = {
-        ...previousForecast,
-        forecastInputCheckedAt: new Date().toISOString(),
-        forecastInputChanged: false,
-      };
-      await writeCrossingForecastCache(cacheKey, stablePayload);
-      return Response.json(stablePayload, {
-        headers: {
-          "X-Crossing-Status-Cache": "MISS",
-          "X-Crossing-Forecast-Input-Changed": "false",
-          "X-Crossing-Status-Source": openBoardsTrains.length ? "mobilithek+openboards" : "mobilithek-snapshot",
-        },
-      });
-    }
-
     const payload=toPayload(crossing,dbDisplayTrains,lineHints,globalTimingCorrectionSeconds);
-    (payload as any).forecastInputSignature = inputSignature;
-    (payload as any).forecastInputCheckedAt = new Date().toISOString();
-    (payload as any).forecastInputChanged = true;
     markPerformance("payloadBuiltMs");
     if (includePerformanceDetails) (payload as any).performanceDiagnostics = {
       cache: "MISS", ...performanceTimings,
