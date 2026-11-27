@@ -6,6 +6,7 @@ import {
   useRef,
 } from "react";
 import LoadingScreen from "../components/LoadingScreen";
+import ContentServices from "../components/ContentServices";
 import { useCrossings } from "../context/CrossingsContext";
 
 function formatSeconds(
@@ -248,6 +249,7 @@ const [isSwitchingCrossing, setIsSwitchingCrossing] = useState(false);
   const [ads, setAds] =
     useState<any[]>([]);
   const [contentItems, setContentItems] = useState<any[]>([]);
+  const [newsEnabled, setNewsEnabled] = useState(false);
 
   const [currentAdIndex, setCurrentAdIndex] =
     useState(0);
@@ -478,6 +480,15 @@ const wakeLockRef =
   }
 
   useEffect(() => {
+  let cancelled = false;
+  fetch("/api/user/content-preferences", { cache: "no-store" })
+    .then((response) => response.ok ? response.json() : null)
+    .then((prefs) => { if (!cancelled) setNewsEnabled(prefs?.newsEnabled === true); })
+    .catch(() => {});
+  return () => { cancelled = true; };
+}, []);
+
+useEffect(() => {
   if (!saved.length) {
     if (!activeId) setBootstrapLoading(false);
     return;
@@ -982,9 +993,11 @@ return (
     </div>
   )}
 
-  {contentItems.length > 0 && (
+  {newsEnabled && contentItems.length > 0 && (
     <EditorialNewsCarousel items={contentItems} />
   )}
+
+  <ContentServices />
 
 {message && (
   <div

@@ -6,6 +6,7 @@ import { signOut } from "next-auth/react";
 import { useCrossings } from "../../context/CrossingsContext";
 import { MAX_FREE_CROSSINGS } from "../../context/CrossingsContext";
 import styles from "./page.module.css";
+import ContentPreferences from "../../components/ContentPreferences";
 
 function distanceKm(a: { lat: number; lon: number }, b: { lat: number; lon: number }) {
   const rad = (n: number) => (n * Math.PI) / 180;
@@ -202,6 +203,7 @@ export default function MeineSchrankenPage() {
           {saved.length >= MAX_FREE_CROSSINGS && <p className={styles.limitNote}>Du hast das Limit von {MAX_FREE_CROSSINGS} Schranken erreicht. Entferne eine Schranke, um eine andere hinzuzufügen.</p>}
         </section>
 
+        <ContentPreferences />
         {notice && <div className={styles.notice} role="status">{notice}</div>}
         <section className={styles.profilePanel}>
           <div>
