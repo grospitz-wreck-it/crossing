@@ -306,7 +306,8 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
         const list = await contentRes.json();
         editorialItems = Array.isArray(list) ? list : [];
       }
-      contentCacheRef.current.set(crossingId, editorialItems);\n      onProgress?.(100, "Alles bereit");
+      contentCacheRef.current.set(crossingId, editorialItems);
+      onProgress?.(100, "Alles bereit");
 
       if (activeIdRef.current === crossingId) {
         setData(json);
