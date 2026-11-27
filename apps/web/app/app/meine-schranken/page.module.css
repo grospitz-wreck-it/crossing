@@ -373,3 +373,61 @@
   }
   .slotMain{min-width:0}
 }
+
+
+/* Compact capacity chip and neatly aligned slot actions */
+.slotCountChip{
+  display:inline-flex;
+  flex:0 0 auto;
+  align-items:center;
+  gap:6px;
+  padding:7px 11px;
+  border:1px solid #e5ebf1;
+  border-radius:999px;
+  background:#f7f9fb;
+  color:#718397;
+  white-space:nowrap;
+  font-size:10px;
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+}
+.slotCountChip strong{
+  color:#173d62;
+  font-size:12px;
+  font-weight:850;
+}
+.slotActions{
+  justify-content:flex-end;
+  gap:2px;
+  padding:0 8px 8px;
+}
+.slotActions button{
+  width:36px;
+  height:36px;
+  min-width:36px;
+  min-height:36px;
+  flex:0 0 36px;
+  padding:0;
+  overflow:visible;
+}
+.slotActions .slotEdit svg{
+  display:block;
+  width:17px;
+  height:17px;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.8;
+  stroke-linecap:round;
+  stroke-linejoin:round;
+}
+@media(max-width:680px){
+  .slotActions{gap:1px;padding:0 6px 8px}
+  .slotActions button{
+    width:34px;
+    height:34px;
+    min-width:34px;
+    min-height:34px;
+    flex-basis:34px;
+  }
+  .slotCountChip{padding:6px 9px;font-size:9px}
+}
