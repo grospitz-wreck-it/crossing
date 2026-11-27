@@ -112,7 +112,6 @@ export default function MeineSchrankenPage() {
             <div>
               <span className={styles.overline}>DEINE AUSWAHL</span>
               <h2>Deine Schranken-Plätze</h2>
-              <p className={styles.slotIntro}>Tippe auf ein Plus, um einen Bahnübergang hinzuzufügen. Belegte Plätze kannst du jederzeit austauschen.</p>
             </div>
             <span className={styles.slotCountChip}><strong>{saved.length}</strong><span>/ {maxCrossings} Plätze belegt</span></span>
           </div>
@@ -152,7 +151,6 @@ export default function MeineSchrankenPage() {
           {saved.length > maxCrossings && (
             <p className={styles.limitNote}>Dein Premium-Kontingent ist abgelaufen. Deine gespeicherten Schranken bleiben erhalten. Entferne bitte {saved.length - maxCrossings} Platz/Plätze, bevor du neue hinzufügen kannst.</p>
           )}
-          <div className={styles.helper}><span>ⓘ</span> Jeder Platz kann beliebig oft mit einem anderen Bahnübergang belegt werden. Deine Prognosen bleiben davon unberührt.</div>
         </section>
 
         <section className={styles.profilePanel}>
