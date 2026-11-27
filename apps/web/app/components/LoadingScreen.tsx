@@ -35,7 +35,7 @@ export default function LoadingScreen({ message, detail, progress = 0, onComplet
         <div className={styles.loadingCopy}>
           <span className={styles.loadingEyebrow}>Einen Moment bitte</span>
           {message && <p className={styles.loadingMessage}>{message}</p>}
-          {detail && <p className={styles.loadingDetail}>{detail}</p>}
+          <p className={styles.loadingDetail} aria-hidden={!detail}>{detail || "\u00a0"}</p>
           <div className={styles.loadingProgress} aria-hidden="true">
             <span />
           </div>
