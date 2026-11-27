@@ -680,7 +680,9 @@ const closureDuration =
 const train =
   data.phase.trains[0];
 
-// Der Zustand bleibt bis zu einer durch neue API-Daten bestätigten\n// Prognoseänderung stabil. Die Uhr aktualisiert ausschließlich den Countdown.\nconst displayState = data.state;
+// Der Zustand bleibt bis zu einer durch neue API-Daten bestätigten
+// Prognoseänderung stabil. Die Uhr aktualisiert ausschließlich den Countdown.
+const displayState = data.state;
 
   const countdown =
   data?.phase
