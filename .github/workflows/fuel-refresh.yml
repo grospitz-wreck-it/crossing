@@ -1,0 +1,29 @@
+name: Central fuel price refresh
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: central-fuel-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Trigger one central refresh step
+        env:
+          FUEL_REFRESH_URL: ${{ secrets.FUEL_REFRESH_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${FUEL_REFRESH_URL:-}" ] || [ -z "${CRON_SECRET:-}" ]; then
+            echo "Missing repository secrets: FUEL_REFRESH_URL and/or CRON_SECRET"
+            exit 1
+          fi
+          curl --fail-with-body --silent --show-error --max-time 40 \
+            -X POST "${FUEL_REFRESH_URL}" \
+            -H "Authorization: Bearer ${CRON_SECRET}"
