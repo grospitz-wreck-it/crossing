@@ -642,8 +642,8 @@ useEffect(() => {
     clearInterval(timer);
 }, []);
 // Keine zusätzliche API-Abfrage zum errechneten Phasenwechsel:
- // Status- und Countdown-Wechsel werden ausschließlich durch die bereits
- // vorhandenen periodischen bzw. durch Nutzeraktivität ausgelösten Loads bestätigt.
+// Status- und Countdown-Wechsel werden ausschließlich durch die bereits
+// vorhandenen periodischen bzw. durch Nutzeraktivität ausgelösten Loads bestätigt.
 
 if (!data || bootstrapLoading) {
   return (
