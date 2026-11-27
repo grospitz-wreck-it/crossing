@@ -11,8 +11,8 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 28px;
-  padding: 4px 16px 2px;
+  height: 36px;
+  padding: 2px 16px;
   background: transparent;
 }
 
@@ -20,58 +20,55 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .dot {
-  width: 7px;
-  height: 7px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
   padding: 0;
   border: 0;
-  border-radius: 999px;
-  background: #8b8b8b;
+  border-radius: 50%;
+  background: transparent;
   cursor: pointer;
-  transition: width 160ms ease, height 160ms ease, background 160ms ease, transform 160ms ease;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.dot.active {
+.dot:after {
+  content: "";
   width: 9px;
   height: 9px;
+  border-radius: 50%;
+  background: #a3a3a3;
+  transition: width 160ms ease, height 160ms ease, background 160ms ease;
+}
+
+.dot.active:after {
+  width: 11px;
+  height: 11px;
   background: #e30613;
 }
 
 .dot:focus-visible {
-  outline: 2px solid #e30613;
-  outline-offset: 3px;
+  outline: 2px solid rgba(227, 6, 19, .35);
+  outline-offset: 1px;
 }
 
+@media (max-width: 680px) {
+  .nav {
+    height: 40px;
+    padding: 2px 12px;
+  }
 
-/* Larger, clearly tappable crossing selector */
-.nav{padding:10px 0 14px}
-.dots{display:flex;align-items:center;justify-content:center;gap:9px;min-height:48px}
-.dot{
-  position:relative;
-  display:grid;
-  place-items:center;
-  width:44px;
-  height:44px;
-  min-width:44px;
-  min-height:44px;
-  padding:0;
-  border:1px solid #d9e2ea;
-  border-radius:14px;
-  background:#fff;
-  cursor:pointer;
-  touch-action:manipulation;
-  -webkit-tap-highlight-color:transparent;
-}
-.dot:after{content:"";width:10px;height:10px;border-radius:50%;background:#cbd5df;transition:background .15s,transform .15s}
-.dot.active{border-color:#e6b5be;background:#fff7f8;box-shadow:0 0 0 2px rgba(199,25,53,.07)}
-.dot.active:after{background:#c71935;transform:scale(1.15)}
-.dot:focus-visible{outline:3px solid rgba(199,25,53,.25);outline-offset:2px}
-@media(max-width:680px){
-  .nav{padding:8px 0 12px}
-  .dots{gap:10px;min-height:54px}
-  .dot{width:50px;height:50px;min-width:50px;min-height:50px;border-radius:16px}
-  .dot:after{width:11px;height:11px}
+  .dot {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+  }
 }
