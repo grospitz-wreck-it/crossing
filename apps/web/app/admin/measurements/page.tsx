@@ -1,6 +1,7 @@
 "use client";
 import {useEffect,useMemo,useState} from "react";
 import styles from "./page.module.css";
+import AdminIcon from "../components/AdminIcon";
 type Row={predictionId:string;predictedClose:string|null;predictedOpen:string|null;actualClose:string|null;actualOpen:string|null;closeDeltaSeconds:number|null;openDeltaSeconds:number|null;measuredDurationSeconds:number|null;trains:Array<{line?:string;category?:string}>;trainCount:number;flagged:boolean};
 const n=(v:number|null)=>v===null?"–":(v>0?"+":"")+v.toLocaleString("de-DE")+" s";
 export default function MeasurementsAdmin(){
@@ -12,7 +13,7 @@ export default function MeasurementsAdmin(){
  const close=rows.map(r=>r.closeDeltaSeconds).filter((v):v is number=>v!==null).map(Math.abs);
  const mean=close.length?Math.round(close.reduce((a,b)=>a+b,0)/close.length):null;
  return <div className={styles.page}>
-  <header className={styles.header}><div><div className={styles.eyebrow}>BETRIEB · QUALITÄTSSICHERUNG</div><h1>Messungen</h1><p>Abgleich zwischen prognostizierten und tatsächlich gemeldeten Schrankenschaltungen.</p></div><button onClick={()=>{setLoading(true);void load()}}>↻ Aktualisieren</button></header>
+  <header className={styles.header}><div><div className={styles.eyebrow}>BETRIEB · QUALITÄTSSICHERUNG</div><h1>Messungen</h1><p>Abgleich zwischen prognostizierten und tatsächlich gemeldeten Schrankenschaltungen.</p></div><button onClick={()=>{setLoading(true);void load()}}><AdminIcon name="refresh" size={15}/> Aktualisieren</button></header>
   {error&&<div className={styles.error}>{error}</div>}
   <section className={styles.kpis}><Kpi label="Messereignisse" value={rows.length}/><Kpi label="Mit Ist-Abgleich" value={measured}/><Kpi label="Ø Close-Abweichung" value={mean===null?"–":mean+" s"}/><Kpi label="Markiert" value={flagged}/></section>
   <section className={styles.panel}>
