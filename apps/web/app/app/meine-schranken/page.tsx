@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { signOut } from "next-auth/react";
 import { useCrossings } from "../../context/CrossingsContext";
 import styles from "./page.module.css";
@@ -28,7 +27,6 @@ export default function MeineSchrankenPage() {
   const [notice, setNotice] = useState("");
   const [busyId, setBusyId] = useState("");
   const [modalSlot, setModalSlot] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
 
   const savedIds = useMemo(() => new Set(saved.map((item) => item.id)), [saved]);
   const results = useMemo(() => {
@@ -104,19 +102,6 @@ export default function MeineSchrankenPage() {
     setBusyId("");
   }
 
-  async function save() {
-    if (!activeId) return;
-    setSaving(true);
-    setNotice("");
-    try {
-      await setFavorite(activeId);
-      window.location.href = "/app";
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Deine Auswahl konnte nicht gespeichert werden.");
-      setSaving(false);
-    }
-  }
-
   const slotCount = Math.max(maxCrossings, saved.length);
 
   return (
@@ -182,20 +167,10 @@ export default function MeineSchrankenPage() {
         </section>
 
         <ContentPreferences />
-        {notice && <div className={styles.notice} role="status">{notice}</div>}
-        <section className={styles.profilePanel}>
-          <div>
-            <span className={styles.overline}>KONTO</span>
-            <h2>Mein Profil</h2>
-            <p>Verwalte hier deine Schranken. Dein Konto ist mit deiner Anmeldung verknüpft.</p>
-          </div>
+        <div className={styles.logoutRow}>
           <button className={styles.logoutButton} onClick={() => signOut({ callbackUrl: "/" })}>Abmelden</button>
-        </section>
-        <div className={styles.bottomBar}>
-          <div><strong>{saved.length} von {maxCrossings} Plätzen belegt</strong><small>{purchasedSlots > 0 ? `${purchasedSlots} Premium-Plätze aktiv` : "Deine Auswahl wird mit deinem Konto synchronisiert."}</small></div>
-          <button onClick={save} disabled={saving || !activeId}>{saving ? "Speichert …" : "Fertig"} <span>→</span></button>
         </div>
-        <Link className={styles.backLink} href="/app">← Zurück zur BÜ-Übersicht</Link>
+        {notice && <div className={styles.notice} role="status">{notice}</div>}
       </div>
 
       {modalSlot != null && (
