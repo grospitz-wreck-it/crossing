@@ -44,6 +44,7 @@
   justify-content: center;
   align-items: flex-end;
   filter: drop-shadow(0 16px 18px rgba(34, 49, 69, .12));
+  top: 30px;
 }
 
 .loadingBar::after {
@@ -184,14 +185,14 @@
 
 @media (max-width: 520px) {
   .splashContent { width: calc(100vw - 32px); padding: 16px 0 206px; }
-  .loadingBar { height: 176px; transform: scale(.88); transform-origin: center bottom; margin-bottom: 0; }
+  .loadingBar { top: 24px; height: 176px; transform: scale(.88); transform-origin: center bottom; margin-bottom: 0; }
   .loadingLogo { top: -20px; max-height: 85px; margin-bottom: 10px; }
   .loadingCopy { min-height: 174px; padding: 19px 18px 17px; border-radius: 23px; }
 }
 
 @media (max-height: 700px) {
   .splashContent { padding: 10px 0 164px; }
-  .loadingBar { height: 150px; transform: scale(.78); transform-origin: center bottom; margin-bottom: -4px; }
+  .loadingBar { top: 16px; height: 150px; transform: scale(.78); transform-origin: center bottom; margin-bottom: -4px; }
   .loadingLogo { top: -16px; max-height: 70px; margin-bottom: 8px; }
   .loadingCopy { min-height: 150px; padding-top: 15px; padding-bottom: 13px; }
   .loadingProgress { margin-top: 13px; }
