@@ -125,6 +125,12 @@ const MAX_PHASE_MS =
   900 * 1000;
 const MEASUREMENT_STATE_PREFIX = "crossing-app:measurement-state:";
 
+// Module-level caches survive client-side navigation away from and back to /app.
+const statusCache = new Map<string, any>();
+const statusInFlight = new Map<string, Promise<void>>();
+const adCache = new Map<string, any[]>();
+const contentCache = new Map<string, any[]>();
+
 // Keep the feedback ID stable across reloads and identical to the ID used by
 // the separate prediction-rating component. The status API intentionally
 // contains forecast data only; it does not provide a predictionId.
@@ -144,6 +150,7 @@ const [data, setData] =
   useState<any>(null);
 const [bootstrapLoading, setBootstrapLoading] = useState(true);
 const [bootstrapProgress, setBootstrapProgress] = useState(0);
+const [bootstrapDetail, setBootstrapDetail] = useState("Deine Schranke wird geladen");
 const [loadingAnimationFinished, setLoadingAnimationFinished] = useState(false);
 const [isSwitchingCrossing, setIsSwitchingCrossing] = useState(false);
   const [ads, setAds] =
@@ -240,12 +247,12 @@ useEffect(() => {
   }
 }, [predictionId]);
 
-const statusCacheRef = useRef<Map<string, any>>(new Map());
-const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
-const adCacheRef = useRef<Map<string, any[]>>(new Map());
-const contentCacheRef = useRef<Map<string, any[]>>(new Map());
+const statusCacheRef = { current: statusCache };
+const statusInFlightRef = { current: statusInFlight };
+const adCacheRef = { current: adCache };
+const contentCacheRef = { current: contentCache };
 
-async function load(crossingId: string | null = activeIdRef.current, force = false) {
+async function load(crossingId: string | null = activeIdRef.current, force = false, onProgress?: (progress: number, detail: string) => void) {
   if (!crossingId) return;
 
   const cached = statusCacheRef.current.get(crossingId);
@@ -255,18 +262,33 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
       setAds(adCacheRef.current.get(crossingId) || []);
       setContentItems(contentCacheRef.current.get(crossingId) || []);
     }
+    onProgress?.(100, "Gespeicherte Daten geladen");
     return;
   }
 
   const existing = statusInFlightRef.current.get(crossingId);
-  if (existing) return existing;
+  if (existing) {
+    await existing;
+    const latest = statusCacheRef.current.get(crossingId);
+    if (latest && activeIdRef.current === crossingId) {
+      setData(latest);
+      setAds(adCacheRef.current.get(crossingId) || []);
+      setContentItems(contentCacheRef.current.get(crossingId) || []);
+    }
+    return;
+  }
 
   const request = (async () => {
     try {
+      let completed = 0;
+      const markLoaded = (label: string) => {
+        completed += 1;
+        onProgress?.(Math.round((completed / 3) * 85), label);
+      };
       const [statusRes, adRes, contentRes] = await Promise.all([
-        fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }),
-        fetch(`/api/ads/${crossingId}`, { cache: "no-store" }),
-        fetch(`/api/content/${crossingId}`, { cache: "no-store" }),
+        fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }).then((response) => { markLoaded("Schrankendaten geladen"); return response; }),
+        fetch(`/api/ads/${crossingId}`, { cache: "no-store" }).then((response) => { markLoaded("Anzeigen geladen"); return response; }),
+        fetch(`/api/content/${crossingId}`, { cache: "no-store" }).then((response) => { markLoaded("Inhalte geladen"); return response; }),
       ]);
       if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
 
@@ -284,7 +306,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
         const list = await contentRes.json();
         editorialItems = Array.isArray(list) ? list : [];
       }
-      contentCacheRef.current.set(crossingId, editorialItems);
+      contentCacheRef.current.set(crossingId, editorialItems);\n      onProgress?.(100, "Alles bereit");
 
       if (activeIdRef.current === crossingId) {
         setData(json);
@@ -445,9 +467,16 @@ const wakeLockRef =
   setBootstrapLoading(true);
   setBootstrapProgress(0);
 
-  void load(activeId, false).finally(() => {
+  setBootstrapDetail("Deine aktive Schranke wird geladen");
+  void load(activeId, false, (progress, detail) => {
     if (!cancelled) {
-      setBootstrapProgress(1);
+      setBootstrapProgress(progress);
+      setBootstrapDetail(detail);
+    }
+  }).finally(() => {
+    if (!cancelled) {
+      setBootstrapProgress(100);
+      setBootstrapDetail("Alles bereit");
       setBootstrapLoading(false);
     }
   });
