@@ -5,6 +5,7 @@
   display: grid;
   place-items: center;
   overflow: hidden;
+  isolation: isolate;
   background: url("/images/bg.webp") center center / cover no-repeat;
   z-index: 1000;
 }
@@ -12,50 +13,41 @@
 .loadingOverlay {
   position: absolute;
   inset: 0;
-  background: rgba(244, 248, 252, .68);
-  backdrop-filter: blur(8px);
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(255,255,255,.74), rgba(241,246,251,.86) 58%, rgba(232,239,247,.91)),
+    rgba(244, 248, 252, .72);
+  backdrop-filter: blur(10px);
 }
 
 .splashContent {
   position: relative;
   z-index: 2;
-  width: min(520px, 92vw);
+  width: min(540px, 92vw);
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 28px 20px 18px;
+  padding: 28px 22px 34px;
   animation: splashEnter .55s ease both;
 }
 
 .loadingLogo {
-  width: min(380px, 72vw);
+  display: block;
+  width: min(360px, 70vw);
+  max-height: 112px;
   height: auto;
   object-fit: contain;
   opacity: 0;
+  filter: drop-shadow(0 8px 18px rgba(34, 54, 78, .08));
   animation: logoFade .6s ease forwards;
 }
 
-.loadingMessage {
-  margin: 20px 0 0;
-  color: #263548;
-  font: 650 16px/1.45 system-ui, sans-serif;
-  text-align: center;
-}
-
-.loadingDetail {
-  margin: 7px 0 0;
-  color: #68778a;
-  font: 13px/1.45 system-ui, sans-serif;
-  text-align: center;
-}
-
-/* Originale Schranken-Animation aus dem bisherigen LoadingScreen */
+/* Schranken-Animation */
 .loadingBar {
   position: relative;
   z-index: 2;
-  margin-top: 42px;
+  margin-top: 12px;
   width: 260px;
-  height: 180px;
+  height: 166px;
   display: flex;
   justify-content: center;
   align-items: flex-end;
@@ -70,21 +62,22 @@
   height: 56px;
   transform: translateX(-50%);
   border-radius: 6px;
-  background: #4f5662;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.15);
+  background: linear-gradient(90deg, #3f4855, #687486 52%, #3e4652);
+  box-shadow: 0 8px 18px rgba(28, 43, 61, .2), inset 0 1px 0 rgba(255,255,255,.22);
 }
 
 .loadingBar::before {
   content: "";
   position: absolute;
   left: 50%;
-  bottom: 50px;
-  width: 18px;
-  height: 18px;
+  bottom: 49px;
+  width: 20px;
+  height: 20px;
   transform: translateX(-50%);
+  border: 3px solid rgba(255,255,255,.78);
   border-radius: 50%;
-  background: #616b79;
-  box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  background: #596678;
+  box-shadow: 0 3px 10px rgba(0,0,0,.2);
   z-index: 3;
 }
 
@@ -93,14 +86,72 @@
   left: 50%;
   bottom: 54px;
   width: 190px;
-  height: 12px;
+  height: 13px;
   margin-left: -2px;
   transform-origin: 6px 50%;
+  border: 1px solid rgba(255,255,255,.78);
   border-radius: 999px;
-  background: repeating-linear-gradient(135deg, #ffffff 0 16px, #d73535 16px 32px);
-  box-shadow: 0 4px 12px rgba(0,0,0,.18);
+  background: repeating-linear-gradient(135deg, #fff 0 16px, #d73535 16px 32px);
+  box-shadow: 0 5px 14px rgba(31, 47, 66, .2);
   z-index: 2;
   animation: barrierOpen 3.2s cubic-bezier(.2,.85,.2,1) forwards;
+}
+
+.loadingCopy {
+  width: min(420px, 100%);
+  min-height: 112px;
+  margin-top: 2px;
+  padding: 20px 24px 18px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border: 1px solid rgba(255,255,255,.82);
+  border-radius: 20px;
+  background: rgba(255,255,255,.66);
+  box-shadow: 0 16px 42px rgba(43, 62, 84, .09), inset 0 1px 0 rgba(255,255,255,.9);
+  backdrop-filter: blur(14px);
+  text-align: center;
+}
+
+.loadingEyebrow {
+  color: #718096;
+  font: 700 10px/1.2 system-ui, sans-serif;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.loadingMessage {
+  margin: 8px 0 0;
+  color: #1e2d40;
+  font: 700 clamp(16px, 3.8vw, 19px)/1.35 system-ui, sans-serif;
+  letter-spacing: -.025em;
+  text-wrap: balance;
+}
+
+.loadingDetail {
+  margin: 6px 0 0;
+  max-width: 34em;
+  color: #65758a;
+  font: 500 13px/1.55 system-ui, sans-serif;
+  text-wrap: balance;
+}
+
+.loadingProgress {
+  width: 76px;
+  height: 3px;
+  margin-top: 15px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(91, 112, 138, .13);
+}
+
+.loadingProgress span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6688ad, #294d75);
+  animation: progressPulse 1.5s ease-in-out infinite;
 }
 
 .debugPanel {
@@ -174,9 +225,19 @@
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
+@keyframes progressPulse {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(250%); }
+}
+
+@media (max-width: 480px) {
+  .splashContent { padding: 18px 16px 24px; }
+  .loadingLogo { width: min(310px, 74vw); }
+  .loadingBar { margin-top: 2px; transform: scale(.9); transform-origin: center bottom; }
+  .loadingCopy { margin-top: -8px; padding: 18px 18px 16px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .loadingBarFill {
-    animation: none;
-    transform: rotate(-70deg);
-  }
+  .loadingBarFill { animation: none; transform: rotate(-70deg); }
+  .loadingProgress span { animation: none; width: 100%; }
 }
