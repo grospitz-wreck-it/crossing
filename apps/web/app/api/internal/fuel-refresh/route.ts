@@ -268,9 +268,9 @@ export async function POST(request: Request) {
   const lockToken = randomUUID();
   const lock = await db.execute({
     sql: `UPDATE fuel_api_control
-      SET lock_until = ?, lock_token = ?, updated_at = ?
+      SET last_request_at = ?, lock_until = ?, lock_token = ?, updated_at = ?
       WHERE id = 1 AND lock_until <= ? AND last_request_at <= ?`,
-    args: [now + 45_000, lockToken, now, now, now - MIN_API_INTERVAL_MS],
+    args: [now, now + 45_000, lockToken, now, now, now - MIN_API_INTERVAL_MS],
   });
   if (Number(lock.rowsAffected) !== 1) {
     const guard = await db.execute("SELECT last_request_at, lock_until FROM fuel_api_control WHERE id = 1 LIMIT 1");
@@ -287,16 +287,16 @@ export async function POST(request: Request) {
       : await refreshPrices(task, apiKey, now);
 
     await db.execute({
-      sql: "UPDATE fuel_api_control SET last_request_at = ?, lock_until = 0, lock_token = NULL, updated_at = ? WHERE id = 1 AND lock_token = ?",
-      args: [Date.now(), Date.now(), lockToken],
+      sql: "UPDATE fuel_api_control SET lock_until = 0, lock_token = NULL, updated_at = ? WHERE id = 1 AND lock_token = ?",
+      args: [Date.now(), lockToken],
     });
     return Response.json({ status: "ok", task: task.kind, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unbekannter Tankerkönig-Fehler";
     const failedAt = Date.now();
     await db.execute({
-      sql: "UPDATE fuel_api_control SET last_request_at = ?, lock_until = 0, lock_token = NULL, updated_at = ? WHERE id = 1 AND lock_token = ?",
-      args: [failedAt, failedAt, lockToken],
+      sql: "UPDATE fuel_api_control SET lock_until = 0, lock_token = NULL, updated_at = ? WHERE id = 1 AND lock_token = ?",
+      args: [failedAt, lockToken],
     });
     if (task.kind === "discovery") {
       await saveRefreshState("crossing", task.crossingId, failedAt, failedAt + ERROR_RETRY_MS, message);
