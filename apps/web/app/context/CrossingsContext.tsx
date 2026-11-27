@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState } from "react";
-import { FREE_CROSSING_LIMIT } from "../lib/subscription-config";
+import { FREE_CROSSING_LIMIT, PREMIUM_CROSSING_PACKAGE } from "../lib/subscription-config";
 
 type CrossingSummary = {
   id: string;
@@ -17,6 +17,13 @@ type CrossingsContextValue = {
   favoriteId: string | null;
   maxCrossings: number;
   purchasedSlots: number;
+  premiumPackage: {
+    additionalCrossings: number;
+    priceCents: number;
+    currency: string;
+    durationDays: number;
+    enabled: boolean;
+  };
   setActiveId: (id: string) => void;
   setFavorite: (id: string) => Promise<void>;
   addCrossing: (crossing: CrossingSummary, replaceCrossingId?: string) => Promise<void>;
@@ -51,6 +58,13 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
   const [favoriteId, setFavoriteId] = useState<string | null>(null);
   const [maxCrossings, setMaxCrossings] = useState(FREE_CROSSING_LIMIT);
   const [purchasedSlots, setPurchasedSlots] = useState(0);
+  const [premiumPackage, setPremiumPackage] = useState({
+    additionalCrossings: PREMIUM_CROSSING_PACKAGE.additionalCrossings,
+    priceCents: PREMIUM_CROSSING_PACKAGE.priceCents,
+    currency: PREMIUM_CROSSING_PACKAGE.currency,
+    durationDays: PREMIUM_CROSSING_PACKAGE.durationDays,
+    enabled: PREMIUM_CROSSING_PACKAGE.enabled,
+  });
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -116,6 +130,9 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
           }
           if (Number.isFinite(Number(userJson?.purchasedSlots))) {
             setPurchasedSlots(Math.max(0, Number(userJson.purchasedSlots)));
+          }
+          if (userJson?.premiumPackage) {
+            setPremiumPackage(userJson.premiumPackage);
           }
 
           const apiFavoriteId =
@@ -281,6 +298,7 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         favoriteId,
         maxCrossings,
         purchasedSlots,
+        premiumPackage,
         setActiveId: setActiveIdState,
         setFavorite,
         addCrossing,
