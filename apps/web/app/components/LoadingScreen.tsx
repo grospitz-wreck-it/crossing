@@ -9,15 +9,15 @@ export default function LoadingScreen({ message, detail }: LoadingScreenProps) {
     <main className={styles.loadingScreen} role="status" aria-live="polite">
       <div className={styles.loadingOverlay} />
       <div className={styles.splashContent}>
+        <div className={styles.loadingBar} aria-label="Schranken-Animation">
+          <div className={styles.loadingBarFill} />
+        </div>
+
         <img
           src="/images/meineschranke_logo.webp"
           alt="Meine Schranke"
           className={styles.loadingLogo}
         />
-
-        <div className={styles.loadingBar} aria-label="Schranken-Animation">
-          <div className={styles.loadingBarFill} />
-        </div>
 
         <div className={styles.loadingCopy}>
           <span className={styles.loadingEyebrow}>Einen Moment bitte</span>
