@@ -233,7 +233,7 @@ async function refreshPrices(
   task: Extract<RefreshTask, { kind: "prices" }>,
   apiKey: string,
   now: number,
-): Promise<{ refreshed: number }> {
+): Promise<{ refreshed: number; missing: number; requested: number }> {
   const url = new URL("https://creativecommons.tankerkoenig.de/json/prices.php");
   url.searchParams.set("ids", task.stationIds.join(","));
   url.searchParams.set("apikey", apiKey);
