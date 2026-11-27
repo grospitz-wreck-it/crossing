@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import styles from "./page.module.css";
+import AdminIcon from "../../components/AdminIcon";
 
 type Crossing = {
   id: string; name: string; eva?: string; lat: number; lon: number;
@@ -70,7 +71,7 @@ export default function ForecastsPage() {
   return <main className={styles.page}>
     <header className={styles.header}>
       <div><div className={styles.eyebrow}>CROSSINGS · DATEN</div><h1>Prognosen</h1><p>Aktuelle Schließprognosen und Datenbasis aller verwalteten Bahnübergänge.</p></div>
-      <button className={styles.refresh} onClick={() => void load()} disabled={loading}>{loading ? "Aktualisiere…" : "↻ Aktualisieren"}</button>
+      <button className={styles.refresh} onClick={() => void load()} disabled={loading}>{loading ? "Aktualisiere…" : <><AdminIcon name="refresh" size={15}/> Aktualisieren</>}</button>
     </header>
     {error && !selected && <div className={styles.error}>{error}</div>}
     <section className={styles.tableCard}>
@@ -80,7 +81,7 @@ export default function ForecastsPage() {
         <span>{sourceLabel(crossing.train_source_mode)}</span>
         <span>{crossing.stations?.length ?? 0} verknüpft</span>
         <span className={styles.badge}>{crossing.status || "active"}</span>
-        <span className={styles.openIcon}>↗</span>
+        <span className={styles.openIcon}><AdminIcon name="arrow-up-right" size={16}/></span>
       </button>)}
       {!loading && !crossings.length && <div className={styles.empty}>Noch keine Bahnübergänge vorhanden.</div>}
       {loading && <div className={styles.empty}>Bahnübergänge werden geladen…</div>}
@@ -88,7 +89,7 @@ export default function ForecastsPage() {
 
     {selected && <div className={styles.backdrop} onMouseDown={(event) => { if (event.target === event.currentTarget) setSelected(null); }}>
       <aside className={styles.drawer}>
-        <header className={styles.drawerHead}><div><div className={styles.eyebrow}>PROGNOSE · {sourceLabel(selected.train_source_mode).toUpperCase()}</div><h2>{selected.name}</h2><p>{Number(selected.lat).toFixed(5)}, {Number(selected.lon).toFixed(5)}</p></div><button className={styles.close} onClick={() => setSelected(null)}>×</button></header>
+        <header className={styles.drawerHead}><div><div className={styles.eyebrow}>PROGNOSE · {sourceLabel(selected.train_source_mode).toUpperCase()}</div><h2>{selected.name}</h2><p>{Number(selected.lat).toFixed(5)}, {Number(selected.lon).toFixed(5)}</p></div><button className={styles.close} onClick={() => setSelected(null)}><AdminIcon name="x" size={16}/></button></header>
         <div className={styles.content}>
           {forecastLoading && <div className={styles.empty}>Prognose wird berechnet…</div>}
           {error && selected && <div className={styles.error}>{error}</div>}
