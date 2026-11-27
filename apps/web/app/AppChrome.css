@@ -2,3 +2,9 @@
 .container > .logo {
   display: none !important;
 }
+
+/* Hide app chrome while the full-screen loading experience is active. */
+body:has(.splash-active) .appHeader,
+body:has(.splash-active) [aria-label="Meine Bahnübergänge"] {
+  display: none !important;
+}
