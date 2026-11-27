@@ -4,17 +4,17 @@ import {
   ArrowUpDown, ArrowUpRight, Bell, CalendarDays, Check, ChevronDown,
   ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gauge, Home,
   Info, Map, MapPin, Menu, Megaphone, MessageCircle, MoreHorizontal,
-  Navigation, Pencil, Play, Plus, RefreshCw, Route, Search, Settings,
-  ShieldCheck, TrainFront, Trash2, Users, X, type LucideIcon,
+  Navigation, Pause, Pencil, Play, Plus, RefreshCw, Route, Search, Settings,
+  ShieldCheck, TrainFront, Trash2, Users, X, FileText, ChartNoAxesCombined, type LucideIcon,
 } from "lucide-react";
 import type { SVGProps } from "react";
 const icons = {
   home: Home, railway: TrainFront, train: TrainFront, clock: Clock3,
-  megaphone: Megaphone, users: Users, activity: Activity, chart: Gauge,
-  trash: Trash2, pencil: Pencil, pause: MoreHorizontal, play: Play,
+  megaphone: Megaphone, users: Users, activity: Activity, chart: ChartNoAxesCombined,
+  trash: Trash2, pencil: Pencil, pause: Pause, play: Play,
   plus: Plus, x: X, "arrow-up-right": ArrowUpRight, "arrow-right": ArrowRight,
   "arrow-left": ArrowLeft, "arrow-up-down": ArrowUpDown, "arrow-up": ArrowUp,
-  "arrow-down": ArrowDown, check: Check, "file-text": Info, menu: Menu,
+  "arrow-down": ArrowDown, check: Check, "file-text": FileText, menu: Menu,
   fuel: Fuel, map: Map, "map-pin": MapPin, navigation: Navigation,
   route: Route, search: Search, settings: Settings, bell: Bell,
   calendar: CalendarDays, refresh: RefreshCw, "chevron-down": ChevronDown,
