@@ -25,9 +25,12 @@
   z-index: 2;
   width: min(560px, calc(100vw - 36px));
   display: flex;
+  height: 100%;
+  box-sizing: border-box;
   flex-direction: column;
   align-items: center;
-  padding: 28px 0;
+  justify-content: center;
+  padding: 28px 0 220px;
   animation: splashEnter .65s cubic-bezier(.2,.75,.25,1) both;
 }
 
@@ -104,9 +107,13 @@
 }
 
 .loadingCopy {
+  position: absolute;
+  left: 0;
+  bottom: max(22px, env(safe-area-inset-bottom));
+  box-sizing: border-box;
   width: 100%;
-  min-height: 132px;
-  padding: 25px clamp(20px, 5vw, 42px) 22px;
+  min-height: 184px;
+  padding: 24px clamp(20px, 5vw, 42px) 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -138,6 +145,7 @@
   max-width: 34em;
   color: #687991;
   font: 550 clamp(13px, 2.5vw, 16px)/1.5 system-ui, sans-serif;
+  min-height: 3em;
   text-wrap: balance;
 }
 
@@ -175,17 +183,17 @@
 }
 
 @media (max-width: 520px) {
-  .splashContent { width: calc(100vw - 32px); padding: 16px 0; }
+  .splashContent { width: calc(100vw - 32px); padding: 16px 0 206px; }
   .loadingBar { height: 176px; transform: scale(.88); transform-origin: center bottom; margin-bottom: 0; }
   .loadingLogo { top: -20px; max-height: 85px; margin-bottom: 10px; }
-  .loadingCopy { min-height: 124px; padding: 21px 18px 19px; border-radius: 23px; }
+  .loadingCopy { min-height: 174px; padding: 19px 18px 17px; border-radius: 23px; }
 }
 
 @media (max-height: 700px) {
-  .splashContent { padding: 10px 0; }
+  .splashContent { padding: 10px 0 164px; }
   .loadingBar { height: 150px; transform: scale(.78); transform-origin: center bottom; margin-bottom: -4px; }
   .loadingLogo { top: -16px; max-height: 70px; margin-bottom: 8px; }
-  .loadingCopy { min-height: 112px; padding-top: 17px; padding-bottom: 15px; }
+  .loadingCopy { min-height: 150px; padding-top: 15px; padding-bottom: 13px; }
   .loadingProgress { margin-top: 13px; }
 }
 
