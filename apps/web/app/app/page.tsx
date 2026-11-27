@@ -990,6 +990,7 @@ return (
 
     <button
       className="cancelButton"
+      disabled={savingMeasurement}
       onClick={() =>
         setPendingEvent(null)
       }
