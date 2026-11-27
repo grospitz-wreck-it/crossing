@@ -103,7 +103,7 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
         {hasNews && newsItems.map((item) => {
           const card = (
             <>
-              <div className={styles.cardHead}><span className={styles.icon} style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}><AppIcon name="info" size={20} /></span><span className={styles.eyebrow}>{contentLabel(item)}</span></div>
+              <div className={styles.cardHead}><span className={styles.icon} style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}>{item.icon || <AppIcon name="info" size={20} />}</span><span className={styles.eyebrow}>{contentLabel(item)}</span></div>
               {item.image_url && <img className={styles.newsImage} src={item.image_url} alt="" loading="lazy" />}
               <h2 className={styles.newsTitle}>{item.title}</h2>
               {item.summary && <p className={styles.newsSummary}>{item.summary}</p>}
