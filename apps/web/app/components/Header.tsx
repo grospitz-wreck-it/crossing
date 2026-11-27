@@ -16,7 +16,7 @@ export default function Header() {
       <div className="appHeaderBrand">
         <span className="appHeaderEyebrow">MEINESCHRANKE</span>
         <div className="appHeaderTitle">
-          {inManager ? "Mein Bereich" : activeCrossing?.name ?? "Bahnübergang"}
+          {inManager ? "Mein Profil" : activeCrossing?.name ?? "Bahnübergang"}
         </div>
       </div>
       <Link
