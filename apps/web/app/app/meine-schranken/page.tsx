@@ -143,6 +143,11 @@ export default function MeineSchrankenPage() {
                     <span className={styles.crossingGlyph} aria-hidden="true"><i /><i /></span>
                     <strong>{crossing.name}</strong>
                     <span className={styles.slotStatus}>{active ? "Aktuell ausgewählt" : "Als aktive Schranke auswählen"}</span>
+                    {position && crossing.lat != null && crossing.lon != null && (
+                      <span className={styles.slotDistance}>
+                        {distanceLabel(distanceKm(position, { lat: crossing.lat, lon: crossing.lon }))}
+                      </span>
+                    )}
                   </button>
                   <div className={styles.slotActions}>
                     <button className={favorite ? styles.favoriteActive : styles.favorite} onClick={() => setFavorite(crossing.id)} aria-label="Als Favorit festlegen" title="Favorit">★</button>
