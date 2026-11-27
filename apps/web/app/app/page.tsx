@@ -435,8 +435,9 @@ const wakeLockRef =
   }
 
   useEffect(() => {
-  if (!saved.length) {
-    if (!activeId) setBootstrapLoading(false);
+  if (!activeId) {
+    setBootstrapLoading(false);
+    setBootstrapProgress(0);
     return;
   }
 
@@ -444,17 +445,15 @@ const wakeLockRef =
   setBootstrapLoading(true);
   setBootstrapProgress(0);
 
-  void Promise.all(saved.map(async (crossing) => {
-    await load(crossing.id, false);
+  void load(activeId, false).finally(() => {
     if (!cancelled) {
-      setBootstrapProgress((current) => current + 1);
+      setBootstrapProgress(1);
+      setBootstrapLoading(false);
     }
-  })).finally(() => {
-    if (!cancelled) setBootstrapLoading(false);
   });
 
   return () => { cancelled = true; };
-}, [saved]);
+}, [activeId]);
 
 useEffect(() => {
   if (!activeId) {
@@ -642,9 +641,9 @@ useEffect(() => {
 if (!data || bootstrapLoading || !loadingAnimationFinished) {
   return (
     <LoadingScreen
-      message="Deine gespeicherten Bahnübergänge werden vorbereitet"
-      detail={saved.length ? `Daten für ${Math.min(bootstrapProgress, saved.length)} von ${saved.length} Bahnübergängen geladen` : undefined}
-      progress={saved.length ? (bootstrapProgress / saved.length) * 100 : (!bootstrapLoading && Boolean(data) ? 100 : 0)}
+      message="Deine aktive Schranke wird vorbereitet"
+      detail={activeId ? (bootstrapProgress ? "Daten sind bereit" : "Verbindung wird hergestellt") : undefined}
+      progress={bootstrapProgress ? 100 : 0}
       onComplete={() => setLoadingAnimationFinished(true)}
     />
   );
