@@ -14,7 +14,7 @@ export default function LoadingScreen({ message, detail }: LoadingScreenProps) {
         </div>
 
         <img
-          src="/images/meineschranke_logo.webp"
+          src="/images/meineschranke_logo_trans.webp"
           alt="Meine Schranke"
           className={styles.loadingLogo}
         />
