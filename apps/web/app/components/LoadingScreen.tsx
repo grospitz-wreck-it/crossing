@@ -2,15 +2,27 @@
 
 import styles from "./LoadingScreen.module.css";
 
-type LoadingScreenProps = { message?: string; detail?: string };
+type LoadingScreenProps = {
+  message?: string;
+  detail?: string;
+  ready?: boolean;
+  onComplete?: () => void;
+};
 
-export default function LoadingScreen({ message, detail }: LoadingScreenProps) {
+export default function LoadingScreen({ message, detail, ready = false, onComplete }: LoadingScreenProps) {
   return (
     <main className={styles.loadingScreen} role="status" aria-live="polite">
       <div className={styles.loadingOverlay} />
       <div className={styles.splashContent}>
         <div className={styles.loadingBar} aria-label="Schranken-Animation">
-          <div className={styles.loadingBarFill} />
+          <div
+            className={`${styles.loadingBarFill} ${ready ? styles.loadingBarReady : ""}`}
+            onAnimationEnd={(event) => {
+              if (event.currentTarget === event.target && event.animationName === "barrierOpen") {
+                onComplete?.();
+              }
+            }}
+          />
         </div>
 
         <img
