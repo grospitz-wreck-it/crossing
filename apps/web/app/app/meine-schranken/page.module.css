@@ -460,3 +460,31 @@
 
 .logoutRow{display:flex;justify-content:flex-end;margin-top:12px}
 @media(max-width:680px){.logoutRow{margin-top:10px}.logoutRow .logoutButton{width:100%}}
+
+
+/* Mein Profil: insgesamt besser lesbare Typografie */
+.slotCountChip{font-size:12px}
+.slotCountChip strong{font-size:14px}
+.slotIntro{font-size:13px;line-height:1.6}
+.slotNumber,.overline{font-size:11px}
+.slotMain>strong{font-size:15px;line-height:1.4}
+.slotStatus{font-size:12px}
+.emptySlot strong{font-size:13px}
+.emptySlot small{font-size:11px}
+.logoutButton{font-size:14px;padding:13px 18px}
+.modalHeader p,.modalFooter span{font-size:13px}
+.modalResult .resultName strong{font-size:14px}
+.modalResult .resultName small{font-size:12px}
+.modalError{font-size:14px}
+@media(max-width:680px){
+  .slotIntro{font-size:14px}
+  .slotNumber,.overline{font-size:11px}
+  .slotMain>strong{font-size:14px}
+  .slotStatus{font-size:12px}
+  .emptySlot strong{font-size:13px}
+  .emptySlot small{font-size:11px}
+  .slotCountChip{font-size:11px}
+  .slotCountChip strong{font-size:14px}
+  .logoutButton{font-size:15px}
+  .modalHeader p,.modalFooter span{font-size:13px}
+}
