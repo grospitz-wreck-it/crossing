@@ -644,7 +644,7 @@ if (!data || bootstrapLoading || !loadingAnimationFinished) {
     <LoadingScreen
       message="Deine gespeicherten Bahnübergänge werden vorbereitet"
       detail={saved.length ? `Daten für ${Math.min(bootstrapProgress, saved.length)} von ${saved.length} Bahnübergängen geladen` : undefined}
-      ready={!bootstrapLoading && Boolean(data)}
+      progress={saved.length ? (bootstrapProgress / saved.length) * 100 : (!bootstrapLoading && Boolean(data) ? 100 : 0)}
       onComplete={() => setLoadingAnimationFinished(true)}
     />
   );
