@@ -145,7 +145,7 @@ function makePredictionId(crossingId: string, phase: any) {
 }
 
 export default function Home() {
-const { activeId, saved, favoriteId, hydrated } = useCrossings();
+const { activeId, saved, hydrated } = useCrossings();
 
 const [data, setData] =
   useState<any>(() => activeId ? statusCache.get(activeId) ?? null : null);
@@ -286,12 +286,12 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
       const adsPromise = fetch(`/api/ads/${crossingId}`, { cache: "no-store" });
       const contentPromise = fetch(`/api/content/${crossingId}`, { cache: "no-store" });
       const statusRes = await statusPromise;
-      onProgress?.(85, `${crossingName} geladen`);
       const [adRes, contentRes] = await Promise.all([adsPromise, contentPromise]);
       if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
 
       const json = await statusRes.json();
       statusCacheRef.current.set(crossingId, json);
+      onProgress?.(85, `${crossingName} geladen`);
 
       let adList: any[] = [];
       if (adRes.ok) {
@@ -305,8 +305,6 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
         editorialItems = Array.isArray(list) ? list : [];
       }
       contentCacheRef.current.set(crossingId, editorialItems);
-      onProgress?.(100, "Alles bereit");
-
       if (activeIdRef.current === crossingId) {
         setData(json);
         setIsSwitchingCrossing(false);
@@ -687,6 +685,14 @@ if (!hasCompletedInitialBootstrap && (!data || bootstrapLoading || !loadingAnima
       progress={bootstrapProgress}
       onComplete={() => setLoadingAnimationFinished(true)}
     />
+  );
+}
+
+if (!data) {
+  return (
+    <main className="container">
+      <div className="heroCard">Deine Schranke wird vorbereitet …</div>
+    </main>
   );
 }
 
