@@ -20,7 +20,7 @@ function distanceLabel(km?: number) {
 }
 
 export default function MeineSchrankenPage() {
-  const { saved, available, activeId, favoriteId, maxCrossings, purchasedSlots, premiumPackage, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
+  const { saved, available, activeId, favoriteId, maxCrossings, premiumPackage, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "loading" | "ready" | "denied" | "error">("idle");
