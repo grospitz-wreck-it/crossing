@@ -2,8 +2,7 @@ import { randomUUID } from "crypto";
 import { auth } from "../../../../auth";
 import { authDb } from "../../../lib/auth-db";
 import { sql } from "drizzle-orm";
-
-const MAX_FREE_CROSSINGS = 5;
+import { FREE_CROSSING_LIMIT, PREMIUM_CROSSING_PACKAGE } from "../../../lib/subscription-config";
 
 type Crossing = {
   id: string;
@@ -111,7 +110,8 @@ export async function GET() {
   return Response.json({
     crossings: result,
     favoriteId,
-    maxFreeCrossings: MAX_FREE_CROSSINGS,
+    maxFreeCrossings: FREE_CROSSING_LIMIT,
+    premiumPackage: PREMIUM_CROSSING_PACKAGE,
   });
 }
 
@@ -189,7 +189,7 @@ export async function POST(request: Request) {
         name: crossing.name,
       },
       favoriteId,
-      maxFreeCrossings: MAX_FREE_CROSSINGS,
+      maxFreeCrossings: FREE_CROSSING_LIMIT,
     });
   }
 
@@ -201,12 +201,12 @@ export async function POST(request: Request) {
 
   const count = Number(countRows[0]?.count ?? 0);
 
-  if (count >= MAX_FREE_CROSSINGS) {
+  if (count >= FREE_CROSSING_LIMIT) {
     return Response.json(
       {
         error: "Du kannst maximal 5 Bahnübergänge kostenlos speichern.",
-        code: "MAX_FREE_CROSSINGS",
-        maxFreeCrossings: MAX_FREE_CROSSINGS,
+        code: "FREE_CROSSING_LIMIT",
+        maxFreeCrossings: FREE_CROSSING_LIMIT,
       },
       { status: 409 },
     );
@@ -246,7 +246,7 @@ export async function POST(request: Request) {
       name: crossing.name,
     },
     favoriteId,
-    maxFreeCrossings: MAX_FREE_CROSSINGS,
+    maxFreeCrossings: FREE_CROSSING_LIMIT,
   });
 }
 
