@@ -259,7 +259,9 @@ async function refreshPrices(
     // Tankerkönig can return a successful HTTP response while omitting
     // individual station IDs. Do not advance their successful refresh time:
     // otherwise an old cached price would be treated as fresh for 20 minutes.
-    if (!entry || typeof entry !== "object") {
+    const status = entry?.status === "open" ? 1 : entry?.status === "closed" ? 0 : null;
+    const hasAnyPrice = entry && (validPrice(entry.e5) || validPrice(entry.e10) || validPrice(entry.diesel));
+    if (!entry || typeof entry !== "object" || (status === null && !hasAnyPrice)) {
       missing += 1;
       await saveRefreshState(
         db,
@@ -267,13 +269,12 @@ async function refreshPrices(
         stationId,
         now,
         now + ERROR_RETRY_MS,
-        "Tankerkönig hat für diese Tankstelle keine Preisantwort geliefert.",
+        "Tankerkönig hat für diese Tankstelle keine verwertbaren Preis- oder Statusdaten geliefert.",
       );
       continue;
     }
 
     refreshed += 1;
-    const status = entry.status === "open" ? 1 : entry.status === "closed" ? 0 : null;
     if (status !== null) {
       statements.push(statement(
         "UPDATE fuel_stations SET is_open = ?, last_seen_at = ? WHERE id = ?",
