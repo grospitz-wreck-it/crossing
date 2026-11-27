@@ -456,3 +456,7 @@
   .slotActions button{flex:1 1 0;max-width:44px}
   .slotDistance{font-size:10px}
 }
+
+
+.logoutRow{display:flex;justify-content:flex-end;margin-top:12px}
+@media(max-width:680px){.logoutRow{margin-top:10px}.logoutRow .logoutButton{width:100%}}
