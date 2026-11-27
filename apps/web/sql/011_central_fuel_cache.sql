@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS fuel_pilot_crossings (
   FOREIGN KEY (crossing_id) REFERENCES crossings(id) ON DELETE CASCADE,
   FOREIGN KEY (area_code) REFERENCES fuel_pilot_areas(code)
 );
+CREATE INDEX IF NOT EXISTS idx_fuel_pilot_crossings_area
+  ON fuel_pilot_crossings(area_code);
 
 CREATE TABLE IF NOT EXISTS fuel_station_prices (
   station_id TEXT NOT NULL,
@@ -76,7 +78,7 @@ CREATE TABLE IF NOT EXISTS fuel_refresh_state (
   scope_id TEXT NOT NULL,
   last_attempt_at INTEGER,
   last_success_at INTEGER,
-  next_attempt_at INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at INTEGER,
   error_message TEXT,
   cursor_value TEXT,
   updated_at INTEGER NOT NULL DEFAULT 0,
