@@ -2601,3 +2601,11 @@ a.editorialContentCard:hover{box-shadow:0 14px 34px rgba(20,48,78,.1)}
   .upcomingClosureTrain span { font-size: .84rem; }
   .upcomingClosureEta { grid-column: 2; justify-self: start; margin-top: 2px; }
 }
+
+
+/* Lucide glyph replaces the former CSS-drawn crossing symbol. */
+.upcomingClosuresIcon { color: #315f83; }
+.upcomingClosuresIcon::before,
+.upcomingClosuresIcon::after { content: none; display: none; }
+.upcomingClosuresIcon svg { display: block; width: 21px; height: 21px; }
+.heroStatIcon svg { display: block; width: 20px; height: 20px; }
