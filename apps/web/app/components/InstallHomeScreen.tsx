@@ -17,7 +17,7 @@ export default function InstallHomeScreen() {
 
   useEffect(() => {
     const ua = window.navigator.userAgent;
-    setIsIos(/iPhone|iPad|iPod/i.test(ua));
+    setIsIos(/iPhone|iPad|iPod/i.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
     const standalone = window.matchMedia("(display-mode: standalone)").matches
       || (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
     setInstalled(standalone);
@@ -75,14 +75,14 @@ export default function InstallHomeScreen() {
             <h2 id="install-help-title">Auf deinen Homescreen</h2>
             {isIos ? (
               <ol>
-                <li>Öffne meineschranke in <strong>Safari</strong>.</li>
-                <li>Tippe unten auf <strong>Teilen</strong> (das Quadrat mit Pfeil).</li>
+                <li>Tippe zuerst auf <strong>Jetzt zur App</strong> und öffne die Seite in <strong>Safari</strong>.</li>
+                <li>Tippe dort unten auf <strong>Teilen</strong> (das Quadrat mit Pfeil).</li>
                 <li>Wähle <strong>„Zum Home-Bildschirm“</strong> und bestätige.</li>
               </ol>
             ) : (
               <ol>
-                <li>Öffne die Seite in <strong>Chrome</strong> oder einem unterstützten Browser.</li>
-                <li>Öffne das Browser-Menü und wähle <strong>„App installieren“</strong> oder <strong>„Zum Startbildschirm hinzufügen“</strong>.</li>
+                <li>Tippe zuerst auf <strong>Jetzt zur App</strong>.</li>
+                <li>Öffne im Browser-Menü <strong>„App installieren“</strong> oder <strong>„Zum Startbildschirm hinzufügen“</strong>.</li>
               </ol>
             )}
             <Link className={styles.openApp} href="/app">Jetzt zur App <span>→</span></Link>
