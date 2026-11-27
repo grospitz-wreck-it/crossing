@@ -98,8 +98,13 @@ export default function MeineSchrankenPage() {
     }
     setBusyId(id);
     setNotice("");
-    await removeCrossing(id);
-    setBusyId("");
+    try {
+      await removeCrossing(id);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Die Schranke konnte nicht entfernt werden.");
+    } finally {
+      setBusyId("");
+    }
   }
 
   const slotCount = Math.max(maxCrossings, saved.length);
@@ -136,7 +141,7 @@ export default function MeineSchrankenPage() {
                   <div className={styles.slotActions}>
                     <button className={favorite ? styles.favoriteActive : styles.favorite} onClick={() => setFavorite(crossing.id)} aria-label="Als Favorit festlegen" title="Favorit">★</button>
                     <button className={styles.slotEdit} onClick={() => { setModalSlot(index); setQuery(""); }} aria-label="Bahnübergang austauschen" title="Bahnübergang bearbeiten"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L8 18l-4 1 1-4Z" /></svg></button>
-                    <button className={styles.remove} onClick={() => remove(crossing.id)} disabled={busyId === crossing.id || saved.length <= 1} aria-label="Platz leeren" title="Entfernen">×</button>
+                    <button className={styles.remove} onClick={() => remove(crossing.id)} disabled={busyId === crossing.id} aria-label="Platz leeren" title="Entfernen">×</button>
                   </div>
                 </article>
               ) : (
