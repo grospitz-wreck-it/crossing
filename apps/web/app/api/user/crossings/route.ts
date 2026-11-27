@@ -205,7 +205,7 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error: "Du kannst maximal 5 Bahnübergänge kostenlos speichern.",
-        code: "FREE_CROSSING_LIMIT",
+        code: "MAX_FREE_CROSSINGS",
         maxFreeCrossings: FREE_CROSSING_LIMIT,
       },
       { status: 409 },
