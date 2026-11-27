@@ -124,6 +124,18 @@ function getDestination(
 const MAX_PHASE_MS =
   900 * 1000;
 
+// Keep the feedback ID stable across reloads and identical to the ID used by
+// the separate prediction-rating component. The status API intentionally
+// contains forecast data only; it does not provide a predictionId.
+function makePredictionId(crossingId: string, phase: any) {
+  const trainIds = (phase?.trains ?? [])
+    .map((train: any) => String(train.id ?? ""))
+    .sort()
+    .join(",");
+
+  return `${crossingId}:${phase?.start ?? ""}:${phase?.end ?? ""}:${trainIds}`;
+}
+
 export default function Home() {
 const { activeId, saved } = useCrossings();
 
@@ -187,6 +199,11 @@ const [isSwitchingCrossing, setIsSwitchingCrossing] = useState(false);
 
 const activeIdRef = useRef<string | null>(activeId);
 activeIdRef.current = activeId;
+
+const predictionId =
+  activeId && data?.phase?.start && data?.phase?.end
+    ? makePredictionId(activeId, data.phase)
+    : null;
 
 const statusCacheRef = useRef<Map<string, any>>(new Map());
 const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -261,7 +278,7 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
 }
 
 async function saveUnexpectedTrain() {
-  if (!data?.predictionId || measurementState !== "close-recorded" || unexpectedTrainSaved || savingUnexpectedTrain) {
+  if (!predictionId || measurementState !== "close-recorded" || unexpectedTrainSaved || savingUnexpectedTrain) {
     return;
   }
 
@@ -271,7 +288,7 @@ async function saveUnexpectedTrain() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        predictionId: data.predictionId,
+        predictionId,
         flag: "unexpected_train",
       }),
     });
@@ -295,7 +312,7 @@ async function saveMeasurement(
   event: "close" | "open",
   precision: "exact" | "at_least"
 ) {
-  if (!data?.predictionId || savingMeasurement) return;
+  if (!predictionId || savingMeasurement) return;
   if (event === "close" && measurementState === "close-recorded") return;
   if (event === "open" && measurementState === "open-recorded") return;
 
@@ -305,7 +322,7 @@ async function saveMeasurement(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        predictionId: data.predictionId,
+        predictionId,
         event,
         actualAt: new Date().toISOString(),
         phase: data.phase,
@@ -332,6 +349,8 @@ async function saveMeasurement(
         ? "✓ Schranke offen – Messung gespeichert"
         : "✓ Öffnungszustand erfasst (Zeitpunkt ungenau)");
     }
+    // Keep the precision choice visible until the server confirms the write.
+    setPendingEvent(null);
   } catch (error) {
     console.error("Measurement save failed:", error);
     setMessage("⚠️ Speichern fehlgeschlagen – bitte erneut versuchen");
@@ -901,7 +920,6 @@ return (
       disabled={savingMeasurement}
       onClick={() => {
         void saveMeasurement(pendingEvent, "exact");
-        setPendingEvent(null);
       }}
     >
       GERADE EBEN
@@ -912,7 +930,6 @@ return (
       disabled={savingMeasurement}
       onClick={() => {
         void saveMeasurement(pendingEvent, "at_least");
-        setPendingEvent(null);
       }}
     >
       WAR SCHON EINE WEILE SO
@@ -974,7 +991,7 @@ return (
       ? "WIRD GESPEICHERT …"
       : unexpectedTrainSaved
         ? "✓ SONDERFALL GESPEICHERT"
-        : "⚠ GÜTERZUG / SONDERFALL"}
+        : "⚠ GÜTERZUG / SONDERZUG"}
   </button>
 )}
     </div>
