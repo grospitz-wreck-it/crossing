@@ -81,7 +81,7 @@ export default function ContentPreferences() {
           <div className={styles.row}>
             <span className={styles.icon}>⛽</span>
             <span className={styles.copy}><strong>Spritpreise</strong><small>{prefs.fuelEnabled && prefs.fuelType ? fuelLabels[prefs.fuelType] : "Günstigster Preis in der Nähe deiner Schranke"}</small></span>
-            {prefs.fuelEnabled && !editingFuel && <button className={styles.edit} type="button" aria-label="Spritart ändern" title="Spritart ändern" onClick={() => { setDraftFuel(prefs.fuelType || "e5"); setEditingFuel(true); }}>✎</button>}
+            {prefs.fuelEnabled && !editingFuel && <button className={styles.edit} type="button" aria-label="Spritart ändern" title="Spritart ändern" onClick={() => { setDraftFuel(prefs.fuelType || "e5"); setEditingFuel(true); }}><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 5 4 4M4 20l4.5-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.5 16 4 20Z"/></svg></button>}
             <button type="button" role="switch" aria-checked={prefs.fuelEnabled} disabled={saving} className={prefs.fuelEnabled ? styles.switchOn : styles.switch} onClick={() => void toggleFuel(!prefs.fuelEnabled)}><span /></button>
           </div>
           {editingFuel && (
