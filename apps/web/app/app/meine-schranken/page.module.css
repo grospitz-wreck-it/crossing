@@ -341,3 +341,8 @@
   .slotCard:hover,.emptySlot:hover{transform:none;box-shadow:none}
   .slotMain:active,.emptySlot:active,.modalResult:active{background:#fff4f6}
 }
+
+.modalError{flex:0 0 auto;margin:10px 20px 0;padding:12px 14px;border:1px solid #f0cbd1;border-radius:12px;background:#fff5f6;color:#a82238;font-size:12px;line-height:1.45}
+.modalSpinner{display:block;width:17px;height:17px;border:2px solid #edc5cc;border-top-color:#c71935;border-radius:50%;animation:modalSpin .7s linear infinite}
+@keyframes modalSpin{to{transform:rotate(360deg)}}
+@media(max-width:680px){.modalError{margin:10px 14px 0;font-size:13px}}
