@@ -250,30 +250,51 @@ async function refreshPrices(
   }
 
   const statements = [];
+  let refreshed = 0;
+  let missing = 0;
+
   for (const stationId of task.stationIds) {
     const entry = payload.prices[stationId];
-    if (entry && typeof entry === "object") {
-      const status = entry.status === "open" ? 1 : entry.status === "closed" ? 0 : null;
-      if (status !== null) {
-        statements.push(statement(
-          "UPDATE fuel_stations SET is_open = ?, last_seen_at = ? WHERE id = ?",
-          [status, now, stationId],
-        ));
-      }
-      for (const fuelType of ["e5", "e10", "diesel"] as FuelType[]) {
-        const price = entry[fuelType];
-        if (!validPrice(price)) continue;
-        statements.push(statement(
-          `INSERT INTO fuel_station_prices (station_id, fuel_type, price, observed_at, fetched_at)
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(station_id, fuel_type) DO UPDATE SET
-              price = excluded.price, observed_at = excluded.observed_at, fetched_at = excluded.fetched_at`,
-          [stationId, fuelType, price, now, now],
-        ));
-      }
+
+    // Tankerkönig can return a successful HTTP response while omitting
+    // individual station IDs. Do not advance their successful refresh time:
+    // otherwise an old cached price would be treated as fresh for 20 minutes.
+    if (!entry || typeof entry !== "object") {
+      missing += 1;
+      await saveRefreshState(
+        db,
+        "prices",
+        stationId,
+        now,
+        now + ERROR_RETRY_MS,
+        "Tankerkönig hat für diese Tankstelle keine Preisantwort geliefert.",
+      );
+      continue;
     }
 
-    // The schema intentionally uses the 'prices' scope for station refresh state.
+    refreshed += 1;
+    const status = entry.status === "open" ? 1 : entry.status === "closed" ? 0 : null;
+    if (status !== null) {
+      statements.push(statement(
+        "UPDATE fuel_stations SET is_open = ?, last_seen_at = ? WHERE id = ?",
+        [status, now, stationId],
+      ));
+    }
+
+    for (const fuelType of ["e5", "e10", "diesel"] as FuelType[]) {
+      const price = entry[fuelType];
+      if (!validPrice(price)) continue;
+      statements.push(statement(
+        `INSERT INTO fuel_station_prices (station_id, fuel_type, price, observed_at, fetched_at)
+          VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(station_id, fuel_type) DO UPDATE SET
+            price = excluded.price, observed_at = excluded.observed_at, fetched_at = excluded.fetched_at`,
+        [stationId, fuelType, price, now, now],
+      ));
+    }
+
+    // Only stations actually present in Tankerkönig's response receive the
+    // normal refresh interval.
     statements.push(statement(
       `INSERT INTO fuel_refresh_state
         (scope_type, scope_id, last_attempt_at, last_success_at, next_attempt_at, error_message, cursor_value, updated_at)
@@ -291,7 +312,7 @@ async function refreshPrices(
   for (let index = 0; index < statements.length; index += MAX_BATCH_STATEMENTS) {
     await db.batch(statements.slice(index, index + MAX_BATCH_STATEMENTS), "write");
   }
-  return { refreshed: task.stationIds.length };
+  return { refreshed, missing, requested: task.stationIds.length };
 }
 
 async function runRefresh(env: Env): Promise<Record<string, unknown>> {
