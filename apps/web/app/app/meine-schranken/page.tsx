@@ -22,12 +22,13 @@ function distanceLabel(km?: number) {
 }
 
 export default function MeineSchrankenPage() {
-  const { saved, available, activeId, favoriteId, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
+  const { saved, available, activeId, favoriteId, maxCrossings, purchasedSlots, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "loading" | "ready" | "denied" | "error">("idle");
   const [notice, setNotice] = useState("");
   const [busyId, setBusyId] = useState("");
+  const [replaceTargetId, setReplaceTargetId] = useState("");
   const [saving, setSaving] = useState(false);
 
   const savedIds = useMemo(() => new Set(saved.map((item) => item.id)), [saved]);
@@ -72,8 +73,11 @@ export default function MeineSchrankenPage() {
   }
 
   async function add(id: string) {
-    if (saved.length >= FREE_CROSSING_LIMIT) {
-      setNotice(`Du kannst maximal ${FREE_CROSSING_LIMIT} Schranken speichern.`);
+    const replaceId = saved.length >= maxCrossings
+      ? (replaceTargetId || saved[0]?.id)
+      : undefined;
+    if (saved.length >= maxCrossings && !replaceId) {
+      setNotice("Wähle zuerst eine gespeicherte Schranke aus, die ersetzt werden soll.");
       return;
     }
     setBusyId(id);
@@ -81,7 +85,8 @@ export default function MeineSchrankenPage() {
     const crossing = available.find((item) => item.id === id);
     try {
       if (!crossing) throw new Error("Dieser Bahnübergang ist nicht mehr verfügbar. Bitte lade die Seite neu.");
-      await addCrossing(crossing);
+      await addCrossing(crossing, replaceId);
+      if (replaceId) setReplaceTargetId("");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Die Schranke konnte nicht hinzugefügt werden.");
     } finally {
@@ -119,7 +124,7 @@ export default function MeineSchrankenPage() {
             <p>Verwalte deine Bahnübergänge und lege fest, welche Schranke beim Öffnen der App zuerst angezeigt wird.</p>
           </div>
           <div className={styles.countCard}>
-            <strong>{saved.length}<span>/{FREE_CROSSING_LIMIT}</span></strong>
+            <strong>{saved.length}<span>/{maxCrossings}</span></strong>
             <small>gespeichert</small>
           </div>
         </section>
@@ -129,7 +134,7 @@ export default function MeineSchrankenPage() {
             <span className={styles.overline}>PREMIUM-PAKET</span>
             <h2>Mehr Schranken im Blick</h2>
             <p>
-              +{PREMIUM_CROSSING_PACKAGE.additionalCrossings} zusätzliche Bahnübergänge ·{" "}
+              +{PREMIUM_CROSSING_PACKAGE.additionalCrossings} zusätzliche Plätze ·{" "}
               {(PREMIUM_CROSSING_PACKAGE.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto ·{" "}
               {PREMIUM_CROSSING_PACKAGE.durationDays} Tage Laufzeit
             </p>
@@ -150,7 +155,7 @@ export default function MeineSchrankenPage() {
               <span className={styles.overline}>DEINE AUSWAHL</span>
               <h2>Gespeicherte Schranken</h2>
             </div>
-            <span className={styles.pill}>{saved.length} von {FREE_CROSSING_LIMIT}</span>
+            <span className={styles.pill}>{saved.length} von {maxCrossings} Plätzen</span>
           </div>
           {saved.length === 0 ? (
             <div className={styles.emptySaved}>
@@ -205,6 +210,22 @@ export default function MeineSchrankenPage() {
           </label>
 
           {locationState === "ready" && <div className={styles.locationNote}>Standort gefunden – Ergebnisse sind nach Entfernung sortiert. Deine GPS-Daten bleiben auf deinem Gerät.</div>}
+          {saved.length >= maxCrossings && saved.length > 0 && (
+            <div className={styles.limitNote}>
+              <strong>Alle {maxCrossings} Plätze sind belegt.</strong>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                <span>Diese Schranke ersetzen:</span>
+                <select
+                  value={replaceTargetId || saved[0]?.id || ""}
+                  onChange={(event) => setReplaceTargetId(event.target.value)}
+                  style={{ minWidth: 0, flex: 1, padding: "10px 12px", border: "1px solid #d7dee8", borderRadius: 10, background: "#fff", color: "#172033" }}
+                >
+                  {saved.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                </select>
+              </label>
+              <small>Du kannst deine Auswahl jederzeit ändern. Es wird kein zusätzlicher Platz verbraucht.</small>
+            </div>
+          )}
           {results.length === 0 ? (
             <div className={styles.noResults}>{available.length === 0 ? "Die Schrankenliste wird geladen …" : "Keine weiteren passenden Bahnübergänge gefunden."}</div>
           ) : (
@@ -213,14 +234,14 @@ export default function MeineSchrankenPage() {
                 <article className={styles.resultItem} key={crossing.id}>
                   <span className={styles.resultGlyph}><i /><i /></span>
                   <span className={styles.resultName}><strong>{crossing.name}</strong><small>{distanceLabel(crossing.distance)}</small></span>
-                  <button className={styles.addButton} onClick={() => add(crossing.id)} disabled={busyId === crossing.id || saved.length >= FREE_CROSSING_LIMIT} aria-label={`${crossing.name} hinzufügen`}>
-                    {busyId === crossing.id ? "…" : "+"}
+                  <button className={styles.addButton} onClick={() => add(crossing.id)} disabled={busyId === crossing.id} aria-label={`${crossing.name} ${saved.length >= maxCrossings ? "als Ersatz übernehmen" : "hinzufügen"}`}>
+                    {busyId === crossing.id ? "…" : saved.length >= maxCrossings ? "↻" : "+"}
                   </button>
                 </article>
               ))}
             </div>
           )}
-          {saved.length >= FREE_CROSSING_LIMIT && <p className={styles.limitNote}>Du hast das Limit von {FREE_CROSSING_LIMIT} Schranken erreicht. Entferne eine Schranke, um eine andere hinzuzufügen.</p>}
+          {saved.length >= maxCrossings && <p className={styles.limitNote}>Mit ↻ ersetzt du die oben ausgewählte Schranke direkt – ohne sie vorher löschen zu müssen.</p>}
         </section>
 
         <ContentPreferences />
@@ -234,7 +255,7 @@ export default function MeineSchrankenPage() {
           <button className={styles.logoutButton} onClick={() => signOut({ callbackUrl: "/" })}>Abmelden</button>
         </section>
         <div className={styles.bottomBar}>
-          <div><strong>{saved.length} Schranken in deiner Liste</strong><small>Deine Auswahl wird mit deinem Konto synchronisiert.</small></div>
+          <div><strong>{saved.length} von {maxCrossings} Plätzen belegt</strong><small>{purchasedSlots > 0 ? `${purchasedSlots} Premium-Plätze aktiv` : "Deine Auswahl wird mit deinem Konto synchronisiert."}</small></div>
           <button onClick={save} disabled={saving || !activeId}>{saving ? "Speichert …" : "Fertig"} <span>→</span></button>
         </div>
         <Link className={styles.backLink} href="/app">← Zurück zur BÜ-Übersicht</Link>
