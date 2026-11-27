@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS fuel_pilot_areas (
   code TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at INTEGER NOT NULL DEFAULT 0
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS fuel_stations (
@@ -16,8 +16,8 @@ CREATE TABLE IF NOT EXISTS fuel_stations (
   house_number TEXT,
   post_code TEXT,
   place TEXT,
-  lat REAL,
-  lon REAL,
+  lat REAL NOT NULL,
+  lon REAL NOT NULL,
   is_open INTEGER,
   first_seen_at INTEGER NOT NULL,
   last_seen_at INTEGER NOT NULL
@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS crossing_fuel_stations (
   distance_m INTEGER,
   direction TEXT,
   discovered_at INTEGER NOT NULL,
-  PRIMARY KEY (crossing_id, station_id)
+  PRIMARY KEY (crossing_id, station_id),
+  FOREIGN KEY (crossing_id) REFERENCES crossings(id) ON DELETE CASCADE,
+  FOREIGN KEY (station_id) REFERENCES fuel_stations(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_crossing_fuel_stations_station
   ON crossing_fuel_stations(station_id);
@@ -39,7 +41,9 @@ CREATE INDEX IF NOT EXISTS idx_crossing_fuel_stations_crossing
 CREATE TABLE IF NOT EXISTS fuel_pilot_crossings (
   crossing_id TEXT PRIMARY KEY,
   area_code TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 1
+  enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  FOREIGN KEY (crossing_id) REFERENCES crossings(id) ON DELETE CASCADE,
+  FOREIGN KEY (area_code) REFERENCES fuel_pilot_areas(code)
 );
 
 CREATE TABLE IF NOT EXISTS fuel_station_prices (
@@ -48,12 +52,13 @@ CREATE TABLE IF NOT EXISTS fuel_station_prices (
   price REAL NOT NULL,
   observed_at INTEGER NOT NULL,
   fetched_at INTEGER NOT NULL,
-  PRIMARY KEY (station_id, fuel_type)
+  PRIMARY KEY (station_id, fuel_type),
+  FOREIGN KEY (station_id) REFERENCES fuel_stations(id) ON DELETE CASCADE
 );
-CREATE INDEX IF NOT EXISTS idx_fuel_station_prices_fetched
+CREATE INDEX IF NOT EXISTS idx_fuel_prices_fetched
   ON fuel_station_prices(fetched_at);
-CREATE INDEX IF NOT EXISTS idx_fuel_station_prices_type_price
-  ON fuel_station_prices(fuel_type, price);
+CREATE INDEX IF NOT EXISTS idx_fuel_prices_type
+  ON fuel_station_prices(fuel_type);
 
 CREATE TABLE IF NOT EXISTS fuel_api_control (
   id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -67,23 +72,23 @@ INSERT OR IGNORE INTO fuel_api_control
 VALUES (1, 0, 0, NULL, 0);
 
 CREATE TABLE IF NOT EXISTS fuel_refresh_state (
-  scope_type TEXT NOT NULL,
+  scope_type TEXT NOT NULL CHECK (scope_type IN ('area', 'crossing', 'prices')),
   scope_id TEXT NOT NULL,
   last_attempt_at INTEGER,
   last_success_at INTEGER,
   next_attempt_at INTEGER NOT NULL DEFAULT 0,
   error_message TEXT,
   cursor_value TEXT,
-  updated_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (scope_type, scope_id)
 );
-CREATE INDEX IF NOT EXISTS idx_fuel_refresh_state_due
-  ON fuel_refresh_state(scope_type, next_attempt_at);
+CREATE INDEX IF NOT EXISTS idx_fuel_refresh_next
+  ON fuel_refresh_state(next_attempt_at);
 
 INSERT OR IGNORE INTO fuel_pilot_areas (code, name, enabled, created_at)
 VALUES
-  ('HERFORD', 'Kreis Herford', 1, unixepoch()),
-  ('MI-LUEBBECKE', 'Kreis Minden-Lübbecke', 1, unixepoch());
+  ('HERFORD', 'Kreis Herford', 1, CURRENT_TIMESTAMP),
+  ('MI-LUEBBECKE', 'Kreis Minden-Lübbecke', 1, CURRENT_TIMESTAMP);
 
 -- Pilot BÜs confirmed in Turso. Kaarst is deliberately not part of this pilot.
 INSERT OR IGNORE INTO fuel_pilot_crossings (crossing_id, area_code, enabled)
