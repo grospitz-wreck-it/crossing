@@ -129,7 +129,7 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
                   </div>;
                 })}
               </div>
-            ) : <p className={styles.muted}>Im Umkreis von 5 km wurden keine Preise für diese Sorte gefunden.</p>}
+            ) : <p className={styles.muted}>{fuel?.message || "Im Umkreis von 5 km wurden keine Preise für diese Sorte gefunden."}</p>}
             <div className={styles.attribution}>Günstige Preise im Umkreis · <a href="https://creativecommons.org/licenses/by/4.0/deed.de" target="_blank" rel="noreferrer">Tankerkönig · CC BY 4.0</a></div>
           </article>
         )}
