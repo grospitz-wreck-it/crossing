@@ -1,4 +1,4 @@
-import { auth } from "../../../../../auth";
+import { auth } from "../../../../auth";
 import { db } from "../../../lib/db";
 
 export const dynamic = "force-dynamic";
