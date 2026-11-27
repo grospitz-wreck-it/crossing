@@ -9,6 +9,63 @@ type Crossing = {
   name: string;
 };
 
+type CrossingCapacity = {
+  freeLimit: number;
+  purchasedSlots: number;
+  maxCrossings: number;
+  premiumEnabled: boolean;
+  packageSlots: number;
+  packagePriceCents: number;
+  packageCurrency: string;
+  packageDurationDays: number;
+};
+
+async function getCrossingCapacity(userId: string): Promise<CrossingCapacity> {
+  const [configRows, purchaseRows] = await Promise.all([
+    authDb.all<{
+      free_crossing_limit: number;
+      premium_package_slots: number;
+      premium_package_price_cents: number;
+      premium_package_currency: string;
+      premium_package_duration_days: number;
+      premium_enabled: number;
+    }>(sql`
+      SELECT
+        free_crossing_limit,
+        premium_package_slots,
+        premium_package_price_cents,
+        premium_package_currency,
+        premium_package_duration_days,
+        premium_enabled
+      FROM subscription_config
+      WHERE id = 1
+      LIMIT 1
+    `),
+    authDb.all<{ slots: number | null }>(sql`
+      SELECT COALESCE(SUM(package_slots), 0) AS slots
+      FROM user_crossing_purchases
+      WHERE user_id = ${userId}
+        AND status = 'paid'
+        AND valid_until > datetime('now')
+    `),
+  ]);
+
+  const config = configRows[0];
+  const freeLimit = Number(config?.free_crossing_limit ?? FREE_CROSSING_LIMIT);
+  const purchasedSlots = Number(purchaseRows[0]?.slots ?? 0);
+
+  return {
+    freeLimit,
+    purchasedSlots,
+    maxCrossings: freeLimit + purchasedSlots,
+    premiumEnabled: Boolean(config?.premium_enabled ?? 0),
+    packageSlots: Number(config?.premium_package_slots ?? PREMIUM_CROSSING_PACKAGE.additionalCrossings),
+    packagePriceCents: Number(config?.premium_package_price_cents ?? PREMIUM_CROSSING_PACKAGE.priceCents),
+    packageCurrency: String(config?.premium_package_currency ?? PREMIUM_CROSSING_PACKAGE.currency).toLowerCase(),
+    packageDurationDays: Number(config?.premium_package_duration_days ?? PREMIUM_CROSSING_PACKAGE.durationDays),
+  };
+}
+
 type SavedCrossing = {
   id: string;
   crossing_id: string;
@@ -70,7 +127,7 @@ export async function GET() {
 
   const userId = session.user.id;
 
-  const [result, favoriteId] = await Promise.all([
+  const [result, favoriteId, capacity] = await Promise.all([
     authDb.all<SavedCrossing>(sql`
       SELECT
         uc.id,
@@ -105,13 +162,20 @@ export async function GET() {
         uc.created_at ASC
     `),
     getFavoriteId(userId),
+    getCrossingCapacity(userId),
   ]);
 
   return Response.json({
     crossings: result,
     favoriteId,
-    maxFreeCrossings: FREE_CROSSING_LIMIT,
-    premiumPackage: PREMIUM_CROSSING_PACKAGE,
+    ...capacity,
+    premiumPackage: {
+      additionalCrossings: capacity.packageSlots,
+      priceCents: capacity.packagePriceCents,
+      currency: capacity.packageCurrency,
+      durationDays: capacity.packageDurationDays,
+      enabled: capacity.premiumEnabled,
+    },
   });
 }
 
@@ -127,7 +191,7 @@ export async function POST(request: Request) {
 
   const userId = session.user.id;
 
-  let body: { crossingId?: string };
+  let body: { crossingId?: string; replaceCrossingId?: string };
 
   try {
     body = await request.json();
@@ -200,34 +264,67 @@ export async function POST(request: Request) {
   `);
 
   const count = Number(countRows[0]?.count ?? 0);
+  const capacity = await getCrossingCapacity(userId);
+  const replaceCrossingId = body.replaceCrossingId?.trim();
 
-  if (count >= FREE_CROSSING_LIMIT) {
+  if (count >= capacity.maxCrossings && !replaceCrossingId) {
     return Response.json(
       {
-        error: `Du kannst maximal ${FREE_CROSSING_LIMIT} Bahnübergänge kostenlos speichern.`,
-        code: "MAX_FREE_CROSSINGS",
-        maxFreeCrossings: FREE_CROSSING_LIMIT,
+        error: `Du hast alle ${capacity.maxCrossings} verfügbaren Plätze belegt. Wähle einen gespeicherten Bahnübergang zum Ersetzen.`,
+        code: "CROSSING_CAPACITY_REACHED",
+        maxCrossings: capacity.maxCrossings,
       },
       { status: 409 },
     );
   }
 
-  const id = randomUUID();
+  if (replaceCrossingId) {
+    if (replaceCrossingId === crossingId) {
+      return Response.json({ error: "Dieser Bahnübergang ist bereits gespeichert." }, { status: 409 });
+    }
 
-  await authDb.run(sql`
-    INSERT INTO user_crossings (
-      id,
-      user_id,
-      crossing_id,
-      sort_order
-    )
-    VALUES (
-      ${id},
-      ${userId},
-      ${crossingId},
-      ${count}
-    )
-  `);
+    const replaceRows = await authDb.all<{ id: string }>(sql`
+      SELECT id
+      FROM user_crossings
+      WHERE user_id = ${userId}
+        AND crossing_id = ${replaceCrossingId}
+      LIMIT 1
+    `);
+
+    if (replaceRows.length === 0) {
+      return Response.json({ error: "Der zu ersetzende Bahnübergang ist nicht gespeichert." }, { status: 404 });
+    }
+
+    const currentFavoriteId = await getFavoriteId(userId);
+    const nextCount = Math.max(0, count - 1);
+
+    await authDb.transaction(async (tx) => {
+      await tx.run(sql`
+        DELETE FROM user_crossings
+        WHERE user_id = ${userId}
+          AND crossing_id = ${replaceCrossingId}
+      `);
+      await tx.run(sql`
+        INSERT INTO user_crossings (id, user_id, crossing_id, sort_order)
+        VALUES (${randomUUID()}, ${userId}, ${crossingId}, ${nextCount})
+      `);
+      if (currentFavoriteId === replaceCrossingId) {
+        await tx.run(sql`
+          INSERT INTO user_settings (user_id, default_crossing_id)
+          VALUES (${userId}, ${crossingId})
+          ON CONFLICT(user_id) DO UPDATE SET
+            default_crossing_id = excluded.default_crossing_id,
+            updated_at = datetime('now')
+        `);
+      }
+    });
+  } else {
+    const id = randomUUID();
+    await authDb.run(sql`
+      INSERT INTO user_crossings (id, user_id, crossing_id, sort_order)
+      VALUES (${id}, ${userId}, ${crossingId}, ${count})
+    `);
+  }
 
   /*
    * Der erste gespeicherte BÜ wird automatisch Favorit.
@@ -239,14 +336,17 @@ export async function POST(request: Request) {
     favoriteId = crossingId;
   }
 
+  const nextFavoriteId = favoriteId === body.replaceCrossingId ? crossingId : favoriteId;
+
   return Response.json({
     success: true,
+    replaced: Boolean(body.replaceCrossingId),
     crossing: {
       id: crossing.id,
       name: crossing.name,
     },
-    favoriteId,
-    maxFreeCrossings: FREE_CROSSING_LIMIT,
+    favoriteId: nextFavoriteId,
+    ...(await getCrossingCapacity(userId)),
   });
 }
 
