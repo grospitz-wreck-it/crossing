@@ -431,3 +431,28 @@
   }
   .slotCountChip{padding:6px 9px;font-size:9px}
 }
+
+
+/* Slot-Aktionen gleichmäßig über die Kartenbreite verteilen */
+.slotActions{
+  width:100%;
+  justify-content:space-evenly;
+  gap:4px;
+  padding-left:10px;
+  padding-right:10px;
+}
+.slotActions button{
+  flex:1 1 0;
+  max-width:52px;
+}
+.slotDistance{
+  color:#607f9b;
+  font-size:10px;
+  font-weight:700;
+  font-variant-numeric:tabular-nums;
+}
+@media(max-width:680px){
+  .slotActions{justify-content:space-evenly;gap:3px;padding-left:7px;padding-right:7px}
+  .slotActions button{flex:1 1 0;max-width:44px}
+  .slotDistance{font-size:10px}
+}
