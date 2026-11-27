@@ -171,6 +171,20 @@ async function discoverStations(task: Extract<RefreshTask, { kind: "discovery" }
         [station.id, fuelType, price, now, now],
       ));
     }
+    // list.php already returned this station's current prices; avoid an
+    // immediate redundant prices.php request for the same station.
+    statements.push(statement(
+      `INSERT INTO fuel_refresh_state
+        (scope_type, scope_id, last_attempt_at, last_success_at, next_attempt_at, error_message, cursor_value, updated_at)
+        VALUES ('station', ?, ?, ?, ?, NULL, NULL, ?)
+        ON CONFLICT(scope_type, scope_id) DO UPDATE SET
+          last_attempt_at = excluded.last_attempt_at,
+          last_success_at = excluded.last_success_at,
+          next_attempt_at = excluded.next_attempt_at,
+          error_message = NULL,
+          updated_at = excluded.updated_at`,
+      [station.id, now, now, now + PRICE_REFRESH_INTERVAL_MS, now],
+    ));
   }
 
   for (let index = 0; index < statements.length; index += 100) {
