@@ -148,7 +148,7 @@ export default function Home() {
 const { activeId, saved, favoriteId, hydrated } = useCrossings();
 
 const [data, setData] =
-  useState<any>(null);
+  useState<any>(() => activeId ? statusCache.get(activeId) ?? null : null);
 const [bootstrapLoading, setBootstrapLoading] = useState(!hasCompletedInitialBootstrap);
 const [bootstrapProgress, setBootstrapProgress] = useState(0);
 const [bootstrapDetail, setBootstrapDetail] = useState("Deine Schranke wird geladen");
@@ -282,12 +282,12 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
   const request = (async () => {
     try {
       const crossingName = saved.find((item) => item.id === crossingId)?.name ?? "Bahnübergang";
-      const [statusRes, adRes, contentRes] = await Promise.all([
-        fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" }),
-        fetch(`/api/ads/${crossingId}`, { cache: "no-store" }),
-        fetch(`/api/content/${crossingId}`, { cache: "no-store" }),
-      ]);
+      const statusPromise = fetch(`/api/crossings/${crossingId}/status`, { cache: "no-store" });
+      const adsPromise = fetch(`/api/ads/${crossingId}`, { cache: "no-store" });
+      const contentPromise = fetch(`/api/content/${crossingId}`, { cache: "no-store" });
+      const statusRes = await statusPromise;
       onProgress?.(85, `${crossingName} geladen`);
+      const [adRes, contentRes] = await Promise.all([adsPromise, contentPromise]);
       if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
 
       const json = await statusRes.json();
