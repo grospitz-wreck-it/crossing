@@ -69,18 +69,17 @@ export default function ContentPreferences() {
       <div className={styles.heading}>
         <span className={styles.eyebrow}>PERSONALISIEREN</span>
         <h2>Mein Content</h2>
-        <p>Wähle aus, welche zusätzlichen Inhalte in deiner Schranken-Übersicht erscheinen sollen.</p>
       </div>
       {loading ? <div className={styles.loading}>Einstellungen werden geladen …</div> : (
         <div className={styles.rows}>
           <div className={styles.row}>
             <span className={styles.icon}>📰</span>
-            <span className={styles.copy}><strong>News</strong><small>Lokale Informationen und redaktionelle Inhalte</small></span>
+            <span className={styles.copy}><strong>News</strong></span>
             <button type="button" role="switch" aria-checked={prefs.newsEnabled} disabled={saving} className={prefs.newsEnabled ? styles.switchOn : styles.switch} onClick={() => void toggle("newsEnabled", !prefs.newsEnabled)}><span /></button>
           </div>
           <div className={styles.row}>
             <span className={styles.icon}>⛽</span>
-            <span className={styles.copy}><strong>Spritpreise</strong><small>{prefs.fuelEnabled && prefs.fuelType ? fuelLabels[prefs.fuelType] : "Günstigster Preis in der Nähe deiner Schranke"}</small></span>
+            <span className={styles.copy}><strong>Spritpreise</strong>{prefs.fuelEnabled && prefs.fuelType && <small>{fuelLabels[prefs.fuelType]}</small>}</span>
             {prefs.fuelEnabled && !editingFuel && <button className={styles.edit} type="button" aria-label="Spritart ändern" title="Spritart ändern" onClick={() => { setDraftFuel(prefs.fuelType || "e5"); setEditingFuel(true); }}><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m15 5 4 4M4 20l4.5-1 10.2-10.2a2.1 2.1 0 0 0-3-3L5.5 16 4 20Z"/></svg></button>}
             <button type="button" role="switch" aria-checked={prefs.fuelEnabled} disabled={saving} className={prefs.fuelEnabled ? styles.switchOn : styles.switch} onClick={() => void toggleFuel(!prefs.fuelEnabled)}><span /></button>
           </div>
@@ -100,13 +99,12 @@ export default function ContentPreferences() {
           )}
           <div className={styles.row}>
             <span className={styles.icon}>😄</span>
-            <span className={styles.copy}><strong>Witze</strong><small>Zufällige Gags direkt in deiner Übersicht</small></span>
+            <span className={styles.copy}><strong>Witze</strong></span>
             <button type="button" role="switch" aria-checked={prefs.jokesEnabled} disabled={saving} className={prefs.jokesEnabled ? styles.switchOn : styles.switch} onClick={() => void toggle("jokesEnabled", !prefs.jokesEnabled)}><span /></button>
           </div>
         </div>
       )}
       {notice && <p className={styles.notice} role="status">{notice}</p>}
-      <p className={styles.footnote}>Du kannst alle Inhalte jederzeit wieder ausschalten. Deine Auswahl wird mit deinem Konto gespeichert.</p>
     </section>
   );
 }
