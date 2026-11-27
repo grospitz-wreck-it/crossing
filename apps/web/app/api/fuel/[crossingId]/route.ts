@@ -10,18 +10,6 @@ type Station = {
   isOpen?: boolean; e5?: number | false; e10?: number | false; diesel?: number | false;
 };
 
-async function ensureCache() {
-  await db.execute(`CREATE TABLE IF NOT EXISTS fuel_price_cache (
-    crossing_id TEXT PRIMARY KEY,
-    payload_json TEXT NOT NULL,
-    fetched_at INTEGER NOT NULL
-  )`);
-  await db.execute(`CREATE TABLE IF NOT EXISTS fuel_price_api_guard (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    last_request_at INTEGER NOT NULL
-  )`);
-}
-
 function compassDirection(fromLat: number, fromLon: number, toLat: number, toLon: number) {
   const toRad = (value: number) => value * Math.PI / 180;
   const y = Math.sin(toRad(toLon - fromLon)) * Math.cos(toRad(toLat));
@@ -79,89 +67,97 @@ export async function GET(request: Request, { params }: { params: Promise<{ cros
     return Response.json({ error: "Ungültige Spritsorte." }, { status: 400 });
   }
 
-  const apiKey = process.env.TANKERKOENIG_API_KEY;
-  if (!apiKey) return Response.json({ error: "Spritpreise sind noch nicht konfiguriert." }, { status: 503 });
-
   try {
-    await ensureCache();
-    const cached = await db.execute({
-      sql: "SELECT payload_json, fetched_at FROM fuel_price_cache WHERE crossing_id = ? LIMIT 1",
-      args: [crossingId],
-    });
-    const cacheRow = cached.rows[0] as any;
-    const cachedAt = Number(cacheRow?.fetched_at || 0);
-    let stations: Station[] = [];
-    let fetchedAt = cachedAt;
-
-    if (cacheRow && Date.now() - cachedAt < 60_000) {
-      const parsed = JSON.parse(String(cacheRow.payload_json));
-      stations = Array.isArray(parsed) ? parsed : [];
-    } else {
-      const guard = await db.execute("SELECT last_request_at FROM fuel_price_api_guard WHERE id = 1 LIMIT 1");
-      const lastRequestAt = Number((guard.rows[0] as any)?.last_request_at || 0);
-      if (Date.now() - lastRequestAt < 60_000) {
-        if (cacheRow) {
-          const parsed = JSON.parse(String(cacheRow.payload_json));
-          stations = Array.isArray(parsed) ? parsed : [];
-        } else {
-          return Response.json({ error: "Die Spritpreisdaten werden gerade aktualisiert. Bitte in einer Minute erneut versuchen.", retryAfter: Math.ceil((60_000 - (Date.now() - lastRequestAt)) / 1000) }, { status: 429 });
-        }
-      } else {
-        const crossingResult = await db.execute({
-          sql: "SELECT lat, lon FROM crossings WHERE id = ? LIMIT 1",
-          args: [crossingId],
-        });
-        const crossing = crossingResult.rows[0] as any;
-        if (!crossing || !Number.isFinite(Number(crossing.lat)) || !Number.isFinite(Number(crossing.lon))) {
-          return Response.json({ error: "Für diesen Bahnübergang sind keine Geodaten hinterlegt." }, { status: 404 });
-        }
-
-        await db.execute({
-          sql: "INSERT INTO fuel_price_api_guard (id, last_request_at) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET last_request_at = excluded.last_request_at",
-          args: [Date.now()],
-        });
-        const url = new URL("https://creativecommons.tankerkoenig.de/json/list.php");
-        url.searchParams.set("lat", String(crossing.lat));
-        url.searchParams.set("lng", String(crossing.lon));
-        url.searchParams.set("rad", "5");
-        url.searchParams.set("type", "all");
-        url.searchParams.set("sort", "price");
-        url.searchParams.set("apikey", apiKey);
-
-        const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10000) });
-        if (!response.ok) throw new Error(`Tankerkönig HTTP ${response.status}`);
-        const payload = await response.json();
-        if (payload?.ok !== true || !Array.isArray(payload.stations)) {
-          throw new Error(payload?.message || "Tankerkönig hat keine gültigen Daten geliefert.");
-        }
-        stations = payload.stations as Station[];
-        fetchedAt = Date.now();
-        await db.execute({
-          sql: "INSERT INTO fuel_price_cache (crossing_id, payload_json, fetched_at) VALUES (?, ?, ?) ON CONFLICT(crossing_id) DO UPDATE SET payload_json = excluded.payload_json, fetched_at = excluded.fetched_at",
-          args: [crossingId, JSON.stringify(stations), Date.now()],
-        });
-      }
-    }
-
     const crossingResult = await db.execute({
       sql: "SELECT lat, lon FROM crossings WHERE id = ? LIMIT 1",
       args: [crossingId],
     });
     const crossing = crossingResult.rows[0] as any;
-    const results = crossing
-      ? cheapest(stations, type, Number(crossing.lat), Number(crossing.lon))
-      : [];
+    if (!crossing || !Number.isFinite(Number(crossing.lat)) || !Number.isFinite(Number(crossing.lon))) {
+      return Response.json({ error: "Für diesen Bahnübergang sind keine Geodaten hinterlegt." }, { status: 404 });
+    }
 
+    const result = await db.execute({
+      sql: `SELECT s.id, s.name, s.brand, s.street, s.house_number, s.post_code,
+          s.place, s.lat, s.lon, s.is_open, cfs.distance_m, cfs.direction,
+          p.price, p.fetched_at
+        FROM crossing_fuel_stations cfs
+        JOIN fuel_stations s ON s.id = cfs.station_id
+        JOIN fuel_station_prices p ON p.station_id = s.id AND p.fuel_type = ?
+        WHERE cfs.crossing_id = ?
+        ORDER BY p.price ASC`,
+      args: [type, crossingId],
+    });
+
+    const rows = result.rows as any[];
+    const stations: Station[] = rows.map((row) => ({
+      id: String(row.id),
+      name: String(row.name || row.brand || "Tankstelle"),
+      brand: row.brand ? String(row.brand) : undefined,
+      street: row.street ? String(row.street) : undefined,
+      houseNumber: row.house_number ? String(row.house_number) : undefined,
+      place: row.place ? String(row.place) : undefined,
+      postCode: row.post_code != null && Number.isFinite(Number(row.post_code)) ? Number(row.post_code) : undefined,
+      dist: row.distance_m != null ? Number(row.distance_m) / 1000 : undefined,
+      lat: row.lat != null ? Number(row.lat) : undefined,
+      lng: row.lon != null ? Number(row.lon) : undefined,
+      isOpen: Number(row.is_open) === 1,
+      [type]: Number(row.price),
+    }));
+    const results = cheapest(stations, type, Number(crossing.lat), Number(crossing.lon));
+    const newestFetchedAt = rows.reduce((latest, row) => Math.max(latest, Number(row.fetched_at || 0)), 0);
+
+    if (results.length) {
+      return Response.json({
+        type, results, fetchedAt: newestFetchedAt,
+        stale: Date.now() - newestFetchedAt > 30 * 60_000,
+        radiusKm: 5,
+        attribution: "Daten: Tankerkönig · CC BY 4.0",
+        attributionUrl: "https://creativecommons.org/licenses/by/4.0/deed.de",
+      }, { headers: { "Cache-Control": "private, no-store" } });
+    }
+
+    // During rollout, serve an already existing per-crossing cache if available.
+    // This is read-only: user requests never call Tankerkönig.
+    try {
+      const legacy = await db.execute({
+        sql: "SELECT payload_json, fetched_at FROM fuel_price_cache WHERE crossing_id = ? LIMIT 1",
+        args: [crossingId],
+      });
+      const legacyRow = legacy.rows[0] as any;
+      if (legacyRow) {
+        const parsed = JSON.parse(String(legacyRow.payload_json));
+        const cachedStations = Array.isArray(parsed) ? parsed as Station[] : [];
+        const legacyResults = cheapest(cachedStations, type, Number(crossing.lat), Number(crossing.lon));
+        if (legacyResults.length) {
+          return Response.json({
+            type, results: legacyResults, fetchedAt: Number(legacyRow.fetched_at || 0),
+            stale: true, radiusKm: 5, source: "legacy-cache",
+            attribution: "Daten: Tankerkönig · CC BY 4.0",
+            attributionUrl: "https://creativecommons.org/licenses/by/4.0/deed.de",
+          }, { headers: { "Cache-Control": "private, no-store" } });
+        }
+      }
+    } catch {
+      // The legacy table may not exist on a fresh installation.
+    }
+
+    const mapped = await db.execute({
+      sql: "SELECT COUNT(*) AS count FROM crossing_fuel_stations WHERE crossing_id = ?",
+      args: [crossingId],
+    });
+    const hasStations = Number((mapped.rows[0] as any)?.count || 0) > 0;
     return Response.json({
-      type,
-      results,
-      fetchedAt,
-      radiusKm: 5,
+      type, results: [], fetchedAt: null, stale: false, radiusKm: 5,
+      status: "warming_up",
+      message: hasStations
+        ? "Tankstellen sind erfasst. Die ersten Preise werden gerade gesammelt."
+        : "Der Tankstellenbestand für diesen Bahnübergang wird gerade aufgebaut.",
       attribution: "Daten: Tankerkönig · CC BY 4.0",
       attributionUrl: "https://creativecommons.org/licenses/by/4.0/deed.de",
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
-    console.error("[FUEL-PRICES] lookup failed:", error);
+    console.error("[FUEL-PRICES] central cache lookup failed:", error);
     return Response.json({ error: "Spritpreise konnten gerade nicht geladen werden." }, { status: 502 });
   }
 }
