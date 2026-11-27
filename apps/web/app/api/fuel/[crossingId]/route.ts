@@ -125,7 +125,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ cros
         url.searchParams.set("lng", String(crossing.lon));
         url.searchParams.set("rad", "5");
         url.searchParams.set("type", "all");
-        url.searchParams.set("sort", "price");
         url.searchParams.set("apikey", apiKey);
 
         const response = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(10000) });
