@@ -15,9 +15,11 @@ type CrossingsContextValue = {
   available: CrossingSummary[];
   activeId: string | null;
   favoriteId: string | null;
+  maxCrossings: number;
+  purchasedSlots: number;
   setActiveId: (id: string) => void;
   setFavorite: (id: string) => Promise<void>;
-  addCrossing: (crossing: CrossingSummary) => Promise<void>;
+  addCrossing: (crossing: CrossingSummary, replaceCrossingId?: string) => Promise<void>;
   removeCrossing: (id: string) => Promise<void>;
 };
 
@@ -47,6 +49,8 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
   const [available, setAvailable] = useState<CrossingSummary[]>([]);
   const [activeId, setActiveIdState] = useState<string | null>(null);
   const [favoriteId, setFavoriteId] = useState<string | null>(null);
+  const [maxCrossings, setMaxCrossings] = useState(FREE_CROSSING_LIMIT);
+  const [purchasedSlots, setPurchasedSlots] = useState(0);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -107,6 +111,13 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
                 crossing.id && crossing.name,
             );
 
+          if (Number.isFinite(Number(userJson?.maxCrossings))) {
+            setMaxCrossings(Math.max(FREE_CROSSING_LIMIT, Number(userJson.maxCrossings)));
+          }
+          if (Number.isFinite(Number(userJson?.purchasedSlots))) {
+            setPurchasedSlots(Math.max(0, Number(userJson.purchasedSlots)));
+          }
+
           const apiFavoriteId =
             typeof userJson?.favoriteId === "string"
               ? userJson.favoriteId
@@ -160,12 +171,12 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY_ACTIVE, activeId);
   }, [activeId, hydrated]);
 
-  async function addCrossing(crossing: CrossingSummary) {
+  async function addCrossing(crossing: CrossingSummary, replaceCrossingId?: string) {
     try {
       const response = await fetch("/api/user/crossings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ crossingId: crossing.id }),
+        body: JSON.stringify({ crossingId: crossing.id, replaceCrossingId }),
       });
       if (response.status === 401) throw new Error("Deine Anmeldung ist abgelaufen. Bitte melde dich erneut an.");
       if (!response.ok) {
@@ -173,16 +184,15 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         throw new Error(result?.error || `Schranke konnte nicht gespeichert werden (${response.status}).`);
       }
       setSaved((prev) => {
-        if (prev.some((item) => item.id === crossing.id)) {
-          return prev;
-        }
-
-        if (prev.length >= FREE_CROSSING_LIMIT) {
-          return prev;
-        }
-
-        return [...prev, crossing];
+        if (prev.some((item) => item.id === crossing.id)) return prev;
+        const next = replaceCrossingId
+          ? prev.filter((item) => item.id !== replaceCrossingId)
+          : prev;
+        return [...next, crossing];
       });
+      if (replaceCrossingId && favoriteId === replaceCrossingId) {
+        setFavoriteId(crossing.id);
+      }
       setActiveIdState(crossing.id);
 
       /*
@@ -269,6 +279,8 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         available,
         activeId,
         favoriteId,
+        maxCrossings,
+        purchasedSlots,
         setActiveId: setActiveIdState,
         setFavorite,
         addCrossing,
