@@ -46,7 +46,7 @@ async function getCrossingCapacity(userId: string): Promise<CrossingCapacity> {
       FROM user_crossing_purchases
       WHERE user_id = ${userId}
         AND status = 'paid'
-        AND valid_until > datetime('now')
+        AND julianday(valid_until) > julianday('now')
     `),
   ]);
 
@@ -267,6 +267,17 @@ export async function POST(request: Request) {
   const capacity = await getCrossingCapacity(userId);
   const replaceCrossingId = body.replaceCrossingId?.trim();
 
+  if (count > capacity.maxCrossings) {
+    return Response.json(
+      {
+        error: `Dein Kontingent umfasst aktuell ${capacity.maxCrossings} Plätze. Entferne zuerst Bahnübergänge, bis du wieder innerhalb deines Kontingents bist.`,
+        code: "CROSSING_CAPACITY_EXCEEDED",
+        maxCrossings: capacity.maxCrossings,
+      },
+      { status: 409 },
+    );
+  }
+
   if (count >= capacity.maxCrossings && !replaceCrossingId) {
     return Response.json(
       {
@@ -336,8 +347,6 @@ export async function POST(request: Request) {
     favoriteId = crossingId;
   }
 
-  const nextFavoriteId = favoriteId === body.replaceCrossingId ? crossingId : favoriteId;
-
   return Response.json({
     success: true,
     replaced: Boolean(body.replaceCrossingId),
@@ -345,7 +354,7 @@ export async function POST(request: Request) {
       id: crossing.id,
       name: crossing.name,
     },
-    favoriteId: nextFavoriteId,
+    favoriteId,
     ...(await getCrossingCapacity(userId)),
   });
 }
