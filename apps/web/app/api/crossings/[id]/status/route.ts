@@ -385,6 +385,43 @@ function toPayload(crossing: any, trains: any[], lineHints: string[], globalTimi
   };
 }
 
+function refreshCachedPhase(payload: any, now = Date.now()) {
+  const closures = Array.isArray(payload?.closures) ? payload.closures : [];
+  const next = closures.find((closure: any) => {
+    const end = Date.parse(String(closure?.end || ""));
+    return Number.isFinite(end) && end > now;
+  });
+
+  if (!next) {
+    return {
+      ...payload,
+      state: "OPEN",
+      nextCloseIn: 0,
+      nextOpenIn: 0,
+      phase: null,
+    };
+  }
+
+  const startMs = Date.parse(String(next.start || ""));
+  const endMs = Date.parse(String(next.end || ""));
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return payload;
+
+  return {
+    ...payload,
+    state: now >= startMs ? "CLOSED" : "OPEN",
+    nextCloseIn: Math.max(0, Math.floor((startMs - now) / 1000)),
+    nextOpenIn: Math.max(0, Math.floor((endMs - now) / 1000)),
+    phase: {
+      start: next.start,
+      end: next.end,
+      durationMinutes: Number(next.durationMinutes) ||
+        Math.round((endMs - startMs) / 60_000),
+      trainCount: Array.isArray(next.trains) ? next.trains.length : Number(next.trainCount || 0),
+      trains: Array.isArray(next.trains) ? next.trains : [],
+    },
+  };
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const debugMode = new URL(request.url).searchParams.get("debug");
@@ -403,8 +440,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     : await readCrossingForecastCache<any>(cacheKey, 60_000);
   markPerformance("cacheReadCompleteMs");
   if (cached) {
-    return Response.json(cached, {
-      headers: { "X-Crossing-Status-Cache": "HIT" },
+    // The cached train/closure forecast is still reusable, but its phase and
+    // countdown are time-dependent. Re-evaluate those lightweight fields on
+    // every hit so a cache entry cannot skip an entire CLOSED interval.
+    const refreshed = refreshCachedPhase(cached);
+    return Response.json(refreshed, {
+      headers: {
+        "X-Crossing-Status-Cache": "HIT",
+        "X-Crossing-Phase-Refreshed": "true",
+      },
     });
   }
 
