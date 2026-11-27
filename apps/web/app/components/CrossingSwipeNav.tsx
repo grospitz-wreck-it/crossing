@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { useCrossings } from "../context/CrossingsContext";
 import styles from "./CrossingSwipeNav.module.css";
 
@@ -13,6 +14,8 @@ type Props = {
 
 export default function CrossingSwipeNav({ children }: Props) {
   const { saved, activeId, setActiveId } = useCrossings();
+  const pathname = usePathname();
+  const showIndicators = pathname !== "/app/meine-schranken";
   const startX = useRef<number | null>(null);
   const startY = useRef<number | null>(null);
   const pointerId = useRef<number | null>(null);
@@ -22,11 +25,6 @@ export default function CrossingSwipeNav({ children }: Props) {
   const [animating, setAnimating] = useState(false);
 
   const activeIndex = saved.findIndex((crossing) => crossing.id === activeId);
-
-  function selectIndex(index: number) {
-    if (index < 0 || index >= saved.length || index === activeIndex) return;
-    setActiveId(saved[index].id);
-  }
 
   function resetGesture() {
     startX.current = null;
@@ -115,16 +113,14 @@ export default function CrossingSwipeNav({ children }: Props) {
 
   return (
     <>
-      {saved.length > 1 && (
+      {showIndicators && saved.length > 1 && (
         <nav className={styles.nav} aria-label="Meine Bahnübergänge">
           <div className={styles.dots}>
             {saved.map((crossing, index) => (
-              <button
+              <span
                 key={crossing.id}
-                type="button"
                 className={`${styles.dot} ${index === activeIndex ? styles.active : ""}`}
-                onClick={() => selectIndex(index)}
-                aria-label={`${crossing.name} auswählen`}
+                aria-label={`${crossing.name}${index === activeIndex ? ", aktiv" : ""}`}
                 aria-current={index === activeIndex ? "true" : undefined}
               />
             ))}
