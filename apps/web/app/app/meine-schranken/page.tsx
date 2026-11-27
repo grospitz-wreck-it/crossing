@@ -122,29 +122,6 @@ export default function MeineSchrankenPage() {
   return (
     <main className={styles.page}>
       <div className={styles.wrap}>
-        <section className={styles.intro}>
-          <div>
-            <div className={styles.kicker}><span /> DEIN ÜBERBLICK</div>
-            <h1>Meine Schranken</h1>
-            <p>Deine persönlichen Plätze für Bahnübergänge. Du kannst die Auswahl jederzeit ändern.</p>
-          </div>
-          <div className={styles.countCard}>
-            <strong>{saved.length}<span>/{maxCrossings}</span></strong>
-            <small>Plätze belegt</small>
-          </div>
-        </section>
-
-        <section className={styles.profilePanel}>
-          <div>
-            <span className={styles.overline}>MEHR PLÄTZE</span>
-            <h2>Mehr Schranken im Blick</h2>
-            <p>+{premiumPackage.additionalCrossings} zusätzliche Plätze ·{" "}
-              {(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto · {premiumPackage.durationDays} Tage Laufzeit</p>
-            <p>{premiumPackage.enabled ? "Das Paket ist verfügbar." : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
-          </div>
-          <span className={styles.pill}>{premiumPackage.enabled ? "Verfügbar" : "Demnächst"}</span>
-        </section>
-
         <section className={styles.slotsPanel}>
           <div className={styles.panelHead}>
             <div>
@@ -186,6 +163,17 @@ export default function MeineSchrankenPage() {
             <p className={styles.limitNote}>Dein Premium-Kontingent ist abgelaufen. Deine gespeicherten Schranken bleiben erhalten. Entferne bitte {saved.length - maxCrossings} Platz/Plätze, bevor du neue hinzufügen kannst.</p>
           )}
           <div className={styles.helper}><span>ⓘ</span> Jeder Platz kann beliebig oft mit einem anderen Bahnübergang belegt werden. Deine Prognosen bleiben davon unberührt.</div>
+        </section>
+
+        <section className={styles.profilePanel}>
+          <div>
+            <span className={styles.overline}>MEHR PLÄTZE</span>
+            <h2>Mehr Schranken im Blick</h2>
+            <p>+{premiumPackage.additionalCrossings} zusätzliche Plätze ·{" "}
+              {(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto · {premiumPackage.durationDays} Tage Laufzeit</p>
+            <p>{premiumPackage.enabled ? "Das Paket ist verfügbar." : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
+          </div>
+          <span className={styles.pill}>{premiumPackage.enabled ? "Verfügbar" : "Demnächst"}</span>
         </section>
 
         <ContentPreferences />
