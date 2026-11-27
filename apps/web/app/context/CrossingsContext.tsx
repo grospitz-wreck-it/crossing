@@ -69,117 +69,79 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
+    const rawActive = localStorage.getItem(STORAGE_KEY_ACTIVE);
 
-    async function initialize() {
-      const rawActive = localStorage.getItem(STORAGE_KEY_ACTIVE);
+    // Restore the last active crossing immediately. The user-specific list
+    // contains names and coordinates already, so it does not need to wait for
+    // the much larger catalogue used by the crossing picker.
+    if (rawActive) setActiveIdState(rawActive);
 
-      if (!cancelled && rawActive) setActiveIdState(rawActive);
-
-      const [crossingsResult, userResult] = await Promise.allSettled([
-        fetch("/api/crossings", { cache: "no-store" }),
-        fetch("/api/user/crossings", { cache: "no-store" }),
-      ]);
-
-      let availableList: CrossingSummary[] = [];
-
+    void (async () => {
       try {
-        if (crossingsResult.status === "fulfilled" && crossingsResult.value.ok) {
-          const crossingsJson = await crossingsResult.value.json();
-          availableList = Array.isArray(crossingsJson) ? crossingsJson : [];
-          if (!cancelled) setAvailable(availableList);
+        const response = await fetch("/api/user/crossings", { cache: "no-store" });
+        if (!response.ok) throw new Error(`User crossings returned ${response.status}`);
+        const userJson = await response.json();
+        const personalList = Array.isArray(userJson)
+          ? userJson
+          : Array.isArray(userJson?.crossings)
+            ? userJson.crossings
+            : [];
+
+        const normalized = personalList
+          .map((crossing: any) => ({
+            id: String(crossing.crossing_id ?? crossing.id ?? ""),
+            name: String(crossing.name ?? ""),
+            lat: crossing.lat != null ? Number(crossing.lat) : null,
+            lon: crossing.lon != null ? Number(crossing.lon) : null,
+          }))
+          .filter((crossing: CrossingSummary) => crossing.id && crossing.name);
+
+        if (Number.isFinite(Number(userJson?.maxCrossings))) {
+          setMaxCrossings(Math.max(FREE_CROSSING_LIMIT, Number(userJson.maxCrossings)));
         }
+        if (Number.isFinite(Number(userJson?.purchasedSlots))) {
+          setPurchasedSlots(Math.max(0, Number(userJson.purchasedSlots)));
+        }
+        if (userJson?.premiumPackage) setPremiumPackage(userJson.premiumPackage);
 
-        if (userResult.status === "fulfilled" && userResult.value.ok) {
-          const userJson = await userResult.value.json();
-          const personalList = Array.isArray(userJson)
-            ? userJson
-            : Array.isArray(userJson?.crossings)
-              ? userJson.crossings
-              : [];
+        const apiFavoriteId = typeof userJson?.favoriteId === "string"
+          ? userJson.favoriteId
+          : normalized.find((crossing: any) => crossing.isFavorite)?.id ?? null;
 
-          const normalized = personalList
-            .map((crossing: any) => {
-              const id = String(
-                crossing.crossing_id ?? crossing.id ?? "",
-              );
-
-              const catalog = availableList.find(
-                (item: any) => item.id === id,
-              );
-
-              return {
-                id,
-                name: String(crossing.name ?? catalog?.name ?? ""),
-                lat:
-                  crossing.lat != null
-                    ? Number(crossing.lat)
-                    : catalog?.lat ?? null,
-                lon:
-                  crossing.lon != null
-                    ? Number(crossing.lon)
-                    : catalog?.lon ?? null,
-              };
-            })
-            .filter(
-              (crossing: CrossingSummary) =>
-                crossing.id && crossing.name,
-            );
-
-          if (Number.isFinite(Number(userJson?.maxCrossings))) {
-            setMaxCrossings(Math.max(FREE_CROSSING_LIMIT, Number(userJson.maxCrossings)));
+        if (!cancelled) {
+          setSaved(withActiveCrossing(normalized, rawActive, []));
+          setFavoriteId(apiFavoriteId);
+          if (normalized.some((crossing) => crossing.id === rawActive)) {
+            setActiveIdState(rawActive);
+          } else if (!rawActive) {
+            setActiveIdState(normalized[0]?.id ?? null);
+          } else if (normalized.length > 0) {
+            setActiveIdState(normalized[0].id);
           }
-          if (Number.isFinite(Number(userJson?.purchasedSlots))) {
-            setPurchasedSlots(Math.max(0, Number(userJson.purchasedSlots)));
-          }
-          if (userJson?.premiumPackage) {
-            setPremiumPackage(userJson.premiumPackage);
-          }
-
-          const apiFavoriteId =
-            typeof userJson?.favoriteId === "string"
-              ? userJson.favoriteId
-              : normalized.find(
-                  (crossing: any) => crossing.isFavorite,
-                )?.id ?? null;
-
-          if (!cancelled) {
-            // Keep a locally selected crossing usable even if the user list is
-            // temporarily stale or the row was not persisted yet. It is still
-            // required to exist in the active crossings catalogue.
-            const nextSaved = withActiveCrossing(
-              normalized,
-              rawActive,
-              availableList,
-            );
-            setSaved(nextSaved);
-            setFavoriteId(apiFavoriteId);
-
-            const activeExists = nextSaved.some((crossing) => crossing.id === rawActive);
-            if (activeExists && rawActive) {
-              setActiveIdState(rawActive);
-            } else if (!rawActive) {
-              setActiveIdState(nextSaved[0]?.id ?? null);
-            }
-          }
-        } else if (!cancelled) {
-          const fallbackSaved = withActiveCrossing(
-            [],
-            rawActive,
-            availableList,
-          );
-          setSaved(fallbackSaved);
         }
       } catch (error) {
-        console.error("Failed to initialize crossings:", error);
-        if (!cancelled) {
-          setSaved(withActiveCrossing([], rawActive, availableList));
-        }
+        console.error("Failed to initialize saved crossings:", error);
       } finally {
         if (!cancelled) setHydrated(true);
       }
-    }
+    })();
 
-    initialize();
+    // Load the full catalogue independently; it is only needed by the
+    // management/search screen and must not block the initial app view.
+    void fetch("/api/crossings", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Crossings catalogue returned ${response.status}`);
+        const list = await response.json();
+        const availableList = Array.isArray(list) ? list : [];
+        if (cancelled) return;
+        setAvailable(availableList);
+        setSaved((current) => withActiveCrossing(current, rawActive, availableList));
+        if (rawActive && availableList.some((crossing: CrossingSummary) => crossing.id === rawActive)) {
+          setActiveIdState((current) => current ?? rawActive);
+        }
+      })
+      .catch((error) => console.error("Failed to load crossings catalogue:", error));
+
     return () => { cancelled = true; };
   }, []);
 
