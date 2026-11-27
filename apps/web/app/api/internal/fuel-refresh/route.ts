@@ -126,10 +126,12 @@ async function discoverStations(task: Extract<RefreshTask, { kind: "discovery" }
 
   const stations = payload.stations as TankerStation[];
   const statements = [];
+  let savedCount = 0;
   for (const station of stations) {
     if (!station?.id || !station.name) continue;
-    const lat = validPrice(station.lat) || typeof station.lat === "number" ? station.lat : null;
-    const lon = typeof station.lng === "number" ? station.lng : null;
+    const lat = typeof station.lat === "number" && Number.isFinite(station.lat) ? station.lat : null;
+    const lon = typeof station.lng === "number" && Number.isFinite(station.lng) ? station.lng : null;
+    savedCount += 1;
     statements.push(statement(
       `INSERT INTO fuel_stations
         (id, name, brand, street, house_number, post_code, place, lat, lon, is_open, first_seen_at, last_seen_at)
@@ -171,10 +173,12 @@ async function discoverStations(task: Extract<RefreshTask, { kind: "discovery" }
     }
   }
 
-  if (statements.length) await db.batch(statements, "write");
-  const nextAttempt = now + (stations.length ? DISCOVERY_INTERVAL_MS : EMPTY_DISCOVERY_RETRY_MS);
+  for (let index = 0; index < statements.length; index += 100) {
+    await db.batch(statements.slice(index, index + 100), "write");
+  }
+  const nextAttempt = now + (savedCount ? DISCOVERY_INTERVAL_MS : EMPTY_DISCOVERY_RETRY_MS);
   await saveRefreshState("crossing", task.crossingId, now, nextAttempt);
-  return { discovered: stations.length };
+  return { discovered: savedCount };
 }
 
 async function refreshPrices(task: Extract<RefreshTask, { kind: "prices" }>, apiKey: string, now: number) {
@@ -222,7 +226,9 @@ async function refreshPrices(task: Extract<RefreshTask, { kind: "prices" }>, api
       [stationId, now, now, now + PRICE_REFRESH_INTERVAL_MS, now],
     ));
   }
-  if (statements.length) await db.batch(statements, "write");
+  for (let index = 0; index < statements.length; index += 100) {
+    await db.batch(statements.slice(index, index + 100), "write");
+  }
   return { refreshed: task.stationIds.length };
 }
 
