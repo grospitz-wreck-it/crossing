@@ -286,12 +286,12 @@ async function load(crossingId: string | null = activeIdRef.current, force = fal
       const adsPromise = fetch(`/api/ads/${crossingId}`, { cache: "no-store" });
       const contentPromise = fetch(`/api/content/${crossingId}`, { cache: "no-store" });
       const statusRes = await statusPromise;
-      const [adRes, contentRes] = await Promise.all([adsPromise, contentPromise]);
       if (!statusRes.ok) throw new Error(`Status API returned ${statusRes.status}`);
 
       const json = await statusRes.json();
       statusCacheRef.current.set(crossingId, json);
       onProgress?.(85, `${crossingName} geladen`);
+      const [adRes, contentRes] = await Promise.all([adsPromise, contentPromise]);
 
       let adList: any[] = [];
       if (adRes.ok) {
