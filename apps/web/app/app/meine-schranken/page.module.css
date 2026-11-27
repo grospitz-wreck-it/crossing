@@ -82,3 +82,71 @@
 .profilePanel p{margin:0;color:#8493a2;font-size:12px;line-height:1.5}
 .logoutButton{flex:0 0 auto;padding:11px 16px;border:1px solid #f0d4d9;border-radius:10px;background:#fff7f8;color:#b91d35;font-size:12px;font-weight:800;cursor:pointer}
 @media(max-width:680px){.profilePanel{align-items:flex-start;flex-direction:column;padding:17px}.logoutButton{width:100%}}
+
+
+/* Slot-based crossing picker */
+.slotsPanel{overflow:hidden;border:1px solid #e4eaf0;border-radius:20px;background:#fff;box-shadow:0 12px 35px rgba(24,50,74,.055)}
+.slotIntro{max-width:590px;margin:7px 0 0;color:#8493a2;font-size:11px;line-height:1.55}
+.slotGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:13px;padding:0 20px 20px}
+.slotCard,.emptySlot{position:relative;display:flex;min-width:0;min-height:190px;flex-direction:column;overflow:hidden;border:1px solid #e7edf3;border-radius:17px;background:linear-gradient(155deg,#fff 0%,#f9fbfd 100%);transition:border-color .18s,box-shadow .18s,transform .18s}
+.slotCard:hover,.emptySlot:hover{border-color:#cbd8e4;box-shadow:0 10px 25px rgba(24,50,74,.07);transform:translateY(-2px)}
+.slotActive{border-color:#e7aeb9;background:linear-gradient(155deg,#fff 0%,#fff8f9 100%);box-shadow:0 0 0 2px rgba(199,25,53,.06)}
+.slotMain{display:flex;flex:1;align-items:flex-start;flex-direction:column;gap:10px;padding:16px 16px 9px;border:0;background:transparent;text-align:left;cursor:pointer}
+.slotNumber{color:#a0afbd;font-size:9px;font-weight:850;letter-spacing:.15em}
+.slotMain .crossingGlyph{width:43px;height:43px;flex-basis:43px}
+.slotMain>strong{display:-webkit-box;overflow:hidden;width:100%;color:#1b3852;font-size:13px;font-weight:800;line-height:1.35;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.slotStatus{color:#8798a8;font-size:10px}
+.slotActive .slotStatus{color:#bf1932;font-weight:750}
+.slotActions{display:flex;justify-content:flex-end;gap:5px;padding:0 10px 10px}
+.slotActions button{display:grid;place-items:center;width:30px;height:30px;border:1px solid transparent;border-radius:9px;background:transparent;color:#98a7b5;font-size:17px;cursor:pointer}
+.slotActions button:hover{border-color:#e6edf3;background:#fff;color:#c71935}
+.slotActions .favoriteActive{background:#fff7e4;color:#d49b24}
+.slotActions .remove:disabled{opacity:.25;cursor:not-allowed}
+.emptySlot{align-items:center;justify-content:center;gap:10px;padding:20px 12px;border:1.5px dashed #d6e0e9;background:rgba(255,255,255,.48);color:#71869a;text-align:center;cursor:pointer}
+.emptySlot:hover{border-color:#c71935;background:#fffafb}
+.emptyPlus{display:grid;place-items:center;width:48px;height:48px;border:1px solid #e6edf3;border-radius:15px;background:#fff;color:#c71935;font-size:29px;font-weight:300;line-height:1;box-shadow:0 5px 15px rgba(24,50,74,.05)}
+.emptySlot strong{color:#456078;font-size:11px;font-weight:800}
+.emptySlot small{color:#9aa8b5;font-size:9px}
+.modalBackdrop{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(14,31,48,.48);backdrop-filter:blur(7px);animation:modalFade .16s ease-out}
+.crossingModal{display:flex;width:min(100%,650px);max-height:min(780px,calc(100dvh - 44px));flex-direction:column;overflow:hidden;border:1px solid rgba(255,255,255,.75);border-radius:23px;background:#fff;box-shadow:0 30px 90px rgba(8,25,42,.28);animation:modalRise .2s ease-out}
+.modalHeader{display:flex;justify-content:space-between;gap:20px;padding:25px 26px 19px}
+.modalHeader h2{max-width:500px;margin:8px 0 6px;color:#17334d;font-size:22px;font-weight:850;letter-spacing:-.7px;line-height:1.15}
+.modalHeader p{margin:0;color:#8293a3;font-size:12px;line-height:1.5}
+.modalClose{display:grid;flex:0 0 34px;place-items:center;width:34px;height:34px;border:1px solid #e7edf2;border-radius:11px;background:#fff;color:#71869a;font-size:23px;cursor:pointer}
+.modalClose:hover{background:#fff4f5;color:#c71935}
+.modalTools{display:flex;gap:9px;padding:0 25px 15px;border-bottom:1px solid #edf1f5}
+.modalTools .search{flex:1;min-width:0}
+.modalTools .locationButton{height:48px}
+.modalResults{min-height:130px;overflow:auto;padding:12px 20px}
+.modalResult{display:flex;width:100%;align-items:center;gap:12px;margin-bottom:7px;padding:9px 11px;border:1px solid #edf1f5;border-radius:13px;background:#fff;text-align:left;cursor:pointer;transition:border-color .15s,background .15s}
+.modalResult:hover{border-color:#e4b4bd;background:#fffafb}
+.modalResult:disabled{opacity:.55;cursor:wait}
+.modalResult .resultGlyph{flex:0 0 38px;width:38px;height:38px}
+.modalResult .resultName{flex:1}
+.modalResult .resultName strong{font-size:12px}
+.modalResult .resultName small{font-size:10px}
+.modalAdd{display:grid;place-items:center;width:31px;height:31px;border:1px solid #f0cbd1;border-radius:10px;background:#fff7f8;color:#c71935;font-size:21px}
+.modalFooter{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:13px 25px;border-top:1px solid #edf1f5;background:#fafbfd}
+.modalFooter span{color:#91a0ad;font-size:10px}
+.modalFooter button{padding:9px 15px;border:1px solid #e1e8ee;border-radius:9px;background:#fff;color:#536b80;font-size:11px;font-weight:750;cursor:pointer}
+.modalFooter button:hover{border-color:#c9d5df}
+.modalResults .noResults{margin:5px 0}
+.modalHeader+.modalTools+.locationNote{margin:10px 25px 0}
+@keyframes modalFade{from{opacity:0}to{opacity:1}}
+@keyframes modalRise{from{opacity:0;transform:translateY(10px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:680px){
+  .slotGrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;padding:0 12px 14px}
+  .slotCard,.emptySlot{min-height:170px}
+  .slotMain{padding:13px 12px 8px}
+  .slotMain>strong{font-size:12px}
+  .modalBackdrop{align-items:flex-end;padding:0}
+  .crossingModal{width:100%;max-height:88dvh;border-radius:22px 22px 0 0;padding-bottom:env(safe-area-inset-bottom);animation:modalSheet .22s ease-out}
+  .modalHeader{padding:21px 18px 16px}
+  .modalHeader h2{font-size:19px}
+  .modalTools{flex-direction:column;padding:0 17px 13px}
+  .modalTools .locationButton{width:100%;justify-content:center}
+  .modalResults{padding:10px 13px}
+  .modalFooter{padding:12px 18px}
+}
+@keyframes modalSheet{from{transform:translateY(25px)}to{transform:translateY(0)}}
+@media(prefers-reduced-motion:reduce){.slotCard,.emptySlot,.modalBackdrop,.crossingModal{animation:none;transition:none}}
