@@ -18,7 +18,7 @@ export default function LoadingScreen({ message, detail, ready = false, onComple
           <div
             className={`${styles.loadingBarFill} ${ready ? styles.loadingBarReady : ""}`}
             onAnimationEnd={(event) => {
-              if (event.currentTarget === event.target && event.animationName === "barrierOpen") {
+              if (event.currentTarget === event.target && ready) {
                 onComplete?.();
               }
             }}
