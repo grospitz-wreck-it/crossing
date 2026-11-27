@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useCrossings } from "../context/CrossingsContext";
 import styles from "./ContentServices.module.css";
 
@@ -24,6 +24,8 @@ function contentLabel(item: NewsItem) {
 
 export default function ContentServices({ newsItems = [] }: { newsItems?: NewsItem[] }) {
   const { activeId } = useCrossings();
+  const trackRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; scrollLeft: number } | null>(null);
   const [prefs, setPrefs] = useState<Preferences>({ newsEnabled: false, fuelEnabled: false, fuelType: null, jokesEnabled: false });
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [fuel, setFuel] = useState<{ results?: FuelStation[] } | null>(null);
@@ -55,6 +57,20 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
     return () => { cancelled = true; };
   }, [activeId, prefs.fuelEnabled, prefs.fuelType]);
 
+  function handleTrackPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, scrollLeft: event.currentTarget.scrollLeft };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function handleTrackPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.currentTarget.scrollLeft = drag.scrollLeft - (event.clientX - drag.startX);
+  }
+  function handleTrackPointerEnd(event: React.PointerEvent<HTMLDivElement>) {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null;
+  }
+
   async function loadJoke() {
     setLoadingJoke(true); setJokeError("");
     try {
@@ -77,12 +93,12 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
   if (!prefsLoaded || (!hasNews && !hasFuel && !hasJokes)) return null;
 
   return (
-    <section className={styles.section} aria-label="Aktuelle Informationen">
+    <section className={styles.section} aria-label="Aktuelle Informationen" data-no-crossing-swipe>
       <div className={styles.header}>
         <div><span className={styles.sectionTitle}>Aktuelle Informationen</span><span className={styles.sectionHint}>Wische durch deine Inhalte</span></div>
         <span className={styles.counter}>{Number(hasNews) + Number(hasFuel) + Number(hasJokes)} Karten</span>
       </div>
-      <div className={styles.track}>
+      <div ref={trackRef} className={styles.track} onPointerDown={handleTrackPointerDown} onPointerMove={handleTrackPointerMove} onPointerUp={handleTrackPointerEnd} onPointerCancel={handleTrackPointerEnd}>
         {hasNews && newsItems.map((item) => {
           const card = (
             <>
