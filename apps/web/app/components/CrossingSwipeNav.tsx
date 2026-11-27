@@ -16,6 +16,7 @@ export default function CrossingSwipeNav({ children }: Props) {
   const { saved, activeId, setActiveId } = useCrossings();
   const pathname = usePathname();
   const showIndicators = pathname !== "/app/meine-schranken";
+  const enableCrossingSwipe = pathname === "/app";
   const startX = useRef<number | null>(null);
   const startY = useRef<number | null>(null);
   const pointerId = useRef<number | null>(null);
@@ -130,16 +131,16 @@ export default function CrossingSwipeNav({ children }: Props) {
 
       <div
         className={styles.gestureStage}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
-        style={{
+        onPointerDown={enableCrossingSwipe ? handlePointerDown : undefined}
+        onPointerMove={enableCrossingSwipe ? handlePointerMove : undefined}
+        onPointerUp={enableCrossingSwipe ? handlePointerUp : undefined}
+        onPointerCancel={enableCrossingSwipe ? handlePointerCancel : undefined}
+        style={enableCrossingSwipe ? {
           transform: `translate3d(${dragX}px, 0, 0)`,
           transition: animating
             ? `transform ${SWIPE_ANIMATION_MS}ms cubic-bezier(0.22, 1, 0.36, 1)`
             : "none",
-        }}
+        } : undefined}
       >
         {children}
       </div>
