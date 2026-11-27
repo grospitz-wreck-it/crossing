@@ -123,6 +123,7 @@ function getDestination(
 
 const MAX_PHASE_MS =
   900 * 1000;
+const MEASUREMENT_STATE_PREFIX = "crossing-app:measurement-state:";
 
 // Keep the feedback ID stable across reloads and identical to the ID used by
 // the separate prediction-rating component. The status API intentionally
@@ -204,6 +205,39 @@ const predictionId =
   activeId && data?.phase?.start && data?.phase?.end
     ? makePredictionId(activeId, data.phase)
     : null;
+
+useEffect(() => {
+  setPendingEvent(null);
+  setMessage("");
+  if (!predictionId) {
+    setMeasurementState("none");
+    setFirstClickAt(null);
+    setUnexpectedTrainSaved(false);
+    return;
+  }
+
+  try {
+    const raw = window.localStorage.getItem(MEASUREMENT_STATE_PREFIX + predictionId);
+    const savedState = raw ? JSON.parse(raw) : null;
+    const savedAt = Number(savedState?.firstClickAt || 0);
+    const isFresh = savedAt > 0 && Date.now() - savedAt <= MAX_PHASE_MS;
+
+    if (savedState?.state === "close-recorded" && isFresh) {
+      setMeasurementState("close-recorded");
+      setFirstClickAt(savedAt);
+      setUnexpectedTrainSaved(savedState.unexpectedTrainSaved === true);
+    } else {
+      window.localStorage.removeItem(MEASUREMENT_STATE_PREFIX + predictionId);
+      setMeasurementState("none");
+      setFirstClickAt(null);
+      setUnexpectedTrainSaved(false);
+    }
+  } catch {
+    setMeasurementState("none");
+    setFirstClickAt(null);
+    setUnexpectedTrainSaved(false);
+  }
+}, [predictionId]);
 
 const statusCacheRef = useRef<Map<string, any>>(new Map());
 const statusInFlightRef = useRef<Map<string, Promise<void>>>(new Map());
@@ -298,7 +332,13 @@ async function saveUnexpectedTrain() {
     }
 
     setUnexpectedTrainSaved(true);
-    setMessage("✓ Güterzug-Sonderfall gespeichert");
+    if (predictionId && firstClickAt) {
+      window.localStorage.setItem(
+        MEASUREMENT_STATE_PREFIX + predictionId,
+        JSON.stringify({ state: "close-recorded", firstClickAt, unexpectedTrainSaved: true })
+      );
+    }
+    setMessage("✓ Güterzug-/Sonderzug-Hinweis gespeichert");
   } catch (error) {
     console.error("Unexpected train flag failed:", error);
     setMessage("⚠️ Speichern fehlgeschlagen – bitte erneut versuchen");
@@ -336,8 +376,15 @@ async function saveMeasurement(
 
     if (event === "close") {
       setMeasurementState("close-recorded");
-      setFirstClickAt(Date.now());
+      const recordedAt = Date.now();
+      setFirstClickAt(recordedAt);
       setUnexpectedTrainSaved(false);
+      if (predictionId) {
+        window.localStorage.setItem(
+          MEASUREMENT_STATE_PREFIX + predictionId,
+          JSON.stringify({ state: "close-recorded", firstClickAt: recordedAt, unexpectedTrainSaved: false })
+        );
+      }
       setMessage(precision === "exact"
         ? "✓ Schranke geschlossen – Messung gespeichert"
         : "✓ Zustand erfasst (Zeitpunkt ungenau)");
@@ -345,6 +392,9 @@ async function saveMeasurement(
       setMeasurementState("none");
       setFirstClickAt(null);
       setUnexpectedTrainSaved(false);
+      if (predictionId) {
+        window.localStorage.removeItem(MEASUREMENT_STATE_PREFIX + predictionId);
+      }
       setMessage(precision === "exact"
         ? "✓ Schranke offen – Messung gespeichert"
         : "✓ Öffnungszustand erfasst (Zeitpunkt ungenau)");
@@ -504,6 +554,9 @@ useEffect(() => {
         setFirstClickAt(
           null
         );
+        if (predictionId) {
+          window.localStorage.removeItem(MEASUREMENT_STATE_PREFIX + predictionId);
+        }
 
         setMessage(
           "⚠️ Messung verworfen"
