@@ -672,8 +672,8 @@ if (!data || bootstrapLoading || !loadingAnimationFinished) {
   return (
     <LoadingScreen
       message="Deine aktive Schranke wird vorbereitet"
-      detail={activeId ? (bootstrapProgress ? "Daten sind bereit" : "Verbindung wird hergestellt") : undefined}
-      progress={bootstrapProgress ? 100 : 0}
+      detail={activeId ? bootstrapDetail : undefined}
+      progress={bootstrapProgress}
       onComplete={() => setLoadingAnimationFinished(true)}
     />
   );
