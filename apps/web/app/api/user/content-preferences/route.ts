@@ -44,14 +44,32 @@ async function ensureTable() {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
-  // Existing installations get the new column automatically, without manual SQL.
-  try {
-    await authDb.run(sql`
-      ALTER TABLE user_content_preferences
-      ADD COLUMN content_order TEXT NOT NULL DEFAULT '["news","fuel","jokes"]'
-    `);
-  } catch (error) {
-    if (!String(error).toLowerCase().includes("duplicate column")) throw error;
+  // Inspect the live schema first. LibSQL wraps SQLite errors in nested causes,
+  // so checking the text of the outer error is not reliable.
+  const columns = await authDb.all<any>(sql`PRAGMA table_info(user_content_preferences)`);
+  const hasContentOrder = columns.some((column) => String(column.name) === "content_order");
+
+  if (!hasContentOrder) {
+    try {
+      await authDb.run(sql`
+        ALTER TABLE user_content_preferences
+        ADD COLUMN content_order TEXT NOT NULL DEFAULT '["news","fuel","jokes"]'
+      `);
+    } catch (error) {
+      // Two first requests can race during a schema upgrade. Ignore only the
+      // specific duplicate-column race; propagate every other database error.
+      let cause: unknown = error;
+      let duplicateColumn = false;
+      while (cause && typeof cause === "object") {
+        const message = String((cause as { message?: unknown }).message ?? "").toLowerCase();
+        if (message.includes("duplicate column")) {
+          duplicateColumn = true;
+          break;
+        }
+        cause = (cause as { cause?: unknown }).cause;
+      }
+      if (!duplicateColumn) throw error;
+    }
   }
 }
 
