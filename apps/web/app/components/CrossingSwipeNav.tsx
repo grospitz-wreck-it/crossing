@@ -15,7 +15,7 @@ type Props = {
 export default function CrossingSwipeNav({ children }: Props) {
   const { saved, activeId, setActiveId } = useCrossings();
   const pathname = usePathname();
-  const showIndicators = pathname !== "/app/meine-schranken";
+  const showIndicators = pathname === "/app" || pathname === "/app/meine-schranken";
   const enableCrossingSwipe = pathname === "/app";
   const startX = useRef<number | null>(null);
   const startY = useRef<number | null>(null);
@@ -118,11 +118,13 @@ export default function CrossingSwipeNav({ children }: Props) {
         <nav className={styles.nav} aria-label="Meine Bahnübergänge">
           <div className={styles.dots}>
             {saved.map((crossing, index) => (
-              <span
+              <button
                 key={crossing.id}
+                type="button"
                 className={`${styles.dot} ${index === activeIndex ? styles.active : ""}`}
                 aria-label={`${crossing.name}${index === activeIndex ? ", aktiv" : ""}`}
                 aria-current={index === activeIndex ? "true" : undefined}
+                onClick={() => setActiveId(crossing.id)}
               />
             ))}
           </div>
