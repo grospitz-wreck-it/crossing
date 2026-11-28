@@ -252,7 +252,7 @@ export default function MeineSchrankenPage() {
             </div>
             {premiumPackage.enabled ? (
               <button className={styles.premiumCta} type="button" onClick={buyAdditionalSlots} disabled={checkoutBusy}>
-                {checkoutBusy ? "Weiter zu Stripe …" : purchasedSlots > 0 ? "Weitere 10 Plätze sichern" : "10 Plätze sichern"}
+                {checkoutBusy ? "Weiter zur Zahlung …" : purchasedSlots > 0 ? "Weitere 10 Plätze sichern" : "10 Plätze sichern"}
                 <span aria-hidden="true">→</span>
               </button>
             ) : (
