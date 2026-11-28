@@ -937,3 +937,32 @@
   .premiumPriceBlock span{max-width:125px;font-size:9px}
   .premiumCta,.premiumCtaDisabled{font-size:12px}
 }
+
+
+/* Premium heading: one gold focal line, without a decorative icon or duplicate slogan */
+.premiumCopy .offerEyebrow{
+  display:block;
+  width:fit-content;
+  max-width:100%;
+  margin:0 0 13px;
+  color:#f2d99e;
+  font-size:clamp(22px,3.3vw,28px);
+  font-weight:950;
+  line-height:1.12;
+  letter-spacing:-.65px;
+  text-transform:none;
+  background:linear-gradient(108deg,#fff5d7 0%,#d8b66f 20%,#fff0b5 39%,#bd9148 57%,#f4d994 76%,#fff4cf 100%);
+  background-size:180% 100%;
+  background-position:0 50%;
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+  text-shadow:0 0 18px rgba(232,201,143,.13);
+}
+@media(max-width:700px){
+  .premiumCopy .offerEyebrow{
+    margin-bottom:2px;
+    font-size:clamp(24px,7vw,29px);
+    letter-spacing:-.7px;
+  }
+}

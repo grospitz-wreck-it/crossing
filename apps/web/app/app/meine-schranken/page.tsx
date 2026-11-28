@@ -218,11 +218,7 @@ export default function MeineSchrankenPage() {
 
         <section className={styles.premiumCompact}>
           <div className={styles.premiumCopy}>
-            <div className={styles.offerEyebrow}>
-              <span className={styles.offerSpark} aria-hidden="true">✦</span>
-              MEHR FREIHEIT MIT PREMIUM
-            </div>
-            <h2>Mehr Schranken. <span>Mehr Überblick.</span></h2>
+            <h2 className={styles.offerEyebrow}>Mehr Schranken mit Premium</h2>
             <p className={styles.offerLead}>
               Speichere zehn weitere Bahnübergänge und behalte bis zu 13 Orte gleichzeitig im Blick.
             </p>

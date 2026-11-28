@@ -22,3 +22,30 @@
   .copy small{font-size:12px}
   .footnote{font-size:12px}
 }
+
+
+/* Content category ordering: touch-friendly drag handle */
+.dragHandle{
+  display:grid;
+  place-items:center;
+  flex:0 0 30px;
+  width:30px;
+  height:42px;
+  margin-left:-5px;
+  padding:0;
+  border:0;
+  border-radius:9px;
+  background:transparent;
+  color:#9aabba;
+  cursor:grab;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+}
+.dragHandle:active{background:#eef3f7;color:#496781;cursor:grabbing}
+.dragHandle:focus-visible{outline:2px solid #7d9db7;outline-offset:2px}
+.rowDragging{border-radius:10px;background:#f1f6fa;box-shadow:0 0 0 1px #d8e4ed}
+@media(max-width:680px){
+  .dragHandle{flex-basis:34px;width:34px;height:48px;margin-left:-4px}
+  .rowDragging{background:#eef4f8}
+}
