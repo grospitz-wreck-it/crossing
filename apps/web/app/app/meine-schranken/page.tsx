@@ -245,7 +245,7 @@ export default function MeineSchrankenPage() {
             </div>
             <div className={styles.accountMetric}>
               <strong>{hydrated ? maxCrossings : "–"}</strong>
-              <span>Plätze verfügbar</span>
+              <span>Plätze gesamt</span>
             </div>
             <div className={styles.accountMetric}>
               <strong>{hydrated ? purchasedSlots : "–"}</strong>
