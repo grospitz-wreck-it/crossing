@@ -478,15 +478,21 @@ const wakeLockRef =
 
   setBootstrapLoading(true);
   setBootstrapProgress(0);
-  setBootstrapDetail("Deine Bahnübergänge werden geladen");
+  const crossingNames = initialCrossings
+    .map((crossing) => crossing.name)
+    .filter(Boolean);
+  setBootstrapDetail(
+    crossingNames.length
+      ? `Wird geladen: ${crossingNames.join(" · ")}`
+      : "Deine Bahnübergänge werden geladen"
+  );
 
   let completed = 0;
   void Promise.all(initialCrossings.map((crossing) =>
-    load(crossing.id, false, (_progress, detail) => {
+    load(crossing.id, false, () => {
       if (cancelled) return;
       completed += 1;
       setBootstrapProgress(Math.round((completed / initialCrossings.length) * 90));
-      setBootstrapDetail(detail);
     })
   )).finally(() => {
     if (!cancelled) {
