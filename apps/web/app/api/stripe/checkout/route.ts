@@ -5,9 +5,9 @@ import { sql } from "drizzle-orm";
 
 export const runtime = "nodejs";
 
-const APP_URL = (process.env.NEXTAUTH_URL || process.env.AUTH_URL || "https://meineschranke.de").replace(/\/$/, "");
 
-export async function POST() {
+
+export async function POST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Bitte melde dich erneut an." }, { status: 401 });
@@ -56,12 +56,13 @@ export async function POST() {
     const form = new URLSearchParams();
     form.set("mode", "payment");
     form.set("client_reference_id", session.user.id);
-    form.set("success_url", `${APP_URL}/app/meine-schranken?payment=success`);
-    form.set("cancel_url", `${APP_URL}/app/meine-schranken?payment=cancelled`);
+    const appUrl = (process.env.NEXTAUTH_URL || process.env.AUTH_URL || new URL(request.url).origin).replace(/\/$/, "");
+    form.set("success_url", `${appUrl}/app/meine-schranken?payment=success`);
+    form.set("cancel_url", `${appUrl}/app/meine-schranken?payment=cancelled`);
     form.set("line_items[0][quantity]", "1");
     form.set("line_items[0][price_data][currency]", currency);
     form.set("line_items[0][price_data][unit_amount]", String(amount));
-    form.set("line_items[0][price_data][product_data][name]", `10 zusätzliche Schranken-Plätze`);
+    form.set("line_items[0][price_data][product_data][name]", `${slots} zusätzliche Schranken-Plätze`);
     form.set("line_items[0][price_data][product_data][description]", `Zusätzliche persönliche Bahnübergänge für ${durationDays} Tage`);
     form.append("line_items[0][tax_rates][0]", taxRateId);
     form.set("invoice_creation[enabled]", "true");
