@@ -488,3 +488,27 @@
   .logoutButton{font-size:15px}
   .modalHeader p,.modalFooter span{font-size:13px}
 }
+
+
+.checkoutButton{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:48px;
+  margin-top:10px;
+  padding:0 20px;
+  border:0;
+  border-radius:13px;
+  background:#173d62;
+  color:#fff;
+  font:inherit;
+  font-size:14px;
+  font-weight:800;
+  cursor:pointer;
+  box-shadow:0 7px 18px rgba(23,61,98,.16);
+  transition:transform .16s ease,background .16s ease,opacity .16s ease;
+}
+.checkoutButton:hover{background:#24547f;transform:translateY(-1px)}
+.checkoutButton:disabled{opacity:.6;cursor:wait;transform:none}
+.checkoutHint{display:block;margin-top:8px;color:#718397;font-size:11px;line-height:1.45}
+@media(max-width:680px){.checkoutButton{width:100%;min-height:50px;font-size:14px}.checkoutHint{font-size:11px}}
