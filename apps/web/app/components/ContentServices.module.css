@@ -2,3 +2,6 @@
 
 /* Lucide content-type symbols */
 .icon>svg{display:block;width:20px;height:20px;flex:none}
+
+
+.tabs{display:flex;gap:7px;overflow-x:auto;padding:2px 1px 10px;scrollbar-width:none;-webkit-overflow-scrolling:touch}.tabs::-webkit-scrollbar{display:none}.tab{display:inline-flex;align-items:center;justify-content:center;gap:7px;flex:0 0 auto;min-height:39px;padding:0 13px;border:1px solid #e4ebf1;border-radius:999px;background:#fff;color:#61778c;font:700 12px/1 system-ui,sans-serif;white-space:nowrap;cursor:pointer;transition:background .18s ease,border-color .18s ease,color .18s ease,box-shadow .18s ease}.tab svg{flex:none}.tab>span{display:grid;place-items:center;min-width:18px;height:18px;padding:0 4px;border-radius:99px;background:#edf2f6;color:#6b7e90;font-size:10px}.tabActive{border-color:#173f62;background:#173f62;color:#fff;box-shadow:0 5px 14px rgba(23,63,98,.16)}.tabActive>span{background:rgba(255,255,255,.18);color:#fff}.tab:focus-visible{outline:3px solid rgba(227,6,19,.22);outline-offset:2px}
