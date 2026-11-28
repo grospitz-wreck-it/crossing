@@ -6,6 +6,16 @@ import { sql } from "drizzle-orm";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  let body: { billingCountry?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return Response.json({ error: "Bitte bestätige dein Rechnungsland." }, { status: 400 });
+  }
+  if (body?.billingCountry !== "DE") {
+    return Response.json({ error: "Der Kauf ist zum Start nur mit einer Rechnungsadresse in Deutschland möglich." }, { status: 400 });
+  }
+
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Bitte melde dich erneut an." }, { status: 401 });
@@ -77,6 +87,7 @@ export async function POST(request: Request) {
     form.set("mode", "payment");
     form.set("client_reference_id", session.user.id);
     form.set("customer_creation", "always");
+    form.set("billing_address_collection", "required");
     form.set("invoice_creation[enabled]", "true");
     form.set("invoice_creation[invoice_data][description]", "10 zusätzliche Schranken-Plätze für 365 Tage");
     form.set("success_url", `${(process.env.NEXTAUTH_URL || process.env.AUTH_URL || new URL(request.url).origin).replace(/\/$/, "")}/app/meine-schranken?payment=success`);
@@ -93,6 +104,7 @@ export async function POST(request: Request) {
     form.set("metadata[userId]", session.user.id);
     form.set("metadata[packageSlots]", String(slots));
     form.set("metadata[durationDays]", String(durationDays));
+    form.set("metadata[billingCountry]", "DE");
     form.set("payment_intent_data[metadata][purchaseId]", purchaseId);
     form.set("payment_intent_data[metadata][userId]", session.user.id);
 
