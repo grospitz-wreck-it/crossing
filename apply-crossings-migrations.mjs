@@ -56,20 +56,9 @@ for (const file of files) {
     .replace(/^\s*BEGIN TRANSACTION;\s*$/gim, "")
     .replace(/^\s*COMMIT;\s*$/gim, "");
 
-  const statements = cleaned
-    .split(";")
-    .map(s => s.trim())
-    .filter(Boolean);
-
-  for (const statement of statements) {
-    const firstLine = statement
-      .split("\n")
-      .map(x => x.trim())
-      .find(Boolean) || "";
-
-    console.log(`→ ${firstLine.slice(0, 120)}`);
-    await db.execute(statement);
-  }
+  // Use libSQL's multi-statement parser. Splitting on semicolons breaks
+  // SQLite triggers, whose BEGIN/END bodies contain internal semicolons.
+  await db.executeMultiple(cleaned);
 
   console.log(`OK: ${file}`);
 }
