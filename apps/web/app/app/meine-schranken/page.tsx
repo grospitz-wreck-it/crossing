@@ -373,7 +373,7 @@ export default function MeineSchrankenPage() {
           </aside>
         </section>
 
-        <ContentPreferences />        <ContentPreferences />
+        <ContentPreferences />
         <div className={styles.logoutRow}>
           <button className={styles.logoutButton} onClick={() => signOut({ callbackUrl: "/" })}>Abmelden</button>
         </div>
