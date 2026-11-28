@@ -2,17 +2,18 @@
 
 import { useEffect, useState } from "react";
 import styles from "./PredictionFeedback.module.css";
+import AppIcon from "./AppIcon";
 
 const ACTIVE_KEY = "crossing-app:active-crossing";
 const RATED_PREFIX = "crossing-app:rated-prediction:";
 
 const ratings = [
-  { value: 5, icon: "👍", label: "Sehr gut" },
-  { value: 4, icon: "👍", label: "Gut" },
-  { value: 3, icon: "😐", label: "Okay" },
-  { value: 2, icon: "👎", label: "Schlecht" },
-  { value: 1, icon: "👎", label: "Sehr schlecht" },
-];
+  { value: 5, icon: "thumbs-up", label: "Sehr gut" },
+  { value: 4, icon: "smile", label: "Gut" },
+  { value: 3, icon: "meh", label: "Okay" },
+  { value: 2, icon: "frown", label: "Schlecht" },
+  { value: 1, icon: "thumbs-down", label: "Sehr schlecht" },
+] as const;
 
 function makePredictionId(crossingId: string, phase: any) {
   const trainIds = (phase?.trains ?? [])
@@ -122,8 +123,10 @@ export default function PredictionFeedback() {
               onClick={() => rate(rating.value)}
               disabled={sending}
               aria-label={rating.label}
+              title={rating.label}
+              data-rating={rating.value}
             >
-              <span>{rating.icon}</span>
+              <span><AppIcon name={rating.icon} size={22} strokeWidth={2} /></span>
               <small>{rating.label}</small>
             </button>
           ))}

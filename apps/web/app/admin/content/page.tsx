@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import AdminIcon from "../components/AdminIcon";
+import ContentTypeIcon from "../../components/ContentTypeIcon";
 import styles from "./page.module.css";
 
 type Item = {
@@ -9,7 +10,7 @@ type Item = {
   sort_order:number; onboarding_version?:number|null; crossings:string[];
 };
 type Crossing = {id:string;name:string};
-const empty = () => ({title:"",summary:"",contentType:"feature_tip",imageUrl:"",icon:"✨",accentColor:"#f32643",status:"draft",actionType:"none",actionUrl:"",sortOrder:0,onboardingVersion:1,crossings:[] as string[]});
+const empty = () => ({title:"",summary:"",contentType:"feature_tip",imageUrl:"",accentColor:"#f32643",status:"draft",actionType:"none",actionUrl:"",sortOrder:0,onboardingVersion:1,crossings:[] as string[]});
 const types = [{value:"onboarding",label:"Onboarding"},{value:"feature_tip",label:"Feature-Tipp"},{value:"local_news",label:"Lokale Nachricht"},{value:"event",label:"Veranstaltung"},{value:"partner",label:"Partner"}];
 const actions = [{value:"none",label:"Keine Aktion"},{value:"location",label:"Standort öffnen"},{value:"install_help",label:"Installationshilfe"},{value:"open_url",label:"Externe URL öffnen"}];
 
@@ -33,7 +34,7 @@ export default function ContentStudioPage() {
   const visible=useMemo(()=>filter==="all"?items:items.filter(i=>i.status===filter),[items,filter]);
   function edit(item:Item){
     setEditing(item.id);
-    setForm({title:item.title,summary:item.summary||"",contentType:item.content_type,imageUrl:item.image_url||"",icon:item.icon||"✨",accentColor:item.accent_color||"#f32643",status:item.status,actionType:item.action_type||"none",actionUrl:item.action_url||"",sortOrder:item.sort_order||0,onboardingVersion:item.onboarding_version||1,crossings:item.crossings||[]});
+    setForm({title:item.title,summary:item.summary||"",contentType:item.content_type,imageUrl:item.image_url||"",accentColor:item.accent_color||"#f32643",status:item.status,actionType:item.action_type||"none",actionUrl:item.action_url||"",sortOrder:item.sort_order||0,onboardingVersion:item.onboarding_version||1,crossings:item.crossings||[]});
     setError("");
   }
   function reset(){setEditing(null);setForm(empty());setError("");}
@@ -76,7 +77,7 @@ export default function ContentStudioPage() {
       <section className={styles.library}>
         <div className={styles.toolbar}><h2>Inhalte</h2><select value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">Alle Status</option><option value="published">Veröffentlicht</option><option value="draft">Entwürfe</option></select></div>
         {loading?<div className={styles.empty}>Inhalte werden geladen …</div>:visible.length===0?<div className={styles.empty}>Noch keine Inhalte vorhanden. Lege deinen ersten App-Inhalt an.</div>:<div className={styles.items}>{visible.map(item=><article key={item.id} className={styles.item}>
-          <div className={styles.itemIcon} style={{background:item.accent_color+"22",color:item.accent_color}}>{item.icon||"✨"}</div>
+          <div className={styles.itemIcon} style={{background:item.accent_color+"22",color:item.accent_color}}><ContentTypeIcon type={item.content_type} size={20} /></div>
           <div className={styles.itemBody}><div className={styles.itemMeta}><span>{types.find(t=>t.value===item.content_type)?.label||item.content_type}</span><i className={item.status==="published"?styles.live:styles.draft}>{item.status==="published"?"Live":"Entwurf"}</i></div><b>{item.title}</b><p>{item.summary||"Kein Beschreibungstext"}</p><small>{item.crossings?.length?item.crossings.length+" Bahnübergänge":"Alle Bahnübergänge"} · {item.action_type==="none"?"Keine Aktion":actions.find(a=>a.value===item.action_type)?.label}</small></div>
           <div className={styles.itemActions}><button onClick={()=>edit(item)} aria-label="Bearbeiten"><AdminIcon name="pencil"/></button><button onClick={()=>remove(item)} aria-label="Löschen"><AdminIcon name="trash"/></button></div>
         </article>)}</div>}
@@ -85,10 +86,7 @@ export default function ContentStudioPage() {
         <div className={styles.editorHead}><div><span>{editing?"INHALT BEARBEITEN":"NEUER INHALT"}</span><h2>{editing?"Bearbeiten":"Inhalt gestalten"}</h2></div>{editing&&<button onClick={reset}>Neu</button>}</div>
         <label>Titel<input value={form.title} maxLength={120} onChange={e=>set("title",e.target.value)} placeholder="z. B. So funktioniert meine Schranke"/></label>
         <label>Beschreibung<textarea value={form.summary} maxLength={600} rows={3} onChange={e=>set("summary",e.target.value)} placeholder="Kurzer Text für die Karte …"/></label>
-        <div className={styles.two}>
-          <label>Inhaltstyp<select value={form.contentType} onChange={e=>set("contentType",e.target.value)}>{types.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}</select></label>
-          <label>Icon / Emoji<input value={form.icon} maxLength={8} onChange={e=>set("icon",e.target.value)} /></label>
-        </div>
+        <label>Inhaltstyp<select value={form.contentType} onChange={e=>set("contentType",e.target.value)}>{types.map(t=><option key={t.value} value={t.value}>{t.label}</option>)}</select><small>Das Symbol wird automatisch passend zum Inhaltstyp gewählt.</small></label>
         <div className={styles.two}>
           <label>Akzentfarbe<div className={styles.color}><input type="color" value={form.accentColor} onChange={e=>set("accentColor",e.target.value)}/><code>{form.accentColor}</code></div></label>
           <label>Reihenfolge<input type="number" min="0" max="9999" value={form.sortOrder} onChange={e=>set("sortOrder",Number(e.target.value))}/></label>
@@ -100,7 +98,7 @@ export default function ContentStudioPage() {
         {form.contentType==="onboarding"&&<label>Onboarding-Version<input type="number" min="1" value={form.onboardingVersion} onChange={e=>set("onboardingVersion",Number(e.target.value))}/><small>Eine höhere Version zeigt das Onboarding erneut.</small></label>}
         <label>Ausspielung an Bahnübergängen<select multiple value={form.crossings} onChange={e=>set("crossings",Array.from(e.target.selectedOptions).map(o=>o.value))}><option value="" disabled>Alle Bahnübergänge (keine Auswahl)</option>{crossings.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select><small>Keine Auswahl bedeutet: global ausspielen. Mehrfachauswahl mit Cmd / Strg.</small></label>
         <div className={styles.previewLabel}>LIVE-VORSCHAU</div>
-        <div className={styles.preview} style={{borderColor:form.accentColor+"66"}}><div className={styles.previewTop}><span style={{background:form.accentColor+"22",color:form.accentColor}}>{form.icon||"✨"}</span><small>{types.find(t=>t.value===form.contentType)?.label}</small></div>{form.imageUrl&&<img src={form.imageUrl} alt=""/>}<b>{form.title||"Dein Titel"}</b><p>{form.summary||"Hier erscheint deine Beschreibung."}</p></div>
+        <div className={styles.preview} style={{borderColor:form.accentColor+"66"}}><div className={styles.previewTop}><span style={{background:form.accentColor+"22",color:form.accentColor}}><ContentTypeIcon type={form.contentType} size={17} /></span><small>{types.find(t=>t.value===form.contentType)?.label}</small></div>{form.imageUrl&&<img src={form.imageUrl} alt=""/>}<b>{form.title||"Dein Titel"}</b><p>{form.summary||"Hier erscheint deine Beschreibung."}</p></div>
         {error&&<div className={styles.error}>{error}</div>}
         <div className={styles.saveActions}><button className={styles.secondary} onClick={()=>save("draft")} disabled={saving||uploading}>Als Entwurf speichern</button><button className={styles.primary} onClick={()=>save("published")} disabled={saving||uploading}>{saving?"Speichert …":"Veröffentlichen"}</button></div>
       </aside>

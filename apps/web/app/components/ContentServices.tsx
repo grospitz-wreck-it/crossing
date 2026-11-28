@@ -4,6 +4,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useCrossings } from "../context/CrossingsContext";
 import styles from "./ContentServices.module.css";
 import AppIcon from "./AppIcon";
+import ContentTypeIcon from "./ContentTypeIcon";
 
 type FuelType = "e5" | "e10" | "diesel";
 type ContentKind = "news" | "fuel" | "jokes";
@@ -14,7 +15,7 @@ function normalizeContentOrder(value: unknown): ContentKind[] {
   const requested = Array.isArray(value) ? value.filter((item): item is ContentKind => allowed.includes(item as ContentKind)) : [];
   return [...new Set<ContentKind>([...requested, ...DEFAULT_CONTENT_ORDER])];
 }
-type NewsItem = { id: string; content_type?: string; title: string; summary?: string; image_url?: string; action_type?: string; action_url?: string; accent_color?: string; icon?: string };
+type NewsItem = { id: string; content_type?: string; title: string; summary?: string; image_url?: string; action_type?: string; action_url?: string; accent_color?: string };
 type FuelStation = { price: number; direction: string; station: { name: string; brand?: string | null; street?: string | null; place?: string | null; postCode?: number | null; distanceKm?: number | null; isOpen?: boolean; lat?: number | null; lng?: number | null } };
 type Joke = { type: "single" | "twopart"; joke?: string; setup?: string; delivery?: string };
 const fuelLabels: Record<FuelType, string> = { e5: "Super E5", e10: "Super E10", diesel: "Diesel" };
@@ -112,7 +113,7 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
           if (kind === "news") return <Fragment key="news">{hasNews && newsItems.map((item) => {
           const card = (
             <>
-              <div className={styles.cardHead}><span className={styles.icon} style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}>{item.icon || <AppIcon name="info" size={20} />}</span><span className={styles.eyebrow}>{contentLabel(item)}</span></div>
+              <div className={styles.cardHead}><span className={styles.icon} style={{ background: (item.accent_color || "#f32643") + "20", color: item.accent_color || "#f32643" }}><ContentTypeIcon type={item.content_type} size={20} /></span><span className={styles.eyebrow}>{contentLabel(item)}</span></div>
               {item.image_url && <img className={styles.newsImage} src={item.image_url} alt="" loading="lazy" />}
               <h2 className={styles.newsTitle}>{item.title}</h2>
               {item.summary && <p className={styles.newsSummary}>{item.summary}</p>}

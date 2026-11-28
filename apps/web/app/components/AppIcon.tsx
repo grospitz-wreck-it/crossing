@@ -1,11 +1,13 @@
 "use client";
 import {
   Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
-  ArrowUpDown, ArrowUpRight, Bell, CalendarDays, Check, ChevronDown,
-  ChevronLeft, ChevronRight, ChevronUp, Clock3, Fuel, Gauge, Home,
-  Info, Map, MapPin, Menu, Megaphone, MessageCircle, MoreHorizontal,
+  ArrowUpDown, ArrowUpRight, Bell, BookOpen, CalendarDays, Check, ChevronDown,
+  ChevronLeft, ChevronRight, ChevronUp, Clock3, Frown, Fuel, Gauge, Handshake, Home,
+  Info, Lightbulb, Map, MapPin, Meh, Menu, Megaphone, MessageCircle, MoreHorizontal,
+  Newspaper,
   Navigation, Pause, Pencil, Play, Plus, RefreshCw, Route, Search, Settings,
-  ShieldCheck, TrainFront, Trash2, Users, X, FileText, ChartNoAxesCombined, type LucideIcon,
+  ShieldCheck, Smile, Sparkles, ThumbsDown, ThumbsUp, TrainFront, Trash2, Users, X,
+  FileText, ChartNoAxesCombined, type LucideIcon,
 } from "lucide-react";
 import type { SVGProps } from "react";
 const icons = {
@@ -21,6 +23,9 @@ const icons = {
   "chevron-up": ChevronUp, "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight, alert: AlertTriangle, info: Info,
   "shield-check": ShieldCheck, "message-circle": MessageCircle,
+  "book-open": BookOpen, "lightbulb": Lightbulb, "newspaper": Newspaper,
+  "handshake": Handshake, "smile": Smile, "meh": Meh, "frown": Frown,
+  "thumbs-up": ThumbsUp, "thumbs-down": ThumbsDown, "sparkles": Sparkles,
 } satisfies Record<string, LucideIcon>;
 export type AppIconName = keyof typeof icons;
 type Props = Omit<SVGProps<SVGSVGElement>, "name"> & { name: AppIconName; size?: number; strokeWidth?: number };
