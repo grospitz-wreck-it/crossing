@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS subscription_config (
   id INTEGER PRIMARY KEY CHECK (id = 1),
   free_crossing_limit INTEGER NOT NULL DEFAULT 3 CHECK (free_crossing_limit > 0),
   premium_package_slots INTEGER NOT NULL DEFAULT 10 CHECK (premium_package_slots > 0),
-  premium_package_price_cents INTEGER NOT NULL DEFAULT 500 CHECK (premium_package_price_cents > 0),
+  premium_package_price_cents INTEGER NOT NULL DEFAULT 595 CHECK (premium_package_price_cents > 0),
   premium_package_currency TEXT NOT NULL DEFAULT 'EUR',
   premium_package_duration_days INTEGER NOT NULL DEFAULT 365 CHECK (premium_package_duration_days > 0),
   premium_enabled INTEGER NOT NULL DEFAULT 0 CHECK (premium_enabled IN (0, 1)),
@@ -27,7 +27,7 @@ INSERT OR IGNORE INTO subscription_config (
   premium_package_currency,
   premium_package_duration_days,
   premium_enabled
-) VALUES (1, 3, 10, 500, 'EUR', 365, 0);
+) VALUES (1, 3, 10, 595, 'EUR', 365, 0);
 
 CREATE TABLE IF NOT EXISTS user_crossing_purchases (
   id TEXT PRIMARY KEY,
