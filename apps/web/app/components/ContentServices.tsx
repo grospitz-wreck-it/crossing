@@ -37,6 +37,7 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
   const dragRef = useRef<{ pointerId: number; startX: number; scrollLeft: number } | null>(null);
   const [prefs, setPrefs] = useState<Preferences>({ newsEnabled: false, fuelEnabled: false, fuelType: null, jokesEnabled: false, contentOrder: DEFAULT_CONTENT_ORDER });
   const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [selectedKind, setSelectedKind] = useState<ContentKind>("news");
   const [fuel, setFuel] = useState<{ results?: FuelStation[]; message?: string } | null>(null);
   const [fuelError, setFuelError] = useState("");
   const [joke, setJoke] = useState<Joke | null>(null);
@@ -100,16 +101,39 @@ export default function ContentServices({ newsItems = [] }: { newsItems?: NewsIt
   const hasFuel = prefs.fuelEnabled;
   const hasJokes = prefs.jokesEnabled;
   const cardCount = (hasNews ? newsItems.length : 0) + Number(hasFuel) + Number(hasJokes);
-  if (!prefsLoaded || cardCount === 0) return null;
+  const enabledKinds = prefs.contentOrder.filter((kind) =>
+    kind === "news" ? hasNews : kind === "fuel" ? hasFuel : hasJokes
+  );
+  const activeKind = enabledKinds.includes(selectedKind) ? selectedKind : enabledKinds[0];
+  if (!prefsLoaded || cardCount === 0 || !activeKind) return null;
 
   return (
     <section className={styles.section} aria-label="Aktuelle Informationen" data-no-crossing-swipe>
       <div className={styles.header}>
-        <div><span className={styles.sectionTitle}>Aktuelle Informationen</span><span className={styles.sectionHint}>Wische durch deine Inhalte</span></div>
+        <div><span className={styles.sectionTitle}>Aktuelle Informationen</span><span className={styles.sectionHint}>Entdecke weitere Inhalte</span></div>
         <span className={styles.counter}>{cardCount} Karten</span>
       </div>
+      <div className={styles.tabs} role="tablist" aria-label="Inhaltsbereiche">
+        {enabledKinds.map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            role="tab"
+            aria-selected={activeKind === kind}
+            className={`${styles.tab} ${activeKind === kind ? styles.tabActive : ""}`}
+            onClick={() => {
+              setSelectedKind(kind);
+              if (trackRef.current) trackRef.current.scrollTo({ left: 0, behavior: "smooth" });
+            }}
+          >
+            <AppIcon name={kind === "news" ? "newspaper" : kind === "fuel" ? "fuel" : "laugh"} size={16} />
+            {kind === "news" ? "Aktuelles" : kind === "fuel" ? "Tanken" : "Pause"}
+            {kind === "news" && <span>{newsItems.length}</span>}
+          </button>
+        ))}
+      </div>
       <div ref={trackRef} className={styles.track} onPointerDown={handleTrackPointerDown} onPointerMove={handleTrackPointerMove} onPointerUp={handleTrackPointerEnd} onPointerCancel={handleTrackPointerEnd}>
-        {prefs.contentOrder.map((kind) => {
+        {[activeKind].map((kind) => {
           if (kind === "news") return <Fragment key="news">{hasNews && newsItems.map((item) => {
           const card = (
             <>
