@@ -128,16 +128,16 @@ export async function POST(request: Request) {
     form.set("customer_creation", "always");
     form.set("billing_address_collection", "required");
     form.set("invoice_creation[enabled]", "true");
-    form.set("invoice_creation[invoice_data][description]", "10 zusätzliche Schranken-Plätze für 365 Tage");
+    form.set("invoice_creation[invoice_data][description]", "meineSchranke – 10 zusätzliche Schranken-Plätze für 365 Tage");
     form.set("success_url", `${(process.env.NEXTAUTH_URL || process.env.AUTH_URL || new URL(request.url).origin).replace(/\/$/, "")}/app/meine-schranken?payment=success`);
     form.set("cancel_url", `${(process.env.NEXTAUTH_URL || process.env.AUTH_URL || new URL(request.url).origin).replace(/\/$/, "")}/app/meine-schranken?payment=cancelled`);
     form.set("line_items[0][quantity]", "1");
     form.set("line_items[0][price_data][currency]", currency);
     form.set("line_items[0][price_data][unit_amount]", String(amount));
-    form.set("line_items[0][price_data][product_data][name]", "10 zusätzliche Schranken-Plätze · 365 Tage");
+    form.set("line_items[0][price_data][product_data][name]", "meineSchranke – 10 zusätzliche Schranken-Plätze · 365 Tage");
     form.set(
       "line_items[0][price_data][product_data][description]",
-      "Einmaliger Kauf von 10 zusätzlichen persönlichen Bahnübergängen für 365 Tage. Keine automatische Verlängerung.",
+      "meineSchranke: Einmaliger Kauf von 10 zusätzlichen persönlichen Bahnübergängen für 365 Tage. Keine automatische Verlängerung.",
     );
     form.set("metadata[purchaseId]", purchaseId);
     form.set("metadata[userId]", session.user.id);
