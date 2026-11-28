@@ -38,6 +38,7 @@ export default function MeineSchrankenPage() {
     favoriteId,
     maxCrossings,
     purchasedSlots,
+    hydrated,
     accountTier,
     nextExpirationAt,
     latestExpirationAt,
@@ -226,25 +227,31 @@ export default function MeineSchrankenPage() {
               <div className={styles.entitlementIdentity}>
                 <span className={`${styles.entitlementBadge} ${accountTier === "premium" ? styles.entitlementBadgePremium : styles.entitlementBadgeFree}`}>
                   <span className={styles.entitlementDot} />
-                  {accountTier === "premium" ? "PREMIUM-KONTO" : "FREE-KONTO"}
+                  {!hydrated ? "STATUS LÄDT" : accountTier === "premium" ? "PREMIUM-KONTO" : "FREE-KONTO"}
                 </span>
-                <strong>{accountTier === "premium" ? "Dein Premium-Zugang ist aktiv" : "Dein kostenloser Zugang"}</strong>
-                <span>{purchasedSlots > 0
-                  ? `${purchasedSlots} zusätzliche Plätze sind aktuell freigeschaltet.`
-                  : `Du nutzt die ${maxCrossings} kostenlosen Plätze.`}</span>
+                <strong>{!hydrated
+                  ? "Dein Kontingent wird geladen"
+                  : accountTier === "premium"
+                    ? "Dein Premium-Zugang ist aktiv"
+                    : "Dein kostenloser Zugang"}</strong>
+                <span>{!hydrated
+                  ? "Wir lesen deine aktuellen Plätze aus."
+                  : purchasedSlots > 0
+                    ? `${purchasedSlots} zusätzliche Plätze sind aktuell freigeschaltet.`
+                    : `Du nutzt die ${maxCrossings} kostenlosen Plätze.`}</span>
               </div>
               <div className={styles.entitlementCapacity}>
-                <strong>{maxCrossings}</strong>
+                <strong>{hydrated ? maxCrossings : "–"}</strong>
                 <span>Plätze insgesamt</span>
               </div>
             </div>
-            {nextExpirationAt && (
+            {hydrated && nextExpirationAt && (
               <div className={styles.entitlementExpiry}>
                 <span>⌛</span>
                 <div>
                   <strong>Nächster Ablauf: {formatEntitlementDate(nextExpirationAt) ?? "Datum wird geladen"}</strong>
                   {latestExpirationAt && latestExpirationAt !== nextExpirationAt && (
-                    <small>Dein zuletzt erworbenes Paket läuft am {formatEntitlementDate(latestExpirationAt) ?? "späteren Datum"} ab.</small>
+                    <small>Weitere Premium-Plätze sind bis {formatEntitlementDate(latestExpirationAt) ?? "zum späteren Datum"} freigeschaltet.</small>
                   )}
                 </div>
               </div>
