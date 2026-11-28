@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { signOut } from "next-auth/react";
-import { useCrossings } from "../../context/CrossingsContext";
+import { FREE_CROSSING_LIMIT, useCrossings } from "../../context/CrossingsContext";
 import styles from "./page.module.css";
 import ContentPreferences from "../../components/ContentPreferences";
 
@@ -20,7 +20,7 @@ function distanceLabel(km?: number) {
 }
 
 export default function MeineSchrankenPage() {
-  const { saved, available, activeId, favoriteId, maxCrossings, premiumPackage, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
+  const { saved, available, activeId, favoriteId, maxCrossings, purchasedSlots, premiumPackage, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "loading" | "ready" | "denied" | "error">("idle");
@@ -164,7 +164,7 @@ export default function MeineSchrankenPage() {
               return crossing ? (
                 <article className={`${styles.slotCard} ${active ? styles.slotActive : ""}`} key={crossing.id}>
                   <button className={styles.slotMain} onClick={() => setActiveId(crossing.id)} aria-pressed={active}>
-                    <span className={styles.slotNumber}>PLATZ {String(index + 1).padStart(2, "0")}</span>
+                    <span className={styles.slotNumber}>{index < FREE_CROSSING_LIMIT ? "KOSTENLOS" : "PREMIUM"} · PLATZ {String(index + 1).padStart(2, "0")}</span>
                     <span className={styles.crossingGlyph} aria-hidden="true"><i /><i /></span>
                     <strong>{crossing.name}</strong>
                     <span className={styles.slotStatus}>{active ? "Aktuell ausgewählt" : "Als aktive Schranke auswählen"}</span>
@@ -183,8 +183,8 @@ export default function MeineSchrankenPage() {
               ) : (
                 <button className={styles.emptySlot} key={`empty-${index}`} onClick={() => { setModalSlot(index); setQuery(""); }}>
                   <span className={styles.emptyPlus}>+</span>
-                  <strong>Bahnübergang hinzufügen</strong>
-                  <small>Freier Platz {index + 1}</small>
+                  <strong>{index < FREE_CROSSING_LIMIT ? "Bahnübergang hinzufügen" : "Premium-Platz belegen"}</strong>
+                  <small>{index < FREE_CROSSING_LIMIT ? `Freier Platz ${index + 1}` : `Zusatzplatz ${index - FREE_CROSSING_LIMIT + 1}`}</small>
                 </button>
               );
             })}
@@ -200,7 +200,11 @@ export default function MeineSchrankenPage() {
             <h2>Mehr Schranken im Blick</h2>
             <p>+{premiumPackage.additionalCrossings} zusätzliche Plätze ·{" "}
               {(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto · {premiumPackage.durationDays} Tage Laufzeit</p>
-            <p>{premiumPackage.enabled ? "Einmal zahlen, 365 Tage nutzen. Keine automatische Verlängerung." : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
+            <p>{purchasedSlots > 0
+              ? `${purchasedSlots} zusätzliche Premium-Plätze sind aktiv. Belege die freien Premium-Karten oben direkt mit weiteren Bahnübergängen.`
+              : premiumPackage.enabled
+                ? "Nach dem Einmalkauf kannst du zehn zusätzliche Plätze direkt oben mit Bahnübergängen belegen. 365 Tage gültig, keine automatische Verlängerung."
+                : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
             {premiumPackage.enabled && (
               <div className={styles.checkoutCountry}>
                 <label htmlFor="billing-country">Rechnungsland</label>
@@ -224,7 +228,7 @@ export default function MeineSchrankenPage() {
             )}
             {premiumPackage.enabled && (
               <button className={styles.checkoutButton} onClick={buyAdditionalSlots} disabled={checkoutBusy || billingCountry !== "DE"}>
-                {checkoutBusy ? "Weiter zu Stripe …" : "10 Plätze für 5,00 € kaufen"}
+                {checkoutBusy ? "Weiter zu Stripe …" : "{purchasedSlots > 0 ? "Weitere 10 Plätze für 5,00 € kaufen" : "10 Plätze für 5,00 € kaufen"}"}
               </button>
             )}
             {premiumPackage.enabled && <small className={styles.checkoutHint}>Sichere Zahlung über Stripe · 5,00 € inklusive 19 % deutscher Umsatzsteuer · nur Rechnungsadressen in Deutschland</small>}
