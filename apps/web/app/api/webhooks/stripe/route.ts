@@ -69,7 +69,15 @@ export async function POST(request: Request) {
         !checkoutSession?.metadata?.purchaseId ||
         !checkoutSession?.metadata?.userId
       ) {
-        throw new Error("Stripe Checkout event does not match the one-time slot purchase flow.");
+        // This endpoint can share the Stripe account with other Checkout flows.
+        // A signed event without our purchase metadata is unrelated; acknowledge
+        // it so Stripe doesn't retry an event this purchase handler can't process.
+        console.info("[STRIPE] Ignoring Checkout event outside the one-time slot purchase flow:", {
+          eventId: event.id,
+          eventType: event.type,
+          checkoutSessionId,
+        });
+        return;
       }
 
       const purchaseId = String(checkoutSession.metadata.purchaseId);
