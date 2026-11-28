@@ -2,9 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useCrossings } from "../../context/CrossingsContext";
-
-const MAX_FREE_CROSSINGS = 5;
+import { FREE_CROSSING_LIMIT, useCrossings } from "../../context/CrossingsContext";
 
 type Crossing = {
   id: string;
@@ -28,6 +26,9 @@ export default function CrossingSelectionPage() {
   const {
     saved,
     activeId,
+    maxCrossings,
+    purchasedSlots,
+    premiumPackage,
     setActiveId,
     addCrossing,
   } = useCrossings();
@@ -206,9 +207,9 @@ export default function CrossingSelectionPage() {
       return;
     }
 
-    if (saved.length >= MAX_FREE_CROSSINGS) {
+    if (saved.length >= maxCrossings) {
       setError(
-        `Du kannst kostenlos maximal ${MAX_FREE_CROSSINGS} Bahnübergänge auswählen.`,
+        `Du hast alle ${maxCrossings} verfügbaren Plätze belegt. ${premiumPackage.enabled ? "Im Bereich „Meine Schranken“ kannst du weitere 10 Premium-Plätze freischalten." : "Entferne zuerst einen gespeicherten Bahnübergang."}`,
       );
       return;
     }
@@ -236,12 +237,14 @@ export default function CrossingSelectionPage() {
         </h1>
 
         <p className="crossingSelectionIntro">
-          Wähle bis zu {MAX_FREE_CROSSINGS} kostenlose
-          Bahnübergänge.
+          Du kannst aktuell bis zu {maxCrossings} Bahnübergänge speichern.
+          {purchasedSlots > 0
+            ? ` Davon sind ${purchasedSlots} zusätzliche Premium-Plätze freigeschaltet.`
+            : ` Deine ersten ${FREE_CROSSING_LIMIT} Plätze sind kostenlos.`}
         </p>
 
         <div className="crossingSelectionCount">
-          {saved.length} / {MAX_FREE_CROSSINGS}
+          {saved.length} / {maxCrossings}
         </div>
 
         {!ready && (
@@ -372,6 +375,16 @@ export default function CrossingSelectionPage() {
           <div className="crossingSelectionError">
             {error}
           </div>
+        )}
+
+        {saved.length >= maxCrossings && premiumPackage.enabled && (
+          <button
+            type="button"
+            className="crossingSelectionContinue"
+            onClick={() => router.push("/app/meine-schranken")}
+          >
+            10 zusätzliche Plätze freischalten
+          </button>
         )}
 
         {saved.length > 0 && (
