@@ -118,6 +118,51 @@ export async function POST(request: Request) {
           throw new Error("Paid Checkout Session amount or currency does not match the local purchase.");
         }
 
+        const billingCountry = String(checkoutSession.customer_details?.address?.country || "").toUpperCase();
+        const declaredCountry = String(checkoutSession.metadata.billingCountry || "").toUpperCase();
+        if (declaredCountry !== "DE" || billingCountry !== "DE") {
+          if (!paymentIntentId) {
+            throw new Error("Cannot refund a non-German billing address because the PaymentIntent is missing.");
+          }
+          const stripeSecret = process.env.STRIPE_SECRET_KEY;
+          if (!stripeSecret) {
+            throw new Error("STRIPE_SECRET_KEY is required to refund a non-German purchase.");
+          }
+
+          // Checkout has no billing-country allowlist. If the address entered
+          // in Stripe differs from the DE-only pre-check, refund the payment
+          // and never activate slots. Stripe idempotency makes retries safe.
+          const refundForm = new URLSearchParams();
+          refundForm.set("payment_intent", String(paymentIntentId));
+          refundForm.set("metadata[purchaseId]", purchaseId);
+          refundForm.set("metadata[reason]", "billing_address_outside_germany");
+          const refundResponse = await fetch("https://api.stripe.com/v1/refunds", {
+            method: "POST",
+            headers: {
+              Authorization: "Basic " + Buffer.from(stripeSecret + ":").toString("base64"),
+              "Content-Type": "application/x-www-form-urlencoded",
+              "Idempotency-Key": "meineschranke-non-de-refund-" + checkoutSessionId,
+            },
+            body: refundForm,
+            cache: "no-store",
+          });
+          const refund = await refundResponse.json();
+          if (!refundResponse.ok || !refund?.id || refund.status === "failed" || refund.status === "canceled") {
+            console.error("[STRIPE] Automatic refund for non-German billing address failed:", refund?.error?.message || refund.status || refundResponse.status);
+            throw new Error("Automatic refund for a non-German billing address failed.");
+          }
+
+          await tx.run(sql`
+            UPDATE user_crossing_purchases
+            SET status = 'refunded', updated_at = datetime('now')
+            WHERE id = ${purchaseId}
+              AND user_id = ${userId}
+              AND stripe_checkout_session_id = ${checkoutSessionId}
+              AND status = 'pending'
+          `);
+          return;
+        }
+
         await tx.run(sql`
           UPDATE user_crossing_purchases
           SET status = 'paid',
