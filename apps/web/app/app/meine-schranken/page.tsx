@@ -39,7 +39,6 @@ export default function MeineSchrankenPage() {
     maxCrossings,
     purchasedSlots,
     hydrated,
-    accountTier,
     nextExpirationAt,
     latestExpirationAt,
     premiumPackage,
@@ -55,7 +54,6 @@ export default function MeineSchrankenPage() {
   const [busyId, setBusyId] = useState("");
   const [modalSlot, setModalSlot] = useState<number | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
-  const [billingCountry, setBillingCountry] = useState("");
 
   const savedIds = useMemo(() => new Set(saved.map((item) => item.id)), [saved]);
   const results = useMemo(() => {
@@ -147,17 +145,14 @@ export default function MeineSchrankenPage() {
 
   async function buyAdditionalSlots() {
     if (checkoutBusy) return;
-    if (billingCountry !== "DE") {
-      setNotice("Der Kauf ist zum Start nur mit einer Rechnungsadresse in Deutschland möglich.");
-      return;
-    }
     setCheckoutBusy(true);
     setNotice("");
     try {
       const response = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ billingCountry }),
+        // Stripe Checkout asks for the full billing address; the webhook checks the actual country.
+        body: JSON.stringify({ billingCountry: "DE" }),
       });
       const result = await response.json().catch(() => null);
       if (!response.ok || !result?.url) {
@@ -221,155 +216,51 @@ export default function MeineSchrankenPage() {
           )}
         </section>
 
-        <section className={styles.accountPanel}>
-          <div className={styles.accountHead}>
-            <div>
-              <span className={styles.overline}>DEIN KONTO</span>
-              <h2>{!hydrated ? "Dein Kontingent wird geladen" : accountTier === "premium" ? "Premium ist aktiv" : "Dein kostenloser Zugang"}</h2>
-              <p>{!hydrated
-                ? "Wir lesen deine aktuellen Plätze aus."
-                : purchasedSlots > 0
-                  ? `${purchasedSlots} zusätzliche Premium-Plätze sind freigeschaltet.`
-                  : "Du kannst bis zu drei Bahnübergänge kostenlos speichern und jederzeit wechseln."}</p>
-            </div>
-            <span className={`${styles.accountBadge} ${accountTier === "premium" ? styles.accountBadgePremium : styles.accountBadgeFree}`}>
-              <span />
-              {!hydrated ? "LÄDT" : accountTier === "premium" ? "PREMIUM" : "FREE"}
-            </span>
-          </div>
-
-          <div className={styles.accountMetrics}>
-            <div className={styles.accountMetric}>
-              <strong>{hydrated ? saved.length : "–"}</strong>
-              <span>Plätze belegt</span>
-            </div>
-            <div className={styles.accountMetric}>
-              <strong>{hydrated ? maxCrossings : "–"}</strong>
-              <span>Plätze gesamt</span>
-            </div>
-            <div className={styles.accountMetric}>
-              <strong>{hydrated ? purchasedSlots : "–"}</strong>
-              <span>Premium-Zusatzplätze</span>
-            </div>
-          </div>
-
-          <div className={styles.capacityTrack} aria-label={hydrated ? `${saved.length} von ${maxCrossings} Plätzen belegt` : "Kontingent wird geladen"}>
-            <span style={{ width: `${hydrated ? Math.min(100, (saved.length / Math.max(1, maxCrossings)) * 100) : 0}%` }} />
-          </div>
-          <div className={styles.capacityLegend}>
-            <span>{hydrated ? `${saved.length} von ${maxCrossings} belegt` : "Kontingent wird geladen"}</span>
-            <span>{hydrated ? `${Math.max(0, maxCrossings - saved.length)} frei` : ""}</span>
-          </div>
-
-          {hydrated && nextExpirationAt && (
-            <div className={styles.accountExpiry}>
-              <span className={styles.expiryIcon}>⌛</span>
-              <div>
-                <strong>Nächster Ablauf: {formatEntitlementDate(nextExpirationAt) ?? "Datum wird geladen"}</strong>
-                {latestExpirationAt && latestExpirationAt !== nextExpirationAt && (
-                  <small>Weitere Premium-Plätze sind bis {formatEntitlementDate(latestExpirationAt) ?? "zum späteren Datum"} freigeschaltet.</small>
-                )}
-              </div>
-            </div>
-          )}
-        </section>
-
-        <section className={styles.premiumOffer}>
-          <div className={styles.offerGlow} aria-hidden="true" />
-          <div className={styles.offerMain}>
+        <section className={styles.premiumCompact}>
+          <div className={styles.premiumCopy}>
             <div className={styles.offerEyebrow}>
               <span className={styles.offerSpark} aria-hidden="true">✦</span>
               MEHR FREIHEIT MIT PREMIUM
             </div>
-            <h2>Mehr Schranken.<br /><span>Mehr Überblick.</span></h2>
+            <h2>Mehr Schranken. <span>Mehr Überblick.</span></h2>
             <p className={styles.offerLead}>
-              Behalte mehr Orte gleichzeitig im Blick. Mit zehn zusätzlichen Plätzen hast du deine wichtigsten Bahnübergänge an einem Ort – und wechselst jederzeit zwischen ihnen.
+              Speichere zehn weitere Bahnübergänge und behalte bis zu 13 Orte gleichzeitig im Blick.
             </p>
-
-            <div className={styles.offerMetrics}>
-              <div>
-                <strong>+{premiumPackage.additionalCrossings}</strong>
-                <span>zusätzliche Plätze</span>
-              </div>
-              <div>
-                <strong>{premiumPackage.durationDays}</strong>
-                <span>Tage Laufzeit</span>
-              </div>
-              <div>
-                <strong>1×</strong>
-                <span>zahlen · kein Abo</span>
-              </div>
+            <div className={styles.premiumFacts}>
+              <span><strong>+10</strong> Plätze</span>
+              <span><strong>365</strong> Tage</span>
+              <span><strong>1×</strong> zahlen · kein Abo</span>
             </div>
-
-            <ul className={styles.offerBenefits}>
-              <li><span aria-hidden="true">✓</span> Bis zu {FREE_CROSSING_LIMIT + premiumPackage.additionalCrossings} Bahnübergänge parallel speichern</li>
-              <li><span aria-hidden="true">✓</span> Deine Auswahl jederzeit ändern und neu sortieren</li>
-              <li><span aria-hidden="true">✓</span> Einmal zahlen – keine automatische Verlängerung</li>
-            </ul>
-
-            <div className={styles.offerComparison}>
-              <div className={styles.comparisonLabel}>
-                <span>FREE</span>
-                <strong>{FREE_CROSSING_LIMIT} Plätze</strong>
+            {hydrated && purchasedSlots > 0 && (
+              <div className={styles.premiumActive}>
+                <span className={styles.premiumActiveDot} />
+                <span>
+                  {purchasedSlots} Premium-Zusatzplätze aktiv
+                  {nextExpirationAt ? ` · nächster Ablauf ${formatEntitlementDate(nextExpirationAt) ?? nextExpirationAt}` : ""}
+                  {latestExpirationAt && latestExpirationAt !== nextExpirationAt
+                    ? ` · weitere Pakete bis ${formatEntitlementDate(latestExpirationAt) ?? latestExpirationAt}`
+                    : ""}
+                </span>
               </div>
-              <div className={styles.comparisonArrow} aria-hidden="true">→</div>
-              <div className={styles.comparisonLabel}>
-                <span>MIT PREMIUM</span>
-                <strong>{FREE_CROSSING_LIMIT + premiumPackage.additionalCrossings} Plätze</strong>
-              </div>
-              <div className={styles.comparisonBar} aria-hidden="true">
-                <span />
-              </div>
-            </div>
+            )}
           </div>
 
-          <aside className={styles.offerPurchase}>
-            <span className={styles.offerPriceLabel}>EINMALIGER KAUF</span>
-            <div className={styles.offerPrice}>
-              {(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}
+          <aside className={styles.premiumAction}>
+            <div className={styles.premiumPriceBlock}>
+              <strong>{(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })}</strong>
+              <span>einmalig · inkl. 19 % MwSt.</span>
             </div>
-            <span className={styles.offerTax}>inkl. 19 % MwSt.</span>
-            <div className={styles.offerDivider} />
-            <div className={styles.offerPurchaseLine}><span>10 zusätzliche Plätze</span><strong>inklusive</strong></div>
-            <div className={styles.offerPurchaseLine}><span>Gültigkeit</span><strong>{premiumPackage.durationDays} Tage</strong></div>
-            <div className={styles.offerPurchaseLine}><span>Verlängerung</span><strong>Keine</strong></div>
-
             {premiumPackage.enabled ? (
-              <>
-                <div className={styles.checkoutCountry}>
-                  <label htmlFor="billing-country">Rechnungsland</label>
-                  <select
-                    id="billing-country"
-                    value={billingCountry}
-                    onChange={(event) => {
-                      setBillingCountry(event.target.value);
-                      setNotice("");
-                    }}
-                    disabled={checkoutBusy}
-                  >
-                    <option value="">Bitte auswählen …</option>
-                    <option value="DE">Deutschland</option>
-                    <option value="OTHER">Anderes Land</option>
-                  </select>
-                  {billingCountry === "OTHER" && (
-                    <small>Der Kauf ist zum Start nur mit deutscher Rechnungsadresse möglich.</small>
-                  )}
-                </div>
-                <button className={styles.offerCta} onClick={buyAdditionalSlots} disabled={checkoutBusy || billingCountry !== "DE"}>
-                  {checkoutBusy ? "Weiter zu Stripe …" : purchasedSlots > 0 ? "Weitere 10 Plätze sichern" : "Jetzt 10 Plätze sichern"}
-                  <span aria-hidden="true">→</span>
-                </button>
-                <small className={styles.offerSecure}>Sichere Zahlung über Stripe · Einmalzahlung</small>
-              </>
+              <button className={styles.premiumCta} type="button" onClick={buyAdditionalSlots} disabled={checkoutBusy}>
+                {checkoutBusy ? "Weiter zu Stripe …" : purchasedSlots > 0 ? "Weitere 10 Plätze sichern" : "10 Plätze sichern"}
+                <span aria-hidden="true">→</span>
+              </button>
             ) : (
-              <>
-                <button className={styles.offerCtaDisabled} type="button" disabled>
-                  <span>Premium startet bald</span>
-                  <span aria-hidden="true">↗</span>
-                </button>
-                <small className={styles.offerSecure}>Wir schließen gerade die letzten Prüfungen ab. Dein kostenloser Zugang bleibt unverändert.</small>
-              </>
+              <button className={styles.premiumCtaDisabled} type="button" disabled>
+                <span>Premium startet bald</span>
+              </button>
             )}
+            <small>{premiumPackage.durationDays} Tage · Sichere Zahlung über Stripe · keine Verlängerung</small>
           </aside>
         </section>
 
