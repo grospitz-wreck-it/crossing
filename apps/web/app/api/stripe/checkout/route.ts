@@ -97,6 +97,8 @@ export async function POST(request: Request) {
   try {
     const form = new URLSearchParams();
     form.set("mode", "payment");
+    form.set("origin_context", "web");
+    form.set("locale", "de");
     form.set("client_reference_id", session.user.id);
     form.set("customer_creation", "always");
     form.set("billing_address_collection", "required");
