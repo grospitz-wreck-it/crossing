@@ -10,7 +10,6 @@ export default function Header() {
 
   return (
     <header className="appHeader">
-      <div className="appHeaderSide appHeaderSideLeft" aria-hidden="true" />
       <Link className="appHeaderLogoLink" href="/app" aria-label="Meine Schranke – Startseite">
         <img
           src="/images/meineschranke_logo_trans.webp"
