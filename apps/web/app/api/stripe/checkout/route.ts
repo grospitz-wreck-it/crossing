@@ -1,11 +1,9 @@
-import { randomUUID } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { auth } from "../../../../auth";
 import { authDb } from "../../../lib/auth-db";
 import { sql } from "drizzle-orm";
 
 export const runtime = "nodejs";
-
-
 
 export async function POST(request: Request) {
   const session = await auth();
@@ -14,9 +12,20 @@ export async function POST(request: Request) {
   }
 
   const secret = process.env.STRIPE_SECRET_KEY;
+  const taxMode = (process.env.STRIPE_TAX_MODE || "manual").toLowerCase();
+  const automaticTaxEnabled = taxMode === "automatic";
   const taxRateId = process.env.STRIPE_TAX_RATE_ID;
-  if (!secret || !taxRateId) {
-    return Response.json({ error: "Der Bezahlvorgang ist noch nicht vollständig eingerichtet." }, { status: 503 });
+  const productTaxCode = process.env.STRIPE_PRODUCT_TAX_CODE;
+
+  if (
+    !secret ||
+    (automaticTaxEnabled && !productTaxCode) ||
+    (!automaticTaxEnabled && (!taxRateId || taxMode !== "manual"))
+  ) {
+    return Response.json(
+      { error: "Der Bezahlvorgang ist noch nicht vollständig eingerichtet." },
+      { status: 503 },
+    );
   }
 
   const configRows = await authDb.all<{
@@ -39,9 +48,20 @@ export async function POST(request: Request) {
   const amount = Number(config.premium_package_price_cents);
   const currency = String(config.premium_package_currency || "eur").toLowerCase();
   const durationDays = Number(config.premium_package_duration_days);
-  if (!Number.isInteger(slots) || slots < 1 || !Number.isInteger(amount) || amount < 1 ||
-      !Number.isInteger(durationDays) || durationDays < 1 || currency !== "eur") {
-    return Response.json({ error: "Die Paketkonfiguration ist ungültig." }, { status: 500 });
+
+  // This offer is deliberately fixed to ten extra crossing slots for 365 days.
+  // Price can be changed later without accidentally changing the purchased entitlement.
+  if (
+    slots !== 10 ||
+    durationDays !== 365 ||
+    !Number.isInteger(amount) ||
+    amount < 1 ||
+    currency !== "eur"
+  ) {
+    return Response.json(
+      { error: "Die Paketkonfiguration muss 10 zusätzliche Plätze für 365 Tage in EUR enthalten." },
+      { status: 500 },
+    );
   }
 
   const purchaseId = randomUUID();
@@ -56,16 +76,19 @@ export async function POST(request: Request) {
     const form = new URLSearchParams();
     form.set("mode", "payment");
     form.set("client_reference_id", session.user.id);
-    const appUrl = (process.env.NEXTAUTH_URL || process.env.AUTH_URL || new URL(request.url).origin).replace(/\/$/, "");
-    form.set("success_url", `${appUrl}/app/meine-schranken?payment=success`);
-    form.set("cancel_url", `${appUrl}/app/meine-schranken?payment=cancelled`);
+    form.set("customer_creation", "always");
+    form.set("invoice_creation[enabled]", "true");
+    form.set("invoice_creation[invoice_data][description]", "10 zusätzliche Schranken-Plätze für 365 Tage");
+    form.set("success_url", `${(process.env.NEXTAUTH_URL || process.env.AUTH_URL || new URL(request.url).origin).replace(/\/$/, "")}/app/meine-schranken?payment=success`);
+    form.set("cancel_url", `${(process.env.NEXTAUTH_URL || process.env.AUTH_URL || new URL(request.url).origin).replace(/\/$/, "")}/app/meine-schranken?payment=cancelled`);
     form.set("line_items[0][quantity]", "1");
     form.set("line_items[0][price_data][currency]", currency);
     form.set("line_items[0][price_data][unit_amount]", String(amount));
-    form.set("line_items[0][price_data][product_data][name]", `${slots} zusätzliche Schranken-Plätze`);
-    form.set("line_items[0][price_data][product_data][description]", `Zusätzliche persönliche Bahnübergänge für ${durationDays} Tage`);
-    form.append("line_items[0][tax_rates][0]", taxRateId);
-    form.set("invoice_creation[enabled]", "true");
+    form.set("line_items[0][price_data][product_data][name]", "10 zusätzliche Schranken-Plätze · 365 Tage");
+    form.set(
+      "line_items[0][price_data][product_data][description]",
+      "Einmaliger Kauf von 10 zusätzlichen persönlichen Bahnübergängen für 365 Tage. Keine automatische Verlängerung.",
+    );
     form.set("metadata[purchaseId]", purchaseId);
     form.set("metadata[userId]", session.user.id);
     form.set("metadata[packageSlots]", String(slots));
@@ -73,13 +96,29 @@ export async function POST(request: Request) {
     form.set("payment_intent_data[metadata][purchaseId]", purchaseId);
     form.set("payment_intent_data[metadata][userId]", session.user.id);
 
+    if (automaticTaxEnabled) {
+      // Stripe Tax is switched on only after Tax Settings and an active registration
+      // have been configured in the relevant Stripe environment.
+      form.set("automatic_tax[enabled]", "true");
+      form.set("billing_address_collection", "required");
+      form.set("line_items[0][price_data][tax_behavior]", "inclusive");
+      form.set("line_items[0][price_data][product_data][tax_code]", productTaxCode!);
+    } else {
+      // Temporary/manual fallback. Do not combine manual tax_rates with automatic_tax.
+      form.append("line_items[0][tax_rates][0]", taxRateId!);
+    }
+
     if (session.user.email) form.set("customer_email", session.user.email);
+
+    const suffix = Array.from(randomBytes(8), (byte) => String.fromCharCode(97 + (byte % 26))).join("");
+    form.set("integration_identifier", `meineschranke-${suffix}`);
 
     const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: {
         Authorization: `Basic ${Buffer.from(`${secret}:`).toString("base64")}`,
         "Content-Type": "application/x-www-form-urlencoded",
+        "Stripe-Version": "2026-11-18.endive",
         "Idempotency-Key": `crossings-purchase-${purchaseId}`,
       },
       body: form,
