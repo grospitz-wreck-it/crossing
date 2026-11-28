@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { signOut } from "next-auth/react";
 import { useCrossings } from "../../context/CrossingsContext";
 import styles from "./page.module.css";
@@ -27,6 +27,7 @@ export default function MeineSchrankenPage() {
   const [notice, setNotice] = useState("");
   const [busyId, setBusyId] = useState("");
   const [modalSlot, setModalSlot] = useState<number | null>(null);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
 
   const savedIds = useMemo(() => new Set(saved.map((item) => item.id)), [saved]);
   const results = useMemo(() => {
@@ -107,6 +108,32 @@ export default function MeineSchrankenPage() {
     }
   }
 
+  useEffect(() => {
+    const paymentState = new URLSearchParams(window.location.search).get("payment");
+    if (paymentState === "success") {
+      setNotice("Danke! Deine Zahlung wird bestätigt. Die zusätzlichen Plätze erscheinen, sobald Stripe die Zahlung verbucht hat. Lade die Seite anschließend neu.");
+    } else if (paymentState === "cancelled") {
+      setNotice("Der Bezahlvorgang wurde abgebrochen. Es wurde nichts berechnet.");
+    }
+  }, []);
+
+  async function buyAdditionalSlots() {
+    if (checkoutBusy) return;
+    setCheckoutBusy(true);
+    setNotice("");
+    try {
+      const response = await fetch("/api/stripe/checkout", { method: "POST" });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.url) {
+        throw new Error(result?.error || "Der Bezahlvorgang konnte nicht gestartet werden.");
+      }
+      window.location.assign(result.url);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Der Bezahlvorgang konnte nicht gestartet werden.");
+      setCheckoutBusy(false);
+    }
+  }
+
   const slotCount = Math.max(maxCrossings, saved.length);
 
   return (
@@ -164,9 +191,15 @@ export default function MeineSchrankenPage() {
             <h2>Mehr Schranken im Blick</h2>
             <p>+{premiumPackage.additionalCrossings} zusätzliche Plätze ·{" "}
               {(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto · {premiumPackage.durationDays} Tage Laufzeit</p>
-            <p>{premiumPackage.enabled ? "Das Paket ist verfügbar." : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
+            <p>{premiumPackage.enabled ? "Einmal zahlen, 365 Tage nutzen. Keine automatische Verlängerung." : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
+            {premiumPackage.enabled && (
+              <button className={styles.checkoutButton} onClick={buyAdditionalSlots} disabled={checkoutBusy}>
+                {checkoutBusy ? "Weiter zu Stripe …" : "10 Plätze für 5,00 € kaufen"}
+              </button>
+            )}
+            {premiumPackage.enabled && <small className={styles.checkoutHint}>Sichere Zahlung über Stripe · Umsatzsteuer inklusive</small>}
           </div>
-          <span className={styles.pill}>{premiumPackage.enabled ? "Verfügbar" : "Demnächst"}</span>
+          <span className={styles.pill}>{premiumPackage.enabled ? "Einmalkauf" : "Demnächst"}</span>
         </section>
 
         <ContentPreferences />
