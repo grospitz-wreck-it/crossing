@@ -41,8 +41,13 @@ export default function ContentPreferences() {
   const [draftFuel, setDraftFuel] = useState<FuelType>("e5");
   const [dragging, setDragging] = useState<ContentKind | null>(null);
   const [notice, setNotice] = useState("");
+  const [scoutEnabled, setScoutEnabled] = useState(false);
   const orderRef = useRef<ContentKind[]>([...DEFAULT_CONTENT_ORDER]);
   const dragRef = useRef<{ pointerId: number; kind: ContentKind; lastTarget: ContentKind } | null>(null);
+
+  useEffect(() => {
+    try { setScoutEnabled(window.localStorage.getItem("crossing-app:scout-enabled") === "true"); } catch { /* storage may be unavailable */ }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -258,6 +263,27 @@ export default function ContentPreferences() {
           {prefs.contentOrder.map(renderRow)}
         </div>
       )}
+      <div className={styles.scoutPreference}>
+        <div className={styles.scoutCopy}>
+          <span className={styles.scoutIcon}><AppIcon name="activity" size={20} /></span>
+          <span>
+            <strong>Schranken-Scout</strong>
+            <small>Hilf mit, unsere Prognosen durch eigene Beobachtungen zu verbessern.</small>
+          </span>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={scoutEnabled}
+          className={scoutEnabled ? styles.switchOn : styles.switch}
+          onClick={() => {
+            const next = !scoutEnabled;
+            setScoutEnabled(next);
+            try { window.localStorage.setItem("crossing-app:scout-enabled", String(next)); } catch { /* storage may be unavailable */ }
+            window.dispatchEvent(new Event("crossing-scout-preference"));
+          }}
+        ><span /></button>
+      </div>
       {notice && <p className={styles.notice} role="status">{notice}</p>}
     </section>
   );
