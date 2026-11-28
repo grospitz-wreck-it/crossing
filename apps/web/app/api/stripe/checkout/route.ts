@@ -22,18 +22,30 @@ export async function POST(request: Request) {
   }
 
   const secret = process.env.STRIPE_SECRET_KEY;
-  const taxMode = (process.env.STRIPE_TAX_MODE || "manual").toLowerCase();
-  const automaticTaxEnabled = taxMode === "automatic";
   const taxRateId = process.env.STRIPE_TAX_RATE_ID;
-  const productTaxCode = process.env.STRIPE_PRODUCT_TAX_CODE;
-
-  if (
-    !secret ||
-    (automaticTaxEnabled && !productTaxCode) ||
-    (!automaticTaxEnabled && (!taxRateId || taxMode !== "manual"))
-  ) {
+  if (!secret || !taxRateId) {
     return Response.json(
       { error: "Der Bezahlvorgang ist noch nicht vollständig eingerichtet." },
+      { status: 503 },
+    );
+  }
+
+  // Launch uses one fixed, inclusive 19% German VAT rate. Stripe Tax remains off.
+  const taxRateResponse = await fetch("https://api.stripe.com/v1/tax_rates/" + encodeURIComponent(taxRateId), {
+    headers: { Authorization: "Basic " + Buffer.from(secret + ":").toString("base64") },
+    cache: "no-store",
+  });
+  const taxRate = await taxRateResponse.json();
+  if (
+    !taxRateResponse.ok ||
+    taxRate?.active !== true ||
+    taxRate?.country !== "DE" ||
+    taxRate?.inclusive !== true ||
+    Number(taxRate?.percentage) !== 19
+  ) {
+    console.error("[STRIPE] Tax rate must be active, German, inclusive, and 19 percent.");
+    return Response.json(
+      { error: "Die deutsche Umsatzsteuerregel ist noch nicht korrekt eingerichtet." },
       { status: 503 },
     );
   }
@@ -108,16 +120,7 @@ export async function POST(request: Request) {
     form.set("payment_intent_data[metadata][purchaseId]", purchaseId);
     form.set("payment_intent_data[metadata][userId]", session.user.id);
 
-    if (automaticTaxEnabled) {
-      // Stripe Tax is switched on only after Tax Settings and an active registration
-      // have been configured in the relevant Stripe environment.
-      form.set("automatic_tax[enabled]", "true");
-      form.set("line_items[0][price_data][tax_behavior]", "inclusive");
-      form.set("line_items[0][price_data][product_data][tax_code]", productTaxCode!);
-    } else {
-      // Temporary/manual fallback. Do not combine manual tax_rates with automatic_tax.
-      form.append("line_items[0][tax_rates][0]", taxRateId!);
-    }
+    form.append("line_items[0][tax_rates][0]", taxRateId);
 
     if (session.user.email) form.set("customer_email", session.user.email);
 
