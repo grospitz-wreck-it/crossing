@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import styles from "./ContentPreferences.module.css";
+import AppIcon, { type AppIconName } from "./AppIcon";
 
 type FuelType = "e5" | "e10" | "diesel";
 type ContentKind = "news" | "fuel" | "jokes";
@@ -22,7 +23,7 @@ const initial: Preferences = {
 };
 const fuelLabels: Record<FuelType, string> = { e5: "Super E5", e10: "Super E10", diesel: "Diesel" };
 const kindLabels: Record<ContentKind, string> = { news: "News", fuel: "Spritpreise", jokes: "Witze" };
-const kindIcons: Record<ContentKind, string> = { news: "📰", fuel: "⛽", jokes: "😄" };
+const kindIcons: Record<ContentKind, AppIconName> = { news: "newspaper", fuel: "fuel", jokes: "laugh" };
 
 function normalizeContentOrder(value: unknown): ContentKind[] {
   const allowed: ContentKind[] = ["news", "fuel", "jokes"];
@@ -189,7 +190,7 @@ export default function ContentPreferences() {
               <circle cx="12" cy="16" r="1.4" fill="currentColor" />
             </svg>
           </button>
-          <span className={styles.icon}>{kindIcons[kind]}</span>
+          <span className={styles.icon}><AppIcon name={kindIcons[kind]} size={20} strokeWidth={1.8} /></span>
           <span className={styles.copy}>
             <strong>{kindLabels[kind]}</strong>
             {kind === "fuel" && prefs.fuelEnabled && prefs.fuelType && <small>{fuelLabels[prefs.fuelType]}</small>}
