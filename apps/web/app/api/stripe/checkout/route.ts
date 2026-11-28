@@ -100,7 +100,6 @@ export async function POST(request: Request) {
       // Stripe Tax is switched on only after Tax Settings and an active registration
       // have been configured in the relevant Stripe environment.
       form.set("automatic_tax[enabled]", "true");
-      form.set("billing_address_collection", "required");
       form.set("line_items[0][price_data][tax_behavior]", "inclusive");
       form.set("line_items[0][price_data][product_data][tax_code]", productTaxCode!);
     } else {
