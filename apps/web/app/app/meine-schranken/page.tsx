@@ -28,6 +28,7 @@ export default function MeineSchrankenPage() {
   const [busyId, setBusyId] = useState("");
   const [modalSlot, setModalSlot] = useState<number | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [billingCountry, setBillingCountry] = useState("");
 
   const savedIds = useMemo(() => new Set(saved.map((item) => item.id)), [saved]);
   const results = useMemo(() => {
@@ -119,10 +120,18 @@ export default function MeineSchrankenPage() {
 
   async function buyAdditionalSlots() {
     if (checkoutBusy) return;
+    if (billingCountry !== "DE") {
+      setNotice("Der Kauf ist zum Start nur mit einer Rechnungsadresse in Deutschland möglich.");
+      return;
+    }
     setCheckoutBusy(true);
     setNotice("");
     try {
-      const response = await fetch("/api/stripe/checkout", { method: "POST" });
+      const response = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ billingCountry }),
+      });
       const result = await response.json().catch(() => null);
       if (!response.ok || !result?.url) {
         throw new Error(result?.error || "Der Bezahlvorgang konnte nicht gestartet werden.");
@@ -193,11 +202,32 @@ export default function MeineSchrankenPage() {
               {(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto · {premiumPackage.durationDays} Tage Laufzeit</p>
             <p>{premiumPackage.enabled ? "Einmal zahlen, 365 Tage nutzen. Keine automatische Verlängerung." : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
             {premiumPackage.enabled && (
-              <button className={styles.checkoutButton} onClick={buyAdditionalSlots} disabled={checkoutBusy}>
+              <div className={styles.checkoutCountry}>
+                <label htmlFor="billing-country">Rechnungsland</label>
+                <select
+                  id="billing-country"
+                  value={billingCountry}
+                  onChange={(event) => {
+                    setBillingCountry(event.target.value);
+                    setNotice("");
+                  }}
+                  disabled={checkoutBusy}
+                >
+                  <option value="">Bitte auswählen …</option>
+                  <option value="DE">Deutschland</option>
+                  <option value="OTHER">Anderes Land</option>
+                </select>
+                {billingCountry === "OTHER" && (
+                  <small>Der Kauf ist zum Start nur mit deutscher Rechnungsadresse möglich.</small>
+                )}
+              </div>
+            )}
+            {premiumPackage.enabled && (
+              <button className={styles.checkoutButton} onClick={buyAdditionalSlots} disabled={checkoutBusy || billingCountry !== "DE"}>
                 {checkoutBusy ? "Weiter zu Stripe …" : "10 Plätze für 5,00 € kaufen"}
               </button>
             )}
-            {premiumPackage.enabled && <small className={styles.checkoutHint}>Sichere Zahlung über Stripe · Umsatzsteuer inklusive</small>}
+            {premiumPackage.enabled && <small className={styles.checkoutHint}>Sichere Zahlung über Stripe · 5,00 € inklusive 19 % deutscher Umsatzsteuer · nur Rechnungsadressen in Deutschland</small>}
           </div>
           <span className={styles.pill}>{premiumPackage.enabled ? "Einmalkauf" : "Demnächst"}</span>
         </section>
