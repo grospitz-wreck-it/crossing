@@ -1,6 +1,6 @@
 /**
- * Public subscription limits and the launch state.
- * Keep checkout disabled until the available crossing catalogue is ready.
+ * Public subscription limits. The database flag subscription_config.premium_enabled
+ * controls whether the package is actually offered to users.
  */
 export const FREE_CROSSING_LIMIT = 3;
 
