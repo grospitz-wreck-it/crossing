@@ -3,7 +3,7 @@ import {
   Activity, AlertTriangle, ArrowDown, ArrowLeft, ArrowRight, ArrowUp,
   ArrowUpDown, ArrowUpRight, Bell, BookOpen, CalendarDays, Check, ChevronDown,
   ChevronLeft, ChevronRight, ChevronUp, Clock3, Frown, Fuel, Gauge, Handshake, Home,
-  Info, Lightbulb, Map, MapPin, Meh, Menu, Megaphone, MessageCircle, MoreHorizontal,
+  Info, Lightbulb, Laugh, Map, MapPin, Meh, Menu, Megaphone, MessageCircle, MoreHorizontal,
   Newspaper,
   Navigation, Pause, Pencil, Play, Plus, RefreshCw, Route, Search, Settings,
   ShieldCheck, Smile, Sparkles, ThumbsDown, ThumbsUp, TrainFront, Trash2, Users, X,
@@ -23,7 +23,7 @@ const icons = {
   "chevron-up": ChevronUp, "chevron-left": ChevronLeft,
   "chevron-right": ChevronRight, alert: AlertTriangle, info: Info,
   "shield-check": ShieldCheck, "message-circle": MessageCircle,
-  "book-open": BookOpen, "lightbulb": Lightbulb, "newspaper": Newspaper,
+  "book-open": BookOpen, "lightbulb": Lightbulb, "laugh": Laugh, "newspaper": Newspaper,
   "handshake": Handshake, "smile": Smile, "meh": Meh, "frown": Frown,
   "thumbs-up": ThumbsUp, "thumbs-down": ThumbsDown, "sparkles": Sparkles,
 } satisfies Record<string, LucideIcon>;
