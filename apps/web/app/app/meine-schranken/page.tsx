@@ -228,7 +228,7 @@ export default function MeineSchrankenPage() {
             )}
             {premiumPackage.enabled && (
               <button className={styles.checkoutButton} onClick={buyAdditionalSlots} disabled={checkoutBusy || billingCountry !== "DE"}>
-                {checkoutBusy ? "Weiter zu Stripe …" : "{purchasedSlots > 0 ? "Weitere 10 Plätze für 5,00 € kaufen" : "10 Plätze für 5,00 € kaufen"}"}
+                {checkoutBusy ? "Weiter zu Stripe …" : purchasedSlots > 0 ? "Weitere 10 Plätze für 5,00 € kaufen" : "10 Plätze für 5,00 € kaufen"}
               </button>
             )}
             {premiumPackage.enabled && <small className={styles.checkoutHint}>Sichere Zahlung über Stripe · 5,00 € inklusive 19 % deutscher Umsatzsteuer · nur Rechnungsadressen in Deutschland</small>}
