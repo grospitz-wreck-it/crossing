@@ -36,16 +36,41 @@ export async function POST(request: Request) {
     cache: "no-store",
   });
   const taxRate = await taxRateResponse.json();
-  if (
-    !taxRateResponse.ok ||
-    taxRate?.active !== true ||
-    taxRate?.country !== "DE" ||
-    taxRate?.inclusive !== true ||
-    Number(taxRate?.percentage) !== 19
-  ) {
-    console.error("[STRIPE] Tax rate must be active, German, inclusive, and 19 percent.");
+  const taxRateCountry = String(taxRate?.country || "").trim().toUpperCase();
+  const taxRateJurisdiction = String(taxRate?.jurisdiction || "").trim().toUpperCase();
+  // Stripe's legacy Tax Rate object can represent a German manual rate with
+  // country=null and jurisdiction="DE". Accept either explicit country or
+  // German jurisdiction, while still requiring the live, active, inclusive
+  // 19% rate. Checkout and the webhook separately enforce a DE customer address.
+  const isGermanTaxRate =
+    taxRateCountry === "DE" ||
+    ["DE", "GERMANY", "DEUTSCHLAND"].includes(taxRateJurisdiction);
+  const isValidTaxRate =
+    taxRateResponse.ok &&
+    taxRate?.livemode === true &&
+    taxRate?.active === true &&
+    isGermanTaxRate &&
+    taxRate?.inclusive === true &&
+    Number(taxRate?.percentage) === 19;
+
+  if (!isValidTaxRate) {
+    console.error("[STRIPE] Manual tax rate validation failed:", {
+      httpStatus: taxRateResponse.status,
+      liveMode: taxRate?.livemode ?? null,
+      active: taxRate?.active ?? null,
+      country: taxRateCountry || null,
+      jurisdiction: taxRateJurisdiction || null,
+      inclusive: taxRate?.inclusive ?? null,
+      percentage: taxRate?.percentage ?? null,
+      stripeErrorType: taxRate?.error?.type ?? null,
+      stripeErrorCode: taxRate?.error?.code ?? null,
+    });
     return Response.json(
-      { error: "Die deutsche Umsatzsteuerregel ist noch nicht korrekt eingerichtet." },
+      {
+        error: taxRateResponse.ok
+          ? "Die hinterlegte Umsatzsteuerregel muss aktiv, für Deutschland, inklusive und genau 19 % sein."
+          : "Die hinterlegte Umsatzsteuerregel wurde im Stripe-Live-Konto nicht gefunden. Bitte prüfe die Tax-Rate-ID.",
+      },
       { status: 503 },
     );
   }
