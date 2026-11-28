@@ -64,7 +64,8 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
     priceCents: PREMIUM_CROSSING_PACKAGE.priceCents,
     currency: PREMIUM_CROSSING_PACKAGE.currency,
     durationDays: PREMIUM_CROSSING_PACKAGE.durationDays,
-    enabled: PREMIUM_CROSSING_PACKAGE.enabled,
+    // Do not expose Checkout until the database-controlled flag has loaded.
+    enabled: false,
   });
   const [hydrated, setHydrated] = useState(false);
 
