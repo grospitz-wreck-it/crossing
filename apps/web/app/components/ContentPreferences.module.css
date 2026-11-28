@@ -49,3 +49,7 @@
   .dragHandle{flex-basis:34px;width:34px;height:48px;margin-left:-4px}
   .rowDragging{background:#eef4f8}
 }
+
+
+.scoutPreference{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:18px;padding:15px 13px;border:1px solid #e6edf2;border-radius:15px;background:#f8fafc}.scoutCopy{display:flex;align-items:center;gap:11px;min-width:0}.scoutIcon{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;background:#eaf1f7;color:#315f83}.scoutCopy>span:last-child{display:flex;flex-direction:column;gap:4px;min-width:0}.scoutCopy strong{color:#1b3852;font-size:14px;font-weight:850}.scoutCopy small{color:#71869a;font-size:11px;line-height:1.45}
+@media(max-width:680px){.scoutPreference{padding:13px 11px}.scoutCopy small{font-size:11px}}
