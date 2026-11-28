@@ -739,3 +739,79 @@
   .capacityTrack span,.offerCta{transition:none}
   .offerCta:hover{transform:none}
 }
+
+
+/* Compact premium sales card — no country dropdown or form controls */
+.premiumCompact{
+  position:relative;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) 250px;
+  align-items:center;
+  gap:24px;
+  overflow:hidden;
+  isolation:isolate;
+  margin-top:20px;
+  padding:21px 23px;
+  border:1px solid #1b3b57;
+  border-radius:19px;
+  background:
+    radial-gradient(ellipse at 12% 0%,rgba(89,143,184,.24),transparent 50%),
+    linear-gradient(120deg,#153650 0%,#1b4261 56%,#102d46 100%);
+  color:#fff;
+  box-shadow:0 13px 30px rgba(18,48,74,.13);
+}
+.premiumCopy{min-width:0}
+.premiumCopy .offerEyebrow{font-size:9px}
+.premiumCopy h2{margin:9px 0 6px;color:#fff;font-size:25px;font-weight:900;line-height:1.08;letter-spacing:-.7px}
+.premiumCopy h2 span{color:#e8c98f}
+.premiumCopy .offerLead{max-width:550px;margin:0;color:#c4d3df;font-size:12px;line-height:1.5}
+.premiumFacts{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}
+.premiumFacts span{display:inline-flex;align-items:center;gap:4px;padding:6px 9px;border:1px solid rgba(255,255,255,.15);border-radius:8px;background:rgba(255,255,255,.055);color:#c5d4df;font-size:10px;font-weight:650}
+.premiumFacts strong{color:#f0d29a;font-size:11px;font-weight:900}
+.premiumActive{display:flex;align-items:flex-start;gap:7px;margin-top:11px;color:#d9eadf;font-size:10px;line-height:1.45}
+.premiumActiveDot{flex:0 0 7px;width:7px;height:7px;margin-top:3px;border-radius:50%;background:#82d4a1;box-shadow:0 0 0 3px rgba(130,212,161,.13)}
+.premiumAction{
+  display:flex;
+  flex-direction:column;
+  align-items:stretch;
+  gap:9px;
+  min-width:0;
+  padding:15px;
+  border:1px solid rgba(255,255,255,.16);
+  border-radius:14px;
+  background:rgba(255,255,255,.085);
+}
+.premiumPriceBlock{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.premiumPriceBlock strong{color:#fff;font-size:31px;font-weight:950;line-height:1;letter-spacing:-1px;font-variant-numeric:tabular-nums}
+.premiumPriceBlock span{color:#b8c9d6;font-size:9px;text-align:right}
+.premiumCta,.premiumCtaDisabled{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  width:100%;
+  min-height:43px;
+  padding:0 13px;
+  border:0;
+  border-radius:10px;
+  background:linear-gradient(100deg,#e5bd7b,#f1d49d);
+  color:#18334b;
+  font:inherit;
+  font-size:11px;
+  font-weight:900;
+  text-align:left;
+  box-shadow:0 6px 15px rgba(0,0,0,.14);
+}
+.premiumCta{cursor:pointer;transition:transform .16s ease,filter .16s ease,box-shadow .16s ease}
+.premiumCta:hover{transform:translateY(-1px);filter:brightness(1.05);box-shadow:0 9px 19px rgba(0,0,0,.18)}
+.premiumCta:disabled,.premiumCtaDisabled{opacity:.68;cursor:not-allowed;box-shadow:none}
+.premiumCta>span{font-size:17px}
+.premiumAction>small{color:#b5c7d5;font-size:9px;line-height:1.45}
+@media(max-width:700px){
+  .premiumCompact{grid-template-columns:1fr;gap:14px;margin-top:15px;padding:18px}
+  .premiumCopy h2{font-size:23px}
+  .premiumAction{padding:13px}
+  .premiumPriceBlock{justify-content:flex-start;gap:10px}
+  .premiumPriceBlock strong{font-size:29px}
+}
+@media(prefers-reduced-motion:reduce){.premiumCta{transition:none}.premiumCta:hover{transform:none}}
