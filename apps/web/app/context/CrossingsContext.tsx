@@ -17,6 +17,9 @@ type CrossingsContextValue = {
   favoriteId: string | null;
   maxCrossings: number;
   purchasedSlots: number;
+  accountTier: "free" | "premium";
+  nextExpirationAt: string | null;
+  latestExpirationAt: string | null;
   hydrated: boolean;
   premiumPackage: {
     additionalCrossings: number;
@@ -59,6 +62,9 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
   const [favoriteId, setFavoriteId] = useState<string | null>(null);
   const [maxCrossings, setMaxCrossings] = useState(FREE_CROSSING_LIMIT);
   const [purchasedSlots, setPurchasedSlots] = useState(0);
+  const [accountTier, setAccountTier] = useState<"free" | "premium">("free");
+  const [nextExpirationAt, setNextExpirationAt] = useState<string | null>(null);
+  const [latestExpirationAt, setLatestExpirationAt] = useState<string | null>(null);
   const [premiumPackage, setPremiumPackage] = useState({
     additionalCrossings: PREMIUM_CROSSING_PACKAGE.additionalCrossings,
     priceCents: PREMIUM_CROSSING_PACKAGE.priceCents,
@@ -104,6 +110,11 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         if (Number.isFinite(Number(userJson?.purchasedSlots))) {
           setPurchasedSlots(Math.max(0, Number(userJson.purchasedSlots)));
         }
+        if (userJson?.accountTier === "free" || userJson?.accountTier === "premium") {
+          setAccountTier(userJson.accountTier);
+        }
+        setNextExpirationAt(typeof userJson?.nextExpirationAt === "string" ? userJson.nextExpirationAt : null);
+        setLatestExpirationAt(typeof userJson?.latestExpirationAt === "string" ? userJson.latestExpirationAt : null);
         if (userJson?.premiumPackage) setPremiumPackage(userJson.premiumPackage);
 
         const apiFavoriteId = typeof userJson?.favoriteId === "string"
@@ -274,6 +285,9 @@ export function CrossingsProvider({ children }: { children: React.ReactNode }) {
         favoriteId,
         maxCrossings,
         purchasedSlots,
+        accountTier,
+        nextExpirationAt,
+        latestExpirationAt,
         premiumPackage,
         hydrated,
         setActiveId: setActiveIdState,
