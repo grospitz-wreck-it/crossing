@@ -19,8 +19,34 @@ function distanceLabel(km?: number) {
   return km < 10 ? km.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " km entfernt" : Math.round(km) + " km entfernt";
 }
 
+function formatEntitlementDate(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value.replace(" ", "T") + (value.endsWith("Z") ? "" : "Z"));
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
 export default function MeineSchrankenPage() {
-  const { saved, available, activeId, favoriteId, maxCrossings, purchasedSlots, premiumPackage, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
+  const {
+    saved,
+    available,
+    activeId,
+    favoriteId,
+    maxCrossings,
+    purchasedSlots,
+    accountTier,
+    nextExpirationAt,
+    latestExpirationAt,
+    premiumPackage,
+    setActiveId,
+    setFavorite,
+    addCrossing,
+    removeCrossing,
+  } = useCrossings();
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "loading" | "ready" | "denied" | "error">("idle");
@@ -196,6 +222,33 @@ export default function MeineSchrankenPage() {
 
         <section className={styles.profilePanel}>
           <div>
+            <div className={styles.entitlementSummary}>
+              <div className={styles.entitlementIdentity}>
+                <span className={`${styles.entitlementBadge} ${accountTier === "premium" ? styles.entitlementBadgePremium : styles.entitlementBadgeFree}`}>
+                  <span className={styles.entitlementDot} />
+                  {accountTier === "premium" ? "PREMIUM-KONTO" : "FREE-KONTO"}
+                </span>
+                <strong>{accountTier === "premium" ? "Dein Premium-Zugang ist aktiv" : "Dein kostenloser Zugang"}</strong>
+                <span>{purchasedSlots > 0
+                  ? `${purchasedSlots} zusätzliche Plätze sind aktuell freigeschaltet.`
+                  : `Du nutzt die ${maxCrossings} kostenlosen Plätze.`}</span>
+              </div>
+              <div className={styles.entitlementCapacity}>
+                <strong>{maxCrossings}</strong>
+                <span>Plätze insgesamt</span>
+              </div>
+            </div>
+            {nextExpirationAt && (
+              <div className={styles.entitlementExpiry}>
+                <span>⌛</span>
+                <div>
+                  <strong>Nächster Ablauf: {formatEntitlementDate(nextExpirationAt) ?? "Datum wird geladen"}</strong>
+                  {latestExpirationAt && latestExpirationAt !== nextExpirationAt && (
+                    <small>Dein zuletzt erworbenes Paket läuft am {formatEntitlementDate(latestExpirationAt) ?? "späteren Datum"} ab.</small>
+                  )}
+                </div>
+              </div>
+            )}
             <span className={styles.overline}>MEHR PLÄTZE</span>
             <h2>Mehr Schranken im Blick</h2>
             <p>+{premiumPackage.additionalCrossings} zusätzliche Plätze ·{" "}
