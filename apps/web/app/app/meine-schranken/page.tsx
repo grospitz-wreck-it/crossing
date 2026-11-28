@@ -296,8 +296,8 @@ export default function MeineSchrankenPage() {
                 <span>Tage Laufzeit</span>
               </div>
               <div>
-                <strong>0 €</strong>
-                <span>Folgekosten / Abo</span>
+                <strong>1×</strong>
+                <span>zahlen · kein Abo</span>
               </div>
             </div>
 
