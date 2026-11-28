@@ -461,8 +461,10 @@ const wakeLockRef =
   const initialCrossings = saved.length
     ? saved.length <= 3
       ? saved
-      : [saved[activeCrossingIndex], saved[activeCrossingIndex + 1], saved[activeCrossingIndex - 1]]
-          .filter((crossing): crossing is (typeof saved)[number] => Boolean(crossing))
+      : [saved[0], saved[activeCrossingIndex], saved[activeCrossingIndex + 1], saved[activeCrossingIndex - 1]]
+          .filter((crossing, index, list): crossing is (typeof saved)[number] =>
+            Boolean(crossing) && list.findIndex((item) => item?.id === crossing.id) === index
+          )
     : activeId
       ? [{ id: activeId, name: "Deine Schranke" }]
       : [];
@@ -684,7 +686,7 @@ useEffect(() => {
 if (!hasCompletedInitialBootstrap && (!data || bootstrapLoading || !loadingAnimationFinished)) {
   return (
     <LoadingScreen
-      message="Deine aktive Schranke wird vorbereitet"
+      message="Dein Schrankenprofil wird geladen"
       detail={activeId ? bootstrapDetail : undefined}
       progress={bootstrapProgress}
       onComplete={() => setLoadingAnimationFinished(true)}
