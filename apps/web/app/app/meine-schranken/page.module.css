@@ -512,3 +512,12 @@
 .checkoutButton:disabled{opacity:.6;cursor:wait;transform:none}
 .checkoutHint{display:block;margin-top:8px;color:#718397;font-size:11px;line-height:1.45}
 @media(max-width:680px){.checkoutButton{width:100%;min-height:50px;font-size:14px}.checkoutHint{font-size:11px}}
+
+
+.checkoutCountry{display:flex;flex-direction:column;gap:7px;margin:14px 0 3px;max-width:360px}
+.checkoutCountry label{color:#526b82;font-size:12px;font-weight:750}
+.checkoutCountry select{width:100%;min-height:46px;padding:0 13px;border:1px solid #dbe3eb;border-radius:12px;background:#fff;color:#17334d;font:inherit;font-size:14px;font-weight:650;outline:none}
+.checkoutCountry select:focus{border-color:#668baa;box-shadow:0 0 0 3px rgba(102,139,170,.14)}
+.checkoutCountry select:disabled{opacity:.65}
+.checkoutCountry small{color:#a34242;font-size:12px;line-height:1.45}
+@media(max-width:680px){.checkoutCountry{max-width:none}.checkoutCountry select{min-height:48px;font-size:16px}}
