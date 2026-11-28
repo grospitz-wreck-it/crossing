@@ -9,5 +9,5 @@ export const PREMIUM_CROSSING_PACKAGE = {
   priceCents: 500,
   currency: "eur",
   durationDays: 365,
-  enabled: false,
+  enabled: true,
 } as const;
