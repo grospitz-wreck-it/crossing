@@ -202,6 +202,7 @@ const [isSwitchingCrossing, setIsSwitchingCrossing] = useState(false);
   const [unexpectedTrainSaved, setUnexpectedTrainSaved] = useState(false);
   const [savingMeasurement, setSavingMeasurement] = useState(false);
   const [savingUnexpectedTrain, setSavingUnexpectedTrain] = useState(false);
+  const [scoutEnabled, setScoutEnabled] = useState(false);
 
   const refreshTimeout =
     useRef<ReturnType<typeof setTimeout> | null>(
@@ -215,6 +216,20 @@ const predictionId =
   activeId && data?.phase?.start && data?.phase?.end
     ? makePredictionId(activeId, data.phase)
     : null;
+
+useEffect(() => {
+  const readScoutPreference = () => {
+    try { setScoutEnabled(window.localStorage.getItem("crossing-app:scout-enabled") === "true"); }
+    catch { setScoutEnabled(false); }
+  };
+  readScoutPreference();
+  window.addEventListener("storage", readScoutPreference);
+  window.addEventListener("crossing-scout-preference", readScoutPreference);
+  return () => {
+    window.removeEventListener("storage", readScoutPreference);
+    window.removeEventListener("crossing-scout-preference", readScoutPreference);
+  };
+}, []);
 
 useEffect(() => {
   setPendingEvent(null);
@@ -1028,7 +1043,10 @@ return (
   </div>
 )}
 
-{pendingEvent ? (
+{scoutEnabled && (
+  <section className="scoutControls" aria-label="Schranken-Scout">
+    <h2>Schranken-Scout</h2>
+    {pendingEvent ? (
   <div className="measurementButtons">
     <div className="precisionPrompt">
       {pendingEvent === "close"
@@ -1110,6 +1128,9 @@ return (
         SCHRANKE HOCH
       </button>
     </div>
+    )}
+    <p>Hilf uns, die Prognosen von meineSchranke zu verbessern.</p>
+  </section>
 )}
  
   </main>
