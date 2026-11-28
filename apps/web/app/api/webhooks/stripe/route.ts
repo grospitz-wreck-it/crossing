@@ -57,27 +57,67 @@ export async function POST(request: Request) {
 
       const isPaidEvent =
         event.type === "checkout.session.async_payment_succeeded" ||
-        (event.type === "checkout.session.completed" &&
-          (checkoutSession?.payment_status === "paid" || checkoutSession?.payment_status === "no_payment_required"));
+        (event.type === "checkout.session.completed" && checkoutSession?.payment_status === "paid");
 
       const isFailedEvent =
         event.type === "checkout.session.async_payment_failed" ||
         event.type === "checkout.session.expired";
 
-      if (!checkoutSessionId || !checkoutSession?.metadata?.purchaseId || !checkoutSession?.metadata?.userId) return;
+      if (!checkoutSessionId || (!isPaidEvent && !isFailedEvent)) return;
+      if (
+        checkoutSession?.mode !== "payment" ||
+        !checkoutSession?.metadata?.purchaseId ||
+        !checkoutSession?.metadata?.userId
+      ) {
+        throw new Error("Stripe Checkout event does not match the one-time slot purchase flow.");
+      }
 
       const purchaseId = String(checkoutSession.metadata.purchaseId);
       const userId = String(checkoutSession.metadata.userId);
+      const metadataSlots = Number(checkoutSession.metadata.packageSlots);
+      const durationDays = Number(checkoutSession.metadata.durationDays);
       const paymentIntentId = typeof checkoutSession.payment_intent === "string"
         ? checkoutSession.payment_intent
         : checkoutSession.payment_intent?.id || null;
 
+      const purchaseRows = await tx.all<{
+        package_slots: number;
+        amount_cents: number;
+        currency: string;
+        status: string;
+      }>(sql`
+        SELECT package_slots, amount_cents, currency, status
+        FROM user_crossing_purchases
+        WHERE id = ${purchaseId}
+          AND user_id = ${userId}
+          AND stripe_checkout_session_id = ${checkoutSessionId}
+        LIMIT 1
+      `);
+      const purchase = purchaseRows[0];
+      if (!purchase) {
+        throw new Error("Matching local purchase record not found for Stripe Checkout session.");
+      }
+
+      if (
+        metadataSlots !== 10 ||
+        metadataSlots !== Number(purchase.package_slots) ||
+        durationDays !== 365 ||
+        String(checkoutSession.client_reference_id || "") !== userId
+      ) {
+        throw new Error("Stripe Checkout metadata does not match the 10-slot / 365-day offer.");
+      }
+
       if (isPaidEvent) {
-        const configRows = await tx.all<{ premium_package_duration_days: number }>(sql`
-          SELECT premium_package_duration_days
-          FROM subscription_config WHERE id = 1 LIMIT 1
-        `);
-        const durationDays = Math.max(1, Math.floor(Number(configRows[0]?.premium_package_duration_days || 365)));
+        const amountSubtotal = Number(checkoutSession.amount_subtotal);
+        const eventCurrency = String(checkoutSession.currency || "").toUpperCase();
+        if (
+          checkoutSession.payment_status !== "paid" ||
+          amountSubtotal !== Number(purchase.amount_cents) ||
+          eventCurrency !== String(purchase.currency).toUpperCase()
+        ) {
+          throw new Error("Paid Checkout Session amount or currency does not match the local purchase.");
+        }
+
         await tx.run(sql`
           UPDATE user_crossing_purchases
           SET status = 'paid',
