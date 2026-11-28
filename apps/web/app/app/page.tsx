@@ -146,6 +146,7 @@ function makePredictionId(crossingId: string, phase: any) {
 
 export default function Home() {
 const { activeId, saved, hydrated } = useCrossings();
+const activeCrossing = saved.find((crossing) => crossing.id === activeId) ?? saved[0];
 
 const [data, setData] =
   useState<any>(() => activeId ? statusCache.get(activeId) ?? null : null);
@@ -780,10 +781,9 @@ const heroImage =
 return (
   <main className="container">
 
-  <div className="logo">
-    {data.crossing?.name
-      ? `GEMEINDE ${data.crossing.name.toUpperCase()}`
-      : "GEMEINDE KIRCHLENGERN"}
+  <div className="crossingNameBlock">
+    <span className="crossingNameEyebrow">DEIN BAHNÜBERGANG</span>
+    <h1>{activeCrossing?.name ?? data.crossing?.name ?? "Deine Schranke"}</h1>
   </div>
 
   <div
