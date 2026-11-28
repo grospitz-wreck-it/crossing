@@ -43,6 +43,7 @@ const files = [
   "apps/web/sql/008_crossing_train_source_mode.sql",
   "migrations/20260823_crossing_locations.sql",
   "packages/db-api-client/sql/006_mobilithek_train_snapshot_indexes.sql",
+  "apps/web/sql/012_crossing_purchase_entitlements.sql",
 ];
 
 for (const file of files) {
@@ -55,20 +56,9 @@ for (const file of files) {
     .replace(/^\s*BEGIN TRANSACTION;\s*$/gim, "")
     .replace(/^\s*COMMIT;\s*$/gim, "");
 
-  const statements = cleaned
-    .split(";")
-    .map(s => s.trim())
-    .filter(Boolean);
-
-  for (const statement of statements) {
-    const firstLine = statement
-      .split("\n")
-      .map(x => x.trim())
-      .find(Boolean) || "";
-
-    console.log(`→ ${firstLine.slice(0, 120)}`);
-    await db.execute(statement);
-  }
+  // Use libSQL's multi-statement parser. Splitting on semicolons breaks
+  // SQLite triggers, whose BEGIN/END bodies contain internal semicolons.
+  await db.executeMultiple(cleaned);
 
   console.log(`OK: ${file}`);
 }

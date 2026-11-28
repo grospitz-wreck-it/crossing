@@ -457,8 +457,12 @@ const wakeLockRef =
   if (hasCompletedInitialBootstrap || !hydrated) return;
 
   let cancelled = false;
+  const activeCrossingIndex = Math.max(0, saved.findIndex((crossing) => crossing.id === activeId));
   const initialCrossings = saved.length
-    ? saved
+    ? saved.length <= 3
+      ? saved
+      : [saved[activeCrossingIndex], saved[activeCrossingIndex + 1], saved[activeCrossingIndex - 1]]
+          .filter((crossing): crossing is (typeof saved)[number] => Boolean(crossing))
     : activeId
       ? [{ id: activeId, name: "Deine Schranke" }]
       : [];
@@ -486,7 +490,7 @@ const wakeLockRef =
     if (!cancelled) {
       hasCompletedInitialBootstrap = true;
       setBootstrapProgress(100);
-      setBootstrapDetail("Alle Schranken sind bereit");
+      setBootstrapDetail(initialCrossings.length < saved.length ? "Dein Startbereich ist bereit" : "Alle Schranken sind bereit");
       setBootstrapLoading(false);
     }
   });

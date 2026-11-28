@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { signOut } from "next-auth/react";
-import { useCrossings } from "../../context/CrossingsContext";
+import { FREE_CROSSING_LIMIT, useCrossings } from "../../context/CrossingsContext";
 import styles from "./page.module.css";
 import ContentPreferences from "../../components/ContentPreferences";
 
@@ -19,8 +19,35 @@ function distanceLabel(km?: number) {
   return km < 10 ? km.toLocaleString("de-DE", { maximumFractionDigits: 1 }) + " km entfernt" : Math.round(km) + " km entfernt";
 }
 
+function formatEntitlementDate(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value.replace(" ", "T") + (value.endsWith("Z") ? "" : "Z"));
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("de-DE", {
+    day: "2-digit",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
 export default function MeineSchrankenPage() {
-  const { saved, available, activeId, favoriteId, maxCrossings, premiumPackage, setActiveId, setFavorite, addCrossing, removeCrossing } = useCrossings();
+  const {
+    saved,
+    available,
+    activeId,
+    favoriteId,
+    maxCrossings,
+    purchasedSlots,
+    hydrated,
+    accountTier,
+    nextExpirationAt,
+    latestExpirationAt,
+    premiumPackage,
+    setActiveId,
+    setFavorite,
+    addCrossing,
+    removeCrossing,
+  } = useCrossings();
   const [query, setQuery] = useState("");
   const [position, setPosition] = useState<{ lat: number; lon: number } | null>(null);
   const [locationState, setLocationState] = useState<"idle" | "loading" | "ready" | "denied" | "error">("idle");
@@ -28,6 +55,7 @@ export default function MeineSchrankenPage() {
   const [busyId, setBusyId] = useState("");
   const [modalSlot, setModalSlot] = useState<number | null>(null);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [billingCountry, setBillingCountry] = useState("");
 
   const savedIds = useMemo(() => new Set(saved.map((item) => item.id)), [saved]);
   const results = useMemo(() => {
@@ -119,10 +147,18 @@ export default function MeineSchrankenPage() {
 
   async function buyAdditionalSlots() {
     if (checkoutBusy) return;
+    if (billingCountry !== "DE") {
+      setNotice("Der Kauf ist zum Start nur mit einer Rechnungsadresse in Deutschland möglich.");
+      return;
+    }
     setCheckoutBusy(true);
     setNotice("");
     try {
-      const response = await fetch("/api/stripe/checkout", { method: "POST" });
+      const response = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ billingCountry }),
+      });
       const result = await response.json().catch(() => null);
       if (!response.ok || !result?.url) {
         throw new Error(result?.error || "Der Bezahlvorgang konnte nicht gestartet werden.");
@@ -155,7 +191,7 @@ export default function MeineSchrankenPage() {
               return crossing ? (
                 <article className={`${styles.slotCard} ${active ? styles.slotActive : ""}`} key={crossing.id}>
                   <button className={styles.slotMain} onClick={() => setActiveId(crossing.id)} aria-pressed={active}>
-                    <span className={styles.slotNumber}>PLATZ {String(index + 1).padStart(2, "0")}</span>
+                    <span className={styles.slotNumber}>{index < FREE_CROSSING_LIMIT ? "KOSTENLOS" : "PREMIUM"} · PLATZ {String(index + 1).padStart(2, "0")}</span>
                     <span className={styles.crossingGlyph} aria-hidden="true"><i /><i /></span>
                     <strong>{crossing.name}</strong>
                     <span className={styles.slotStatus}>{active ? "Aktuell ausgewählt" : "Als aktive Schranke auswählen"}</span>
@@ -174,8 +210,8 @@ export default function MeineSchrankenPage() {
               ) : (
                 <button className={styles.emptySlot} key={`empty-${index}`} onClick={() => { setModalSlot(index); setQuery(""); }}>
                   <span className={styles.emptyPlus}>+</span>
-                  <strong>Bahnübergang hinzufügen</strong>
-                  <small>Freier Platz {index + 1}</small>
+                  <strong>{index < FREE_CROSSING_LIMIT ? "Bahnübergang hinzufügen" : "Premium-Platz belegen"}</strong>
+                  <small>{index < FREE_CROSSING_LIMIT ? `Freier Platz ${index + 1}` : `Zusatzplatz ${index - FREE_CROSSING_LIMIT + 1}`}</small>
                 </button>
               );
             })}
@@ -187,17 +223,75 @@ export default function MeineSchrankenPage() {
 
         <section className={styles.profilePanel}>
           <div>
+            <div className={styles.entitlementSummary}>
+              <div className={styles.entitlementIdentity}>
+                <span className={`${styles.entitlementBadge} ${accountTier === "premium" ? styles.entitlementBadgePremium : styles.entitlementBadgeFree}`}>
+                  <span className={styles.entitlementDot} />
+                  {!hydrated ? "STATUS LÄDT" : accountTier === "premium" ? "PREMIUM-KONTO" : "FREE-KONTO"}
+                </span>
+                <strong>{!hydrated
+                  ? "Dein Kontingent wird geladen"
+                  : accountTier === "premium"
+                    ? "Dein Premium-Zugang ist aktiv"
+                    : "Dein kostenloser Zugang"}</strong>
+                <span>{!hydrated
+                  ? "Wir lesen deine aktuellen Plätze aus."
+                  : purchasedSlots > 0
+                    ? `${purchasedSlots} zusätzliche Plätze sind aktuell freigeschaltet.`
+                    : `Du nutzt die ${maxCrossings} kostenlosen Plätze.`}</span>
+              </div>
+              <div className={styles.entitlementCapacity}>
+                <strong>{hydrated ? maxCrossings : "–"}</strong>
+                <span>Plätze insgesamt</span>
+              </div>
+            </div>
+            {hydrated && nextExpirationAt && (
+              <div className={styles.entitlementExpiry}>
+                <span>⌛</span>
+                <div>
+                  <strong>Nächster Ablauf: {formatEntitlementDate(nextExpirationAt) ?? "Datum wird geladen"}</strong>
+                  {latestExpirationAt && latestExpirationAt !== nextExpirationAt && (
+                    <small>Weitere Premium-Plätze sind bis {formatEntitlementDate(latestExpirationAt) ?? "zum späteren Datum"} freigeschaltet.</small>
+                  )}
+                </div>
+              </div>
+            )}
             <span className={styles.overline}>MEHR PLÄTZE</span>
             <h2>Mehr Schranken im Blick</h2>
             <p>+{premiumPackage.additionalCrossings} zusätzliche Plätze ·{" "}
               {(premiumPackage.priceCents / 100).toLocaleString("de-DE", { style: "currency", currency: "EUR" })} brutto · {premiumPackage.durationDays} Tage Laufzeit</p>
-            <p>{premiumPackage.enabled ? "Einmal zahlen, 365 Tage nutzen. Keine automatische Verlängerung." : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
+            <p>{purchasedSlots > 0
+              ? `${purchasedSlots} zusätzliche Premium-Plätze sind aktiv. Belege die freien Premium-Karten oben direkt mit weiteren Bahnübergängen.`
+              : premiumPackage.enabled
+                ? "Nach dem Einmalkauf kannst du zehn zusätzliche Plätze direkt oben mit Bahnübergängen belegen. 365 Tage gültig, keine automatische Verlängerung."
+                : "Premium wird zu einem späteren Zeitpunkt freigeschaltet."}</p>
             {premiumPackage.enabled && (
-              <button className={styles.checkoutButton} onClick={buyAdditionalSlots} disabled={checkoutBusy}>
-                {checkoutBusy ? "Weiter zu Stripe …" : "10 Plätze für 5,00 € kaufen"}
+              <div className={styles.checkoutCountry}>
+                <label htmlFor="billing-country">Rechnungsland</label>
+                <select
+                  id="billing-country"
+                  value={billingCountry}
+                  onChange={(event) => {
+                    setBillingCountry(event.target.value);
+                    setNotice("");
+                  }}
+                  disabled={checkoutBusy}
+                >
+                  <option value="">Bitte auswählen …</option>
+                  <option value="DE">Deutschland</option>
+                  <option value="OTHER">Anderes Land</option>
+                </select>
+                {billingCountry === "OTHER" && (
+                  <small>Der Kauf ist zum Start nur mit deutscher Rechnungsadresse möglich.</small>
+                )}
+              </div>
+            )}
+            {premiumPackage.enabled && (
+              <button className={styles.checkoutButton} onClick={buyAdditionalSlots} disabled={checkoutBusy || billingCountry !== "DE"}>
+                {checkoutBusy ? "Weiter zu Stripe …" : purchasedSlots > 0 ? "Weitere 10 Plätze für 5,00 € kaufen" : "10 Plätze für 5,00 € kaufen"}
               </button>
             )}
-            {premiumPackage.enabled && <small className={styles.checkoutHint}>Sichere Zahlung über Stripe · Umsatzsteuer inklusive</small>}
+            {premiumPackage.enabled && <small className={styles.checkoutHint}>Sichere Zahlung über Stripe · 5,00 € inklusive 19 % deutscher Umsatzsteuer · nur Rechnungsadressen in Deutschland</small>}
           </div>
           <span className={styles.pill}>{premiumPackage.enabled ? "Einmalkauf" : "Demnächst"}</span>
         </section>

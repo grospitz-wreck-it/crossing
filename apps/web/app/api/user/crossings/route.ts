@@ -13,6 +13,9 @@ type CrossingCapacity = {
   freeLimit: number;
   purchasedSlots: number;
   maxCrossings: number;
+  accountTier: "free" | "premium";
+  nextExpirationAt: string | null;
+  latestExpirationAt: string | null;
   premiumEnabled: boolean;
   packageSlots: number;
   packagePriceCents: number;
@@ -30,6 +33,9 @@ async function getCrossingCapacity(userId: string): Promise<CrossingCapacity> {
       freeLimit: FREE_CROSSING_LIMIT,
       purchasedSlots: 0,
       maxCrossings: FREE_CROSSING_LIMIT,
+      accountTier: "free",
+      nextExpirationAt: null,
+      latestExpirationAt: null,
       premiumEnabled: false,
       packageSlots: PREMIUM_CROSSING_PACKAGE.additionalCrossings,
       packagePriceCents: PREMIUM_CROSSING_PACKAGE.priceCents,
@@ -38,7 +44,7 @@ async function getCrossingCapacity(userId: string): Promise<CrossingCapacity> {
     };
   }
 
-  const [configRows, purchaseRows] = await Promise.all([
+  const [configRows, entitlementRows] = await Promise.all([
     authDb.all<{
       free_crossing_limit: number;
       premium_package_slots: number;
@@ -58,23 +64,39 @@ async function getCrossingCapacity(userId: string): Promise<CrossingCapacity> {
       WHERE id = 1
       LIMIT 1
     `),
-    authDb.all<{ slots: number | null }>(sql`
-      SELECT COALESCE(SUM(package_slots), 0) AS slots
-      FROM user_crossing_purchases
+    authDb.all<{
+      account_tier: string;
+      purchased_slots: number | null;
+      free_crossing_limit: number | null;
+      max_crossings: number | null;
+      next_expiration_at: string | null;
+      latest_expiration_at: string | null;
+    }>(sql`
+      SELECT
+        account_tier,
+        purchased_slots,
+        free_crossing_limit,
+        max_crossings,
+        next_expiration_at,
+        latest_expiration_at
+      FROM user_crossing_entitlement_summary
       WHERE user_id = ${userId}
-        AND status = 'paid'
-        AND julianday(valid_until) > julianday('now')
+      LIMIT 1
     `),
   ]);
 
   const config = configRows[0];
-  const freeLimit = Number(config?.free_crossing_limit ?? FREE_CROSSING_LIMIT);
-  const purchasedSlots = Number(purchaseRows[0]?.slots ?? 0);
+  const entitlement = entitlementRows[0];
+  const freeLimit = Number(entitlement?.free_crossing_limit ?? config?.free_crossing_limit ?? FREE_CROSSING_LIMIT);
+  const purchasedSlots = Number(entitlement?.purchased_slots ?? 0);
 
   return {
     freeLimit,
     purchasedSlots,
-    maxCrossings: freeLimit + purchasedSlots,
+    maxCrossings: Number(entitlement?.max_crossings ?? freeLimit + purchasedSlots),
+    accountTier: entitlement?.account_tier === "premium" || purchasedSlots > 0 ? "premium" as const : "free" as const,
+    nextExpirationAt: entitlement?.next_expiration_at ?? null,
+    latestExpirationAt: entitlement?.latest_expiration_at ?? null,
     premiumEnabled: Boolean(config?.premium_enabled ?? 0),
     packageSlots: Number(config?.premium_package_slots ?? PREMIUM_CROSSING_PACKAGE.additionalCrossings),
     packagePriceCents: Number(config?.premium_package_price_cents ?? PREMIUM_CROSSING_PACKAGE.priceCents),
